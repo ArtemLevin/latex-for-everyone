@@ -21,12 +21,33 @@ frontend/main.html  Browser editor UI and backend API client
 
 ## Quick start
 
-### 1. Start the backend
+### 1. Install Python dependencies with uv
+
+This repository includes `pyproject.toml` for `uv`. From the repository root:
+
+```bash
+uv sync --all-groups
+```
+
+If you prefer the legacy requirements file, use:
+
+```bash
+uv pip install -r backend/requirements.txt
+```
+
+### 2. Start the backend
+
+Using Make:
+
+```bash
+make backend
+```
+
+Or directly with `uv`:
 
 ```bash
 cd backend
-pip install -r requirements.txt
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uv run --project .. uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Useful backend URLs:
@@ -36,9 +57,15 @@ Useful backend URLs:
 
 > Server-side compilation and PDF export require `pdflatex` to be installed and available on `PATH` unless you override `LATEX_COMPILER`.
 
-### 2. Start the frontend
+### 3. Start the frontend
 
-From the repository root, serve the frontend with any static server. For example:
+Using Make:
+
+```bash
+make frontend
+```
+
+Or directly from the repository root with any static server:
 
 ```bash
 python -m http.server 8080 --directory frontend
@@ -48,7 +75,7 @@ Open http://localhost:8080/main.html.
 
 The frontend will try to connect to `http://localhost:8000/api` when it is served from a local development port such as `8080`. If the backend is not reachable, the editor remains usable in local preview/export fallback mode.
 
-### 3. Docker backend
+### 4. Docker backend
 
 ```bash
 cd backend
@@ -56,6 +83,44 @@ docker-compose up --build
 ```
 
 The Docker image installs a TeX Live distribution, so backend compilation/export is available inside the container.
+
+## Makefile commands
+
+The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup workflows.
+
+| Command | Description |
+|---------|-------------|
+| `make help` | Show all available targets. |
+| `make sync` | Run `uv sync --all-groups` to install app and dev dependencies. |
+| `make lock` | Refresh `uv.lock` from `pyproject.toml`. |
+| `make backend` | Run the FastAPI backend on `BACKEND_PORT` (default `8000`). |
+| `make frontend` | Serve `frontend/main.html` on `FRONTEND_PORT` (default `8080`). |
+| `make open` | Print backend, docs, health, and frontend URLs. |
+| `make health` | Call `GET /api/health`. |
+| `make test` | Run backend tests with `uv`. |
+| `make frontend-check` | Extract inline frontend JavaScript and run `node --check`. |
+| `make check` | Run Python compile check, frontend syntax check, and backend tests. |
+| `make migrate` | Run Alembic migrations. |
+| `make migration MSG="..."` | Create an Alembic autogeneration revision. |
+| `make docker-up` | Build and start Docker Compose services. |
+| `make docker-down` | Stop Docker Compose services. |
+| `make clean` | Remove local DB files and Python/test caches. |
+| `make clean-venv` | Remove the root `.venv`. |
+
+Useful overrides:
+
+```bash
+make backend BACKEND_PORT=9000
+make frontend FRONTEND_PORT=3000
+make migration MSG="add users table"
+```
+
+## uv notes
+
+- `pyproject.toml` is the source for `uv sync` and includes runtime dependencies plus a `dev` dependency group for tests.
+- The project is configured with `package = false`, so `uv` manages the environment without requiring this repository to be installed as a Python package.
+- Backend commands run from `backend/` so `app.main:app` imports resolve the same way they do with plain `uvicorn`.
+- `requirements.txt` remains available for Docker and pip-based workflows.
 
 ## Frontend/backend integration
 
@@ -158,13 +223,33 @@ Deprecated compatibility routes are still available for compile history:
 
 ## Testing
 
+Install dependencies first:
+
 ```bash
-cd backend
-pip install -r requirements.txt
-PYTHONPATH=. pytest tests/ -q
+make sync
 ```
 
-Frontend syntax smoke check:
+Run all local checks:
+
+```bash
+make check
+```
+
+Individual checks:
+
+```bash
+make compileall
+make frontend-check
+make test
+```
+
+Direct `uv` test invocation from the repository root also works because `pyproject.toml` configures the backend Python path:
+
+```bash
+uv run pytest backend/tests/ -q
+```
+
+Frontend syntax smoke check without Make:
 
 ```bash
 python - <<'PY'
