@@ -331,6 +331,55 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
         assert archive.read("notes.tex").decode("utf-8") == "Notes"
 
 
+def test_generation_presets():
+    response = client.get("/api/generation/presets")
+    assert response.status_code == 200
+    presets = response.json()
+    assert len(presets) >= 1
+    assert presets[0]["id"] == "ege_math_11_hard"
+    assert presets[0]["defaults"]["gamma_code"] == 4
+
+
+def test_generation_prompt_preview_includes_fields_and_materials():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
+            "fields": {
+                "topic": "Показательные неравенства",
+                "student_name": "Михаил Романов",
+                "subject": "математика",
+                "alpha_code": 1,
+                "beta_code": 1,
+                "gamma_code": 4,
+            },
+            "materials": "Решить неравенство 2^x > 8.",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["provider"] == "ollama"
+    assert data["model"] == "qwen2.5:14b"
+    assert data["warnings"] == []
+    assert "Показательные неравенства" in data["prompt"]
+    assert "Михаил Романов" in data["prompt"]
+    assert "Решить неравенство 2^x > 8." in data["prompt"]
+    assert "```latex```" in data["prompt"]
+
+
+def test_generation_prompt_preview_warns_without_topic_or_materials():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {}},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["warnings"]) == 2
+    assert "Материалы не переданы" in data["prompt"]
+
+
 def test_openapi_schema():
     response = client.get("/api/openapi.json")
     assert response.status_code == 200

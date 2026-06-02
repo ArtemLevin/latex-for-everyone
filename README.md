@@ -209,6 +209,8 @@ If the API lives on a different host, configure `window.LATEXED_API_BASE_URL` or
 | GET | `/api/export/download/{filename}` | Download exported file |
 | GET | `/api/templates/` | List templates |
 | GET | `/api/templates/{id}` | Get template details |
+| GET | `/api/generation/presets` | List generation presets |
+| POST | `/api/generation/prompt` | Preview the AI LaTeX generation prompt |
 
 Deprecated compatibility routes are still available for compile history:
 

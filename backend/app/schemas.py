@@ -119,6 +119,43 @@ class TemplateResponse(BaseModel):
     preview_image: Optional[str] = None
 
 
+# Generation Schemas
+class GenerationFields(BaseModel):
+    level: str = "ЕГЭ"
+    alpha_code: int = Field(1, ge=0, le=2)
+    beta_code: int = Field(1, ge=0, le=50)
+    gamma_code: int = Field(4, ge=1, le=5)
+    grade: str = "11 класс"
+    student_name: str = ""
+    subject: str = "математика"
+    topic: str = ""
+    priority_method: str = "нейросеть выбирает самостоятельно по отношению к уровню и классу"
+    graph_analytic: str = "по ситуации"
+
+
+class GenerationRequest(BaseModel):
+    provider: str = "ollama"
+    model: Optional[str] = None
+    fields: GenerationFields = Field(default_factory=GenerationFields)
+    materials: str = ""
+    project_id: Optional[str] = None
+
+
+class GenerationPromptResponse(BaseModel):
+    status: str
+    prompt: str
+    warnings: list[str] = Field(default_factory=list)
+    provider: str
+    model: Optional[str] = None
+
+
+class GenerationPresetResponse(BaseModel):
+    id: str
+    name: str
+    description: str
+    defaults: dict[str, Any]
+
+
 # Snapshot Schemas
 class SnapshotCreate(BaseModel):
     project_id: str
