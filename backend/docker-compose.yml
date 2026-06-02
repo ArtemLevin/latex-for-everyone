@@ -1,0 +1,43 @@
+version: "3.9"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: latexed-api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./latexed.db
+      - DEBUG=true
+      - CORS_ORIGINS=["http://localhost:3000","http://localhost:8080"]
+      - SECRET_KEY=dev-secret-key-change-in-production
+    volumes:
+      - ./app:/app/app
+      - latexed_data:/tmp/latexed_uploads
+      - latexed_compiles:/tmp/latexed_compiles
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  nginx:
+    image: nginx:alpine
+    container_name: latexed-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  latexed_data:
+  latexed_compiles:
