@@ -68,6 +68,11 @@ class CompileRequest(BaseModel):
     all_files: Optional[dict[str, str]] = None
 
 
+class RawCompileRequest(BaseModel):
+    content: str
+    files: dict[str, str] = Field(default_factory=dict)
+
+
 class CompileResponse(BaseModel):
     status: str  # success, error
     output: Optional[str] = None
