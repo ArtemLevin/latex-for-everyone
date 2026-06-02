@@ -1,13 +1,17 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from app.schemas import (
     GenerationPresetResponse,
     GenerationPromptResponse,
     GenerationRequest,
+    GenerationResultResponse,
 )
+from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
 from app.services.prompt_builder import build_latex_generation_prompt
 
 router = APIRouter()
+
+ai_generator = AIGenerationService()
 
 PRESETS: list[GenerationPresetResponse] = [
     GenerationPresetResponse(
@@ -28,13 +32,7 @@ PRESETS: list[GenerationPresetResponse] = [
 ]
 
 
-@router.get("/presets", response_model=list[GenerationPresetResponse])
-async def list_generation_presets():
-    return PRESETS
-
-
-@router.post("/prompt", response_model=GenerationPromptResponse)
-async def preview_generation_prompt(request: GenerationRequest):
+def build_generation_prompt_response(request: GenerationRequest) -> GenerationPromptResponse:
     prompt = build_latex_generation_prompt(request.fields, request.materials)
     warnings = []
     if not request.fields.topic:
@@ -48,4 +46,38 @@ async def preview_generation_prompt(request: GenerationRequest):
         warnings=warnings,
         provider=request.provider,
         model=request.model,
+    )
+
+
+@router.get("/presets", response_model=list[GenerationPresetResponse])
+async def list_generation_presets():
+    return PRESETS
+
+
+@router.post("/prompt", response_model=GenerationPromptResponse)
+async def preview_generation_prompt(request: GenerationRequest):
+    return build_generation_prompt_response(request)
+
+
+@router.post("/generate", response_model=GenerationResultResponse)
+async def generate_latex(request: GenerationRequest):
+    prompt_response = build_generation_prompt_response(request)
+
+    try:
+        raw_output, provider, model = await ai_generator.generate(
+            prompt=prompt_response.prompt,
+            provider=request.provider,
+            model=request.model,
+        )
+    except AIGenerationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+
+    return GenerationResultResponse(
+        status="success",
+        prompt=prompt_response.prompt,
+        warnings=prompt_response.warnings,
+        provider=provider,
+        model=model,
+        latex_code=extract_latex_code(raw_output),
+        raw_output=raw_output,
     )

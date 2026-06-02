@@ -380,6 +380,66 @@ def test_generation_prompt_preview_warns_without_topic_or_materials():
     assert "Материалы не переданы" in data["prompt"]
 
 
+def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        assert "Показательные уравнения" in prompt
+        assert "Михаил Романов" in prompt
+        assert provider == "ollama"
+        assert model == "qwen2.5:14b"
+        return (
+            "```latex\n"
+            r"\documentclass{article}\begin{document}Generated\end{document}"
+            "\n```",
+            "ollama",
+            "qwen2.5:14b",
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
+            "fields": {
+                "topic": "Показательные уравнения",
+                "student_name": "Михаил Романов",
+            },
+            "materials": "Решить уравнение 2^x = 8.",
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["provider"] == "ollama"
+    assert data["model"] == "qwen2.5:14b"
+    assert data["latex_code"] == r"\documentclass{article}\begin{document}Generated\end{document}"
+    assert data["raw_output"].startswith("```latex")
+
+
+def test_generation_generate_provider_error_returns_bad_gateway(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError("Provider unavailable")
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={
+            "provider": "ollama",
+            "fields": {"topic": "Логарифмы"},
+            "materials": "Решить log_2(x)=3.",
+        },
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == "Provider unavailable"
+
+
 def test_openapi_schema():
     response = client.get("/api/openapi.json")
     assert response.status_code == 200

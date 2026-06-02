@@ -149,6 +149,11 @@ class GenerationPromptResponse(BaseModel):
     model: Optional[str] = None
 
 
+class GenerationResultResponse(GenerationPromptResponse):
+    latex_code: str
+    raw_output: str
+
+
 class GenerationPresetResponse(BaseModel):
     id: str
     name: str

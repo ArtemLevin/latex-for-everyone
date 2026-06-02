@@ -211,6 +211,7 @@ If the API lives on a different host, configure `window.LATEXED_API_BASE_URL` or
 | GET | `/api/templates/{id}` | Get template details |
 | GET | `/api/generation/presets` | List generation presets |
 | POST | `/api/generation/prompt` | Preview the AI LaTeX generation prompt |
+| POST | `/api/generation/generate` | Generate LaTeX through Ollama or an OpenAI-compatible vendor |
 
 Deprecated compatibility routes are still available for compile history:
 
@@ -229,6 +230,14 @@ Deprecated compatibility routes are still available for compile history:
 | `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
 | `CORS_ORIGINS` | `['http://localhost:3000', 'http://localhost:8080']` | Allowed CORS origins |
+| `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
+| `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
+| `OLLAMA_MODEL` | `qwen2.5:14b` | Default Ollama model for LaTeX generation |
+| `AI_VENDOR_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible vendor API base URL |
+| `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
+| `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
+| `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
 
 ## Testing
 
