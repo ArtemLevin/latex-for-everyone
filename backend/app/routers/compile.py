@@ -1,16 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from app.dependencies import get_project
+from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
-from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse
+from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, RawCompileRequest
 from app.services.latex_compiler import LatexCompiler
 from sqlalchemy.orm import Session
 from app.database import get_db
-from datetime import datetime
-from typing import Optional
-import logging
+from fastapi.responses import FileResponse
+from pathlib import Path
+from app.config import settings
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 compiler = LatexCompiler()
 
@@ -18,7 +16,6 @@ compiler = LatexCompiler()
 @router.post("/", response_model=CompileResponse)
 async def compile_project(
     request: CompileRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     project = db.query(Project).filter(Project.id == request.project_id).first()
@@ -78,12 +75,8 @@ async def compile_project(
 
 
 @router.post("/raw", response_model=CompileResponse)
-async def compile_raw_latex(
-    content: str,
-    files: Optional[dict[str, str]] = None,
-    db: Session = Depends(get_db),
-):
-    result = compiler.compile(content, files or {})
+async def compile_raw_latex(request: RawCompileRequest):
+    result = compiler.compile(request.content, request.files)
 
     return CompileResponse(
         status=result["status"],
@@ -94,7 +87,8 @@ async def compile_raw_latex(
     )
 
 
-@router.get("/history/{project_id}")
+@router.get("/history/project/{project_id}", response_model=list[CompileHistoryResponse])
+@router.get("/history/{project_id}", response_model=list[CompileHistoryResponse], deprecated=True)
 async def get_compile_history(
     project_id: str,
     limit: int = 20,
@@ -110,7 +104,8 @@ async def get_compile_history(
     return history
 
 
-@router.get("/history/{history_id}")
+@router.get("/history/item/{history_id}", response_model=CompileHistoryResponse)
+@router.get("/history/detail/{history_id}", response_model=CompileHistoryResponse, deprecated=True)
 async def get_compile_history_detail(
     history_id: str,
     db: Session = Depends(get_db),
@@ -119,3 +114,19 @@ async def get_compile_history_detail(
     if not history:
         raise HTTPException(status_code=404, detail="Compile history not found")
     return history
+
+
+@router.get("/download/{filename}")
+async def download_compiled_pdf(filename: str):
+    if not filename.endswith(".pdf") or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Invalid PDF filename")
+
+    filepath = Path(settings.COMPILE_WORK_DIR) / "pdfs" / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    return FileResponse(
+        path=str(filepath),
+        filename=filename,
+        media_type="application/pdf",
+    )
