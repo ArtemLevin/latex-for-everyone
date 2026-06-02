@@ -209,6 +209,128 @@ def test_compile_pdf_download_rejects_invalid_filename():
     assert response.status_code == 400
 
 
+def test_frontend_bootstrap_contract_creates_template_project_and_updates_main_file():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Frontend Runtime Project", "template": "article"},
+    )
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    files_response = client.get(f"/api/files/project/{project_id}")
+    assert files_response.status_code == 200
+    files = files_response.json()
+    assert len(files) == 1
+    main_file = files[0]
+    assert main_file["name"] == "main.tex"
+    assert main_file["is_main"] is True
+    assert "\\documentclass" in main_file["content"]
+
+    updated_content = r"\documentclass{article}\begin{document}Updated\end{document}"
+    update_response = client.put(
+        f"/api/files/{main_file['id']}",
+        json={"content": updated_content},
+    )
+    assert update_response.status_code == 200
+    assert update_response.json()["content"] == updated_content
+
+
+def test_export_pdf_receives_frontend_content_payload(monkeypatch):
+    from app.routers import export as export_router
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "PDF Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    frontend_content = r"\documentclass{article}\begin{document}Fresh PDF\end{document}"
+
+    def fake_generate_pdf(main_content, files):
+        assert main_content == frontend_content
+        assert files["main.tex"] == frontend_content
+        assert files["notes.tex"] == "Notes"
+        return {"success": True, "filename": "compiled.pdf", "size": 123}
+
+    monkeypatch.setattr(export_router.pdf_generator, "generate_pdf", fake_generate_pdf)
+
+    response = client.post(
+        "/api/export/pdf",
+        json={
+            "project_id": project_id,
+            "format": "pdf",
+            "content": {"main.tex": frontend_content, "notes.tex": "Notes"},
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["url"] == "/api/export/download/compiled.pdf"
+    assert data["format"] == "pdf"
+
+
+def test_export_html_uses_frontend_content_payload(tmp_path, monkeypatch):
+    from app.config import settings
+    from app.routers import export as export_router
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "HTML Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    frontend_content = r"\documentclass{article}\begin{document}Fresh HTML\end{document}"
+
+    def fake_generate_html(main_content):
+        assert main_content == frontend_content
+        return "<html>Fresh HTML</html>"
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(export_router.pdf_generator, "generate_html", fake_generate_html)
+
+    response = client.post(
+        "/api/export/html",
+        json={
+            "project_id": project_id,
+            "format": "html",
+            "content": {"main.tex": frontend_content},
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["format"] == "html"
+    exported = tmp_path / "exports" / data["filename"]
+    assert exported.read_text(encoding="utf-8") == "<html>Fresh HTML</html>"
+
+
+def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
+    from app.config import settings
+    from zipfile import ZipFile
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "TEX Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    frontend_content = r"\documentclass{article}\begin{document}Fresh TEX\end{document}"
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+
+    response = client.post(
+        "/api/export/tex",
+        json={
+            "project_id": project_id,
+            "format": "tex",
+            "content": {"main.tex": frontend_content, "notes.tex": "Notes"},
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["format"] == "tex"
+
+    exported = tmp_path / "exports" / data["filename"]
+    with ZipFile(exported) as archive:
+        assert archive.read("main.tex").decode("utf-8") == frontend_content
+        assert archive.read("notes.tex").decode("utf-8") == "Notes"
+
+
 def test_openapi_schema():
     response = client.get("/api/openapi.json")
     assert response.status_code == 200
