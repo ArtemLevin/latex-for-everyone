@@ -1771,13 +1771,27 @@
 <script>
     // ==================== STATE ====================
     let editor = null;
+    let currentProject = null;
     let currentFileId = 'main';
     let autoCompile = false;
+    let backendAvailable = false;
     let compileTimeout = null;
+    let saveTimeout = null;
+    let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
 
-    const files = {
+    const IS_LOCAL_FRONTEND = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+        && window.location.port
+        && window.location.port !== '8000';
+    const DEFAULT_API_ORIGIN = (window.location.protocol === 'http:' || window.location.protocol === 'https:') && !IS_LOCAL_FRONTEND
+        ? window.location.origin
+        : 'http://localhost:8000';
+    const API_BASE_URL = (window.LATEXED_API_BASE_URL || `${DEFAULT_API_ORIGIN}/api`).replace(/\/$/, '');
+    const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
+    const LOCAL_PROJECT_KEY = 'latexed_project_id';
+
+    let files = {
         main: {
             name: 'main.tex',
             content: `\\documentclass[12pt,a4paper]{article}
@@ -1933,7 +1947,7 @@ edition = {5}
         }
     };
 
-    const templates = [
+    let templates = [
         {
             name: 'Статья (article)',
             desc: 'Стандартная научная статья с заголовком, аннотацией и секциями',
@@ -2105,6 +2119,162 @@ $$E = mc^2$$
         }
     ];
 
+    // ==================== BACKEND API ====================
+    async function apiRequest(path, options = {}) {
+        const response = await fetch(`${API_BASE_URL}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+
+        if (!response.ok) {
+            let message = `HTTP ${response.status}`;
+            try {
+                const data = await response.json();
+                message = data.detail || message;
+            } catch (e) {
+                message = response.statusText || message;
+            }
+            throw new Error(message);
+        }
+
+        if (response.status === 204) return null;
+        return response.json();
+    }
+
+    function resolveApiUrl(url) {
+        return new URL(url, API_ORIGIN).toString();
+    }
+
+    async function bootstrapBackend() {
+        try {
+            await apiRequest('/health');
+            backendAvailable = true;
+            await loadOrCreateProject();
+            await loadProjectFiles();
+            await loadTemplates();
+            openInitialFile();
+            renderFileTree();
+            showToast('Соединение с backend установлено', 'success');
+            try {
+                await compileLatex();
+            } catch (compileError) {
+                showCompileError(compileError.message);
+            }
+        } catch (error) {
+            backendAvailable = false;
+            renderFileTree();
+            compileLatexLocal();
+            showToast(`Backend недоступен: ${error.message}. Работаем локально.`, 'error');
+        }
+    }
+
+    async function loadOrCreateProject() {
+        const savedProjectId = localStorage.getItem(LOCAL_PROJECT_KEY);
+        if (savedProjectId) {
+            try {
+                currentProject = await apiRequest(`/projects/${savedProjectId}`);
+                document.getElementById('projectNameInput').value = currentProject.name;
+                return;
+            } catch (error) {
+                localStorage.removeItem(LOCAL_PROJECT_KEY);
+            }
+        }
+
+        currentProject = await apiRequest('/projects/', {
+            method: 'POST',
+            body: JSON.stringify({
+                name: document.getElementById('projectNameInput').value || 'Мой документ',
+                is_public: false,
+                template: 'article'
+            })
+        });
+        localStorage.setItem(LOCAL_PROJECT_KEY, currentProject.id);
+        document.getElementById('projectNameInput').value = currentProject.name;
+    }
+
+    async function loadProjectFiles() {
+        const backendFiles = await apiRequest(`/files/project/${currentProject.id}`);
+        files = {};
+        backendFiles.forEach(file => {
+            files[file.id] = file;
+        });
+    }
+
+    async function loadTemplates() {
+        templates = await apiRequest('/templates/');
+    }
+
+    function openInitialFile() {
+        const mainFile = Object.values(files).find(file => file.is_main) || Object.values(files)[0];
+        if (!mainFile) return;
+        currentFileId = mainFile.id;
+        suppressEditorChange = true;
+        editor.setValue(mainFile.content || '');
+        suppressEditorChange = false;
+        document.getElementById('currentFileName').textContent = mainFile.name;
+    }
+
+    function collectFilesByName() {
+        if (currentFileId && files[currentFileId]) {
+            files[currentFileId].content = editor.getValue();
+        }
+        const byName = {};
+        Object.values(files).forEach(file => {
+            byName[file.name] = file.content || '';
+        });
+        return byName;
+    }
+
+    function showCompileError(message) {
+        document.getElementById('errorPanel').classList.add('active');
+        document.getElementById('errorText').textContent = message;
+        document.getElementById('statusDot').className = 'status-dot error';
+        document.getElementById('statusText').textContent = 'Ошибка';
+    }
+
+    function showHtmlPreviewFallback() {
+        const rendered = renderLatex(editor.getValue());
+        document.getElementById('previewContent').innerHTML = rendered;
+    }
+
+    function showPdfPreview(pdfUrl) {
+        const url = resolveApiUrl(pdfUrl);
+        document.getElementById('previewContent').innerHTML = `
+            <iframe src="${url}" title="PDF preview" style="width:100%;height:100%;min-height:70vh;border:0;background:white;border-radius:8px;"></iframe>
+        `;
+    }
+
+    async function saveCurrentFile() {
+        clearTimeout(saveTimeout);
+        if (!currentFileId || !files[currentFileId]) return null;
+        const file = files[currentFileId];
+        file.content = editor.getValue();
+
+        if (!backendAvailable) return file;
+
+        const updated = await apiRequest(`/files/${file.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ content: file.content })
+        });
+        files[updated.id] = updated;
+        return updated;
+    }
+
+    function scheduleSaveCurrentFile() {
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(async () => {
+            try {
+                await saveCurrentFile();
+                document.getElementById('statusText').textContent = 'Сохранено';
+            } catch (error) {
+                showToast(`Ошибка сохранения: ${error.message}`, 'error');
+            }
+        }, 800);
+    }
+
     const commands = [
         { name: 'Скомпилировать', shortcut: 'Ctrl+Enter', action: compileLatex },
         { name: 'Создать новый файл', shortcut: 'Ctrl+N', action: createNewFile },
@@ -2146,9 +2316,13 @@ $$E = mc^2$$
         });
 
         editor.on('change', function() {
+            if (!currentFileId || !files[currentFileId]) return;
             files[currentFileId].content = editor.getValue();
             updateWordCount();
-            if (autoCompile) {
+            if (!suppressEditorChange) {
+                scheduleSaveCurrentFile();
+            }
+            if (!suppressEditorChange && autoCompile) {
                 clearTimeout(compileTimeout);
                 const delay = parseInt(document.getElementById('compileDelay').value);
                 compileTimeout = setTimeout(compileLatex, delay);
@@ -2162,8 +2336,15 @@ $$E = mc^2$$
         });
 
         renderFileTree();
-        compileLatex();
         updateWordCount();
+        document.getElementById('projectNameInput').addEventListener('blur', saveProjectName);
+        document.getElementById('projectNameInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.target.blur();
+            }
+        });
+        bootstrapBackend();
 
         // Resizer
         initResizer();
@@ -2246,10 +2427,17 @@ $$E = mc^2$$
         });
     }
 
-    function switchFile(id) {
-        files[currentFileId].content = editor.getValue();
+    async function switchFile(id) {
+        if (!files[id]) return;
+        try {
+            await saveCurrentFile();
+        } catch (error) {
+            showToast(`Ошибка сохранения текущего файла: ${error.message}`, 'error');
+        }
         currentFileId = id;
-        editor.setValue(files[id].content);
+        suppressEditorChange = true;
+        editor.setValue(files[id].content || '');
+        suppressEditorChange = false;
         editor.refresh();
         editor.focus();
         document.getElementById('currentFileName').textContent = files[id].name;
@@ -2257,40 +2445,75 @@ $$E = mc^2$$
         compileLatex();
     }
 
-    function createNewFile() {
+    async function createNewFile() {
         const name = prompt('Имя файла:', 'new_document.tex');
         if (!name) return;
-        const id = 'file_' + Date.now();
-        files[id] = { name: name, content: '' };
-        switchFile(id);
-        showToast('Файл создан', 'success');
+
+        try {
+            if (backendAvailable && currentProject) {
+                const file = await apiRequest(`/files/project/${currentProject.id}`, {
+                    method: 'POST',
+                    body: JSON.stringify({ name, content: '', is_main: false })
+                });
+                files[file.id] = file;
+                await switchFile(file.id);
+            } else {
+                const id = 'file_' + Date.now();
+                files[id] = { id, name: name, content: '', is_main: false };
+                await switchFile(id);
+            }
+            showToast('Файл создан', 'success');
+        } catch (error) {
+            showToast(`Ошибка создания файла: ${error.message}`, 'error');
+        }
     }
 
-    function deleteFile(id) {
+    async function deleteFile(id) {
         if (Object.keys(files).length <= 1) {
             showToast('Нельзя удалить последний файл', 'error');
             return;
         }
-        if (confirm(`Удалить файл "${files[id].name}"?`)) {
+        if (!confirm(`Удалить файл "${files[id].name}"?`)) return;
+
+        try {
+            if (backendAvailable) {
+                await apiRequest(`/files/${id}`, { method: 'DELETE' });
+            }
             delete files[id];
             if (currentFileId === id) {
-                switchFile(Object.keys(files)[0]);
+                await switchFile(Object.keys(files)[0]);
             } else {
                 renderFileTree();
             }
             showToast('Файл удалён', 'info');
+        } catch (error) {
+            showToast(`Ошибка удаления файла: ${error.message}`, 'error');
         }
     }
 
-    function renameFile(id) {
+    async function renameFile(id) {
         const newName = prompt('Новое имя:', files[id].name);
-        if (newName && newName.trim()) {
-            files[id].name = newName.trim();
+        if (!newName || !newName.trim()) return;
+
+        try {
+            if (backendAvailable) {
+                const updated = await apiRequest(`/files/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ name: newName.trim() })
+                });
+                delete files[id];
+                files[updated.id] = updated;
+                if (currentFileId === id) currentFileId = updated.id;
+            } else {
+                files[id].name = newName.trim();
+            }
             renderFileTree();
-            if (id === currentFileId) {
+            if (id === currentFileId || files[currentFileId]?.name === newName.trim()) {
                 document.getElementById('currentFileName').textContent = newName.trim();
             }
             showToast('Файл переименован', 'success');
+        } catch (error) {
+            showToast(`Ошибка переименования файла: ${error.message}`, 'error');
         }
     }
 
@@ -2304,45 +2527,100 @@ $$E = mc^2$$
         menu.classList.add('active');
     }
 
-    function contextAction(action) {
+    async function contextAction(action) {
         document.getElementById('contextMenu').classList.remove('active');
         if (!contextMenuFileId) return;
         switch (action) {
-            case 'rename': renameFile(contextMenuFileId); break;
-            case 'duplicate':
-                const id = 'file_' + Date.now();
-                files[id] = { name: 'copy_' + files[contextMenuFileId].name, content: files[contextMenuFileId].content };
-                switchFile(id);
-                showToast('Файл дублирован', 'success');
+            case 'rename':
+                renameFile(contextMenuFileId);
                 break;
-            case 'delete': deleteFile(contextMenuFileId); break;
+            case 'duplicate':
+                try {
+                    const source = files[contextMenuFileId];
+                    const copyName = 'copy_' + source.name;
+                    if (backendAvailable && currentProject) {
+                        const file = await apiRequest(`/files/project/${currentProject.id}`, {
+                            method: 'POST',
+                            body: JSON.stringify({ name: copyName, content: source.content || '', is_main: false })
+                        });
+                        files[file.id] = file;
+                        await switchFile(file.id);
+                    } else {
+                        const id = 'file_' + Date.now();
+                        files[id] = { id, name: copyName, content: source.content || '', is_main: false };
+                        await switchFile(id);
+                    }
+                    showToast('Файл дублирован', 'success');
+                } catch (error) {
+                    showToast(`Ошибка дублирования файла: ${error.message}`, 'error');
+                }
+                break;
+            case 'delete':
+                deleteFile(contextMenuFileId);
+                break;
         }
     }
 
     // ==================== COMPILATION ====================
-    function compileLatex() {
+    async function compileLatex() {
         const btn = document.getElementById('compileBtn');
         btn.classList.add('compiling');
         btn.innerHTML = '<div class="spinner"></div><span>Компиляция...</span>';
 
-        setTimeout(() => {
-            try {
-                const content = editor.getValue();
-                const rendered = renderLatex(content);
-                document.getElementById('previewContent').innerHTML = rendered;
-                document.getElementById('errorPanel').classList.remove('active');
-                document.getElementById('statusDot').className = 'status-dot';
-                document.getElementById('statusText').textContent = 'Скомпилировано';
-                document.getElementById('lastCompiled').textContent = 'Последняя компиляция: ' + new Date().toLocaleTimeString('ru');
-            } catch (e) {
-                document.getElementById('errorPanel').classList.add('active');
-                document.getElementById('errorText').textContent = e.message;
-                document.getElementById('statusDot').className = 'status-dot error';
-                document.getElementById('statusText').textContent = 'Ошибка';
+        try {
+            if (backendAvailable && currentProject) {
+                await saveCurrentFile();
+                const allFiles = collectFilesByName();
+                const mainFile = Object.values(files).find(file => file.is_main) || files[currentFileId];
+                const result = await apiRequest('/compile/', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        project_id: currentProject.id,
+                        main_file_content: mainFile?.content || editor.getValue(),
+                        all_files: allFiles
+                    })
+                });
+
+                if (result.status === 'success') {
+                    document.getElementById('errorPanel').classList.remove('active');
+                    document.getElementById('statusDot').className = 'status-dot';
+                    document.getElementById('statusText').textContent = result.compile_time
+                        ? `Скомпилировано за ${result.compile_time}`
+                        : 'Скомпилировано';
+                    if (result.pdf_url) {
+                        showPdfPreview(result.pdf_url);
+                    } else {
+                        showHtmlPreviewFallback();
+                    }
+                } else {
+                    showCompileError(result.error || 'Ошибка компиляции');
+                }
+            } else {
+                compileLatexLocal();
             }
+            document.getElementById('lastCompiled').textContent = 'Последняя компиляция: ' + new Date().toLocaleTimeString('ru');
+        } catch (e) {
+            showCompileError(e.message);
+            if (!backendAvailable) {
+                compileLatexLocal();
+            }
+        } finally {
             btn.classList.remove('compiling');
             btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Компиляция</span>';
-        }, 300);
+        }
+    }
+
+    function compileLatexLocal() {
+        try {
+            const content = editor.getValue();
+            const rendered = renderLatex(content);
+            document.getElementById('previewContent').innerHTML = rendered;
+            document.getElementById('errorPanel').classList.remove('active');
+            document.getElementById('statusDot').className = 'status-dot';
+            document.getElementById('statusText').textContent = 'Локальный preview';
+        } catch (e) {
+            showCompileError(e.message);
+        }
     }
 
     function renderLatex(content) {
@@ -2750,12 +3028,19 @@ $$E = mc^2$$
     }
 
     // ==================== TEMPLATES ====================
-    function showTemplates() {
+    async function showTemplates() {
         const grid = document.getElementById('templateGrid');
+        if (backendAvailable) {
+            try {
+                await loadTemplates();
+            } catch (error) {
+                showToast(`Ошибка загрузки шаблонов: ${error.message}`, 'error');
+            }
+        }
         grid.innerHTML = templates.map((t, i) => `
             <div class="template-card" onclick="applyTemplate(${i})">
                 <h4>${t.name}</h4>
-                <p>${t.desc}</p>
+                <p>${t.description || t.desc || ''}</p>
             </div>
         `).join('');
         document.getElementById('templateModal').classList.add('active');
@@ -2765,6 +3050,7 @@ $$E = mc^2$$
         const template = templates[index];
         editor.setValue(template.content);
         files[currentFileId].content = template.content;
+        scheduleSaveCurrentFile();
         closeModal('templateModal');
         compileLatex();
         showToast(`Шаблон "${template.name}" применён`, 'success');
@@ -2775,8 +3061,23 @@ $$E = mc^2$$
         document.getElementById('exportMenu').classList.toggle('active');
     }
 
-    function exportPDF() {
+    async function exportPDF() {
         document.getElementById('exportMenu').classList.remove('active');
+        if (backendAvailable && currentProject) {
+            try {
+                await saveCurrentFile();
+                const result = await apiRequest('/export/pdf', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_id: currentProject.id, format: 'pdf', content: collectFilesByName() })
+                });
+                window.open(resolveApiUrl(result.url), '_blank');
+                showToast('PDF экспортирован', 'success');
+                return;
+            } catch (error) {
+                showToast(`Ошибка PDF экспорта: ${error.message}`, 'error');
+            }
+        }
+
         const element = document.getElementById('previewContent');
         const opt = {
             margin: 10,
@@ -2787,12 +3088,27 @@ $$E = mc^2$$
         };
         showToast('Генерация PDF...', 'info');
         html2pdf().set(opt).from(element).save().then(() => {
-            showToast('PDF сохранён', 'success');
+            showToast('PDF сохранён локально', 'success');
         });
     }
 
-    function exportHTML() {
+    async function exportHTML() {
         document.getElementById('exportMenu').classList.remove('active');
+        if (backendAvailable && currentProject) {
+            try {
+                await saveCurrentFile();
+                const result = await apiRequest('/export/html', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_id: currentProject.id, format: 'html', content: collectFilesByName() })
+                });
+                window.open(resolveApiUrl(result.url), '_blank');
+                showToast('HTML экспортирован', 'success');
+                return;
+            } catch (error) {
+                showToast(`Ошибка HTML экспорта: ${error.message}`, 'error');
+            }
+        }
+
         const content = document.getElementById('previewContent').innerHTML;
         const html = `<!DOCTYPE html>
 <html lang="ru">
@@ -2821,13 +3137,27 @@ ${content}
 </body>
 </html>`;
         downloadFile(html, document.getElementById('projectNameInput').value + '.html', 'text/html');
-        showToast('HTML сохранён', 'success');
+        showToast('HTML сохранён локально', 'success');
     }
 
-    function exportLatex() {
+    async function exportLatex() {
         document.getElementById('exportMenu').classList.remove('active');
+        if (backendAvailable && currentProject) {
+            try {
+                await saveCurrentFile();
+                const result = await apiRequest('/export/tex', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_id: currentProject.id, format: 'tex', content: collectFilesByName() })
+                });
+                window.open(resolveApiUrl(result.url), '_blank');
+                showToast('TEX архив экспортирован', 'success');
+                return;
+            } catch (error) {
+                showToast(`Ошибка TEX экспорта: ${error.message}`, 'error');
+            }
+        }
         downloadFile(editor.getValue(), document.getElementById('projectNameInput').value + '.tex', 'text/plain');
-        showToast('LaTeX файл сохранён', 'success');
+        showToast('LaTeX файл сохранён локально', 'success');
     }
 
     function downloadFile(content, filename, type) {
@@ -2840,9 +3170,13 @@ ${content}
         URL.revokeObjectURL(url);
     }
 
-    function saveFile() {
-        files[currentFileId].content = editor.getValue();
-        showToast('Файл сохранён', 'success');
+    async function saveFile() {
+        try {
+            await saveCurrentFile();
+            showToast('Файл сохранён', 'success');
+        } catch (error) {
+            showToast(`Ошибка сохранения файла: ${error.message}`, 'error');
+        }
     }
 
     // ==================== MODALS ====================
@@ -2856,6 +3190,28 @@ ${content}
 
     function editProjectName() {
         document.getElementById('projectNameInput').select();
+    }
+
+    async function saveProjectName() {
+        const input = document.getElementById('projectNameInput');
+        const name = input.value.trim();
+        if (!name) return;
+
+        if (!backendAvailable || !currentProject) {
+            showToast('Название обновлено локально', 'info');
+            return;
+        }
+
+        try {
+            currentProject = await apiRequest(`/projects/${currentProject.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name })
+            });
+            input.value = currentProject.name;
+            showToast('Название проекта сохранено', 'success');
+        } catch (error) {
+            showToast(`Ошибка сохранения проекта: ${error.message}`, 'error');
+        }
     }
 
     // ==================== COMMAND PALETTE ====================
