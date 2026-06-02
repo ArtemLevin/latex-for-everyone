@@ -139,7 +139,8 @@ make migration MSG="add users table"
 4. loads templates from `GET /api/templates/`;
 5. autosaves the current file with `PUT /api/files/{file_id}`;
 6. compiles with `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
-7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online.
+7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
+8. opens the AI generation dialog, sends prompt fields to `/api/generation/generate`, inserts returned `latex_code` into the active `.tex` file, saves it, and starts compilation.
 
 ### Configuring the API base URL
 

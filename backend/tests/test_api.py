@@ -1,6 +1,8 @@
 """
 Tests for the Latexed API.
 """
+from pathlib import Path
+
 import pytest
 from fastapi.testclient import TestClient
 from app.main import app
@@ -233,6 +235,18 @@ def test_frontend_bootstrap_contract_creates_template_project_and_updates_main_f
     )
     assert update_response.status_code == 200
     assert update_response.json()["content"] == updated_content
+
+
+def test_frontend_generation_ui_contract():
+    frontend_html = Path(__file__).resolve().parents[2] / "frontend" / "main.html"
+    content = frontend_html.read_text(encoding="utf-8")
+
+    assert 'id="generationModal"' in content
+    assert 'id="generationTopic"' in content
+    assert 'id="generationMaterials"' in content
+    assert "collectGenerationRequest" in content
+    assert "generateLatexFromAi" in content
+    assert "'/generation/generate'" in content
 
 
 def test_export_pdf_receives_frontend_content_payload(monkeypatch):
