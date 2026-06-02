@@ -68,7 +68,13 @@ make frontend
 Or directly from the repository root with any static server:
 
 ```bash
-python -m http.server 8080 --directory frontend
+python3 -m http.server 8080 --directory frontend
+```
+
+If your system uses the `python` executable instead of `python3`, override the Makefile variable when needed:
+
+```bash
+make frontend PYTHON=python
 ```
 
 Open http://localhost:8080/main.html.
@@ -112,6 +118,7 @@ Useful overrides:
 ```bash
 make backend BACKEND_PORT=9000
 make frontend FRONTEND_PORT=3000
+make frontend PYTHON=python
 make migration MSG="add users table"
 ```
 
@@ -252,7 +259,7 @@ uv run pytest backend/tests/ -q
 Frontend syntax smoke check without Make:
 
 ```bash
-python - <<'PY'
+python3 - <<'PY'
 from pathlib import Path
 text = Path('frontend/main.html').read_text()
 start = text.rfind('<script>') + len('<script>')

@@ -10,7 +10,7 @@ FRONTEND_JS := /tmp/frontend-main.js
 HOST ?= 0.0.0.0
 BACKEND_PORT ?= 8000
 FRONTEND_PORT ?= 8080
-PYTHON ?= python
+PYTHON ?= python3
 UV ?= uv
 UV_PROJECT := --project $(ROOT_DIR)
 PYTHONPATH_BACKEND := PYTHONPATH=$(BACKEND_DIR)
