@@ -1,0 +1,2997 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Latexed Clone — Онлайн LaTeX редактор</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/idea.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/matchesonscrollbar.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/stex/stex.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldcode.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/brace-fold.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/anyword-hint.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/jump-to-line.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/comment/comment.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/scroll/simplescrollbars.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/scroll/annotatescrollbar.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/matchesonscrollbar.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/keymap/sublime.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+    <style>
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.16/300.css');
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.16/400.css');
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.16/500.css');
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.16/600.css');
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/inter@5.0.16/700.css');
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/400.css');
+        @import url('https://cdn.jsdelivr.net/npm/@fontsource/jetbrains-mono@5.0.18/500.css');
+
+        :root {
+            --bg-primary: #0f1117;
+            --bg-secondary: #161922;
+            --bg-tertiary: #1a1e2e;
+            --bg-hover: #232838;
+            --bg-active: #2a3044;
+            --border-color: #2a2f42;
+            --border-light: #333952;
+            --text-primary: #e6e8f0;
+            --text-secondary: #9ca3b8;
+            --text-muted: #6b7280;
+            --accent-primary: #6366f1;
+            --accent-hover: #818cf8;
+            --accent-secondary: #8b5cf6;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-danger: #ef4444;
+            --accent-info: #3b82f6;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+            --shadow-md: 0 4px 12px rgba(0,0,0,0.4);
+            --shadow-lg: 0 8px 30px rgba(0,0,0,0.5);
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            overflow: hidden;
+            height: 100vh;
+            font-size: 14px;
+        }
+
+        .app-container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+
+        /* Top Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            height: 52px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            z-index: 100;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 700;
+            font-size: 18px;
+            color: var(--accent-primary);
+            text-decoration: none;
+        }
+
+        .logo svg { width: 28px; height: 28px; }
+
+        .project-name {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 4px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .project-name:hover {
+            border-color: var(--accent-primary);
+            background: var(--bg-hover);
+        }
+
+        .project-name input {
+            background: transparent;
+            border: none;
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+            outline: none;
+            width: 150px;
+        }
+
+        .header-center {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: var(--transition);
+            white-space: nowrap;
+        }
+
+        .btn-primary {
+            background: var(--accent-primary);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: var(--accent-hover);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
+        }
+
+        .btn-secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .btn-secondary:hover {
+            background: var(--bg-hover);
+            border-color: var(--border-light);
+        }
+
+        .btn-ghost {
+            background: transparent;
+            color: var(--text-secondary);
+            padding: 7px 10px;
+        }
+
+        .btn-ghost:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-icon {
+            padding: 7px;
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .btn-icon:hover {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+        }
+
+        .btn-icon.active {
+            color: var(--accent-primary);
+            background: rgba(99, 102, 241, 0.1);
+        }
+
+        .compile-btn {
+            padding: 7px 18px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: white;
+            border: none;
+            border-radius: var(--radius-sm);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .compile-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px rgba(99, 102, 241, 0.5);
+        }
+
+        .compile-btn.compiling {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            display: flex;
+            flex-direction: column;
+            transition: var(--transition);
+            overflow: hidden;
+        }
+
+        .sidebar.collapsed {
+            width: 0;
+            border-right: none;
+        }
+
+        .sidebar-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 14px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-title {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+        }
+
+        .sidebar-tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .sidebar-tab {
+            flex: 1;
+            padding: 10px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: var(--transition);
+        }
+
+        .sidebar-tab:hover {
+            color: var(--text-secondary);
+            background: var(--bg-hover);
+        }
+
+        .sidebar-tab.active {
+            color: var(--accent-primary);
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .file-tree {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .file-tree::-webkit-scrollbar { width: 5px; }
+        .file-tree::-webkit-scrollbar-track { background: transparent; }
+        .file-tree::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
+        .file-tree::-webkit-scrollbar-thumb:hover { background: var(--border-light); }
+
+        .file-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 10px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 13px;
+            color: var(--text-secondary);
+            position: relative;
+        }
+
+        .file-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .file-item.active {
+            background: rgba(99, 102, 241, 0.1);
+            color: var(--accent-primary);
+        }
+
+        .file-item .file-icon {
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }
+
+        .file-item .file-name {
+            flex: 1;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .file-item .file-actions {
+            display: none;
+            gap: 2px;
+        }
+
+        .file-item:hover .file-actions {
+            display: flex;
+        }
+
+        .file-item .file-action-btn {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            transition: var(--transition);
+        }
+
+        .file-item .file-action-btn:hover {
+            background: var(--bg-active);
+            color: var(--text-primary);
+        }
+
+        .file-item .file-action-btn.delete:hover {
+            color: var(--accent-danger);
+        }
+
+        .sidebar-footer {
+            padding: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .template-btn {
+            width: 100%;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border: 1px dashed var(--border-light);
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            font-family: inherit;
+            font-size: 13px;
+            cursor: pointer;
+            transition: var(--transition);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            justify-content: center;
+        }
+
+        .template-btn:hover {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+            background: rgba(99, 102, 241, 0.05);
+        }
+
+        /* Editor Area */
+        .editor-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .toolbar {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+        }
+
+        .toolbar::-webkit-scrollbar { height: 0; }
+
+        .toolbar-group {
+            display: flex;
+            align-items: center;
+            gap: 2px;
+            padding-right: 8px;
+            margin-right: 8px;
+            border-right: 1px solid var(--border-color);
+        }
+
+        .toolbar-group:last-child {
+            border-right: none;
+            margin-right: 0;
+            padding-right: 0;
+        }
+
+        .toolbar-btn {
+            padding: 5px 8px;
+            background: transparent;
+            border: none;
+            border-radius: var(--radius-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+
+        .toolbar-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .toolbar-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        .editor-panes {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .editor-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            position: relative;
+        }
+
+        .pane-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .pane-tabs {
+            display: flex;
+            gap: 2px;
+        }
+
+        .pane-tab {
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .pane-tab:hover {
+            color: var(--text-secondary);
+            background: var(--bg-hover);
+        }
+
+        .pane-tab.active {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        .code-editor {
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .code-editor .CodeMirror {
+            height: 100% !important;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            line-height: 1.6;
+            background: var(--bg-primary) !important;
+            color: var(--text-primary) !important;
+        }
+
+        .CodeMirror-gutters {
+            background: var(--bg-secondary) !important;
+            border-right: 1px solid var(--border-color) !important;
+        }
+
+        .CodeMirror-linenumber {
+            color: var(--text-muted) !important;
+            font-size: 12px !important;
+        }
+
+        .CodeMirror-cursor {
+            border-left: 2px solid var(--accent-primary) !important;
+        }
+
+        .CodeMirror-selected {
+            background: rgba(99, 102, 241, 0.2) !important;
+        }
+
+        .CodeMirror-activeline-background {
+            background: var(--bg-tertiary) !important;
+        }
+
+        .cm-s-monokai .cm-keyword { color: #ff79c6 !important; }
+        .cm-s-monokai .cm-def { color: #8be9fd !important; }
+        .cm-s-monokai .cm-variable { color: #f8f8f2 !important; }
+        .cm-s-monokai .cm-variable-2 { color: #fd971f !important; }
+        .cm-s-monokai .cm-string { color: #f1fa8c !important; }
+        .cm-s-monokai .cm-comment { color: #6272a4 !important; font-style: italic !important; }
+        .cm-s-monokai .cm-number { color: #bd93f9 !important; }
+
+        /* Preview Pane */
+        .preview-pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+            border-left: 1px solid var(--border-color);
+        }
+
+        .preview-container {
+            flex: 1;
+            overflow: auto;
+            padding: 30px;
+            background: #ffffff;
+        }
+
+        .preview-container::-webkit-scrollbar { width: 8px; }
+        .preview-container::-webkit-scrollbar-track { background: #f0f0f0; }
+        .preview-container::-webkit-scrollbar-thumb { background: #ccc; border-radius: 10px; }
+        .preview-container::-webkit-scrollbar-thumb:hover { background: #aaa; }
+
+        .preview-content {
+            max-width: 700px;
+            margin: 0 auto;
+            font-family: 'Computer Modern', 'Latin Modern Math', 'STIX Two Math', Georgia, serif;
+            color: #000;
+            line-height: 1.7;
+        }
+
+        .preview-content h1 {
+            font-size: 2em;
+            font-weight: 700;
+            margin: 0.5em 0;
+            text-align: center;
+        }
+
+        .preview-content h2 {
+            font-size: 1.5em;
+            font-weight: 600;
+            margin: 0.8em 0 0.4em;
+        }
+
+        .preview-content h3 {
+            font-size: 1.25em;
+            font-weight: 600;
+            margin: 0.6em 0 0.3em;
+        }
+
+        .preview-content p {
+            margin: 0.5em 0;
+            text-align: justify;
+        }
+
+        .preview-content .equation-block {
+            margin: 1.2em 0;
+            text-align: center;
+        }
+
+        .preview-content ul, .preview-content ol {
+            margin: 0.5em 0;
+            padding-left: 2em;
+        }
+
+        .preview-content li {
+            margin: 0.3em 0;
+        }
+
+        .preview-content table {
+            border-collapse: collapse;
+            margin: 1em 0;
+            width: 100%;
+        }
+
+        .preview-content table td,
+        .preview-content table th {
+            border: 1px solid #ccc;
+            padding: 8px 12px;
+            text-align: center;
+        }
+
+        .preview-content table th {
+            background: #f5f5f5;
+            font-weight: 600;
+        }
+
+        .preview-content .abstract {
+            margin: 1em 2em;
+            font-style: italic;
+        }
+
+        .preview-content .author {
+            text-align: center;
+            font-size: 1.1em;
+            margin: 0.3em 0;
+        }
+
+        .preview-content .date {
+            text-align: center;
+            font-size: 0.95em;
+            color: #555;
+            margin: 0.5em 0 1.5em;
+        }
+
+        /* Resizer */
+        .resizer {
+            width: 4px;
+            background: var(--border-color);
+            cursor: col-resize;
+            transition: background 0.2s;
+            position: relative;
+        }
+
+        .resizer:hover, .resizer.active {
+            background: var(--accent-primary);
+        }
+
+        .resizer::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: -4px;
+            right: -4px;
+        }
+
+        /* Status Bar */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 16px;
+            height: 28px;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border-color);
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .status-left, .status-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--accent-success);
+        }
+
+        .status-dot.error { background: var(--accent-danger); }
+        .status-dot.warning { background: var(--accent-warning); }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow: hidden;
+            animation: modalIn 0.2s ease-out;
+        }
+
+        @keyframes modalIn {
+            from { opacity: 0; transform: scale(0.95) translateY(10px); }
+            to { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        .modal-close {
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            transition: var(--transition);
+        }
+
+        .modal-close:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .modal-body {
+            padding: 20px;
+            overflow-y: auto;
+            max-height: calc(80vh - 120px);
+        }
+
+        .template-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .template-card {
+            padding: 16px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .template-card:hover {
+            border-color: var(--accent-primary);
+            background: var(--bg-hover);
+            transform: translateY(-2px);
+            box-shadow: var(--shadow-md);
+        }
+
+        .template-card h4 {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+        }
+
+        .template-card p {
+            font-size: 12px;
+            color: var(--text-muted);
+            line-height: 1.5;
+        }
+
+        /* Context Menu */
+        .context-menu {
+            display: none;
+            position: fixed;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 180px;
+            padding: 6px;
+            z-index: 1001;
+        }
+
+        .context-menu.active {
+            display: block;
+        }
+
+        .context-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .context-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .context-item.danger:hover {
+            color: var(--accent-danger);
+            background: rgba(239, 68, 68, 0.1);
+        }
+
+        .context-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+
+        /* Toast */
+        .toast-container {
+            position: fixed;
+            bottom: 40px;
+            right: 20px;
+            z-index: 1002;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .toast {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-md);
+            font-size: 13px;
+            animation: toastIn 0.3s ease-out;
+            min-width: 280px;
+        }
+
+        .toast.success { border-left: 3px solid var(--accent-success); }
+        .toast.error { border-left: 3px solid var(--accent-danger); }
+        .toast.info { border-left: 3px solid var(--accent-info); }
+
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(20px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* Dropdown */
+        .dropdown {
+            position: relative;
+        }
+
+        .dropdown-menu {
+            display: none;
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            box-shadow: var(--shadow-lg);
+            min-width: 200px;
+            padding: 6px;
+            z-index: 100;
+        }
+
+        .dropdown-menu.active {
+            display: block;
+        }
+
+        .dropdown-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .dropdown-item:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .dropdown-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 4px 0;
+        }
+
+        /* Command Palette */
+        .command-palette {
+            display: none;
+            position: fixed;
+            top: 80px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 500px;
+            max-width: 90vw;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            z-index: 1001;
+            overflow: hidden;
+        }
+
+        .command-palette.active {
+            display: block;
+            animation: modalIn 0.15s ease-out;
+        }
+
+        .command-input {
+            width: 100%;
+            padding: 14px 18px;
+            background: transparent;
+            border: none;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-primary);
+            font-size: 15px;
+            font-family: inherit;
+            outline: none;
+        }
+
+        .command-input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .command-list {
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 6px;
+        }
+
+        .command-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: var(--transition);
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .command-item:hover, .command-item.selected {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .command-item .shortcut {
+            margin-left: auto;
+            font-size: 11px;
+            color: var(--text-muted);
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        /* Split View Toggle */
+        .split-view-toggle {
+            display: flex;
+            gap: 2px;
+            background: var(--bg-tertiary);
+            border-radius: var(--radius-sm);
+            padding: 2px;
+        }
+
+        .split-option {
+            padding: 4px 8px;
+            border: none;
+            background: transparent;
+            color: var(--text-muted);
+            cursor: pointer;
+            border-radius: 4px;
+            font-size: 12px;
+            transition: var(--transition);
+        }
+
+        .split-option:hover { color: var(--text-secondary); }
+        .split-option.active {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        /* Line numbers styling */
+        .line-info {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+
+        /* Word count */
+        .word-count {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            .sidebar { display: none; }
+            .preview-pane { display: none; }
+            .header-center { display: none; }
+        }
+
+        /* Loading spinner */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar for preview */
+        .preview-container {
+            scrollbar-width: thin;
+            scrollbar-color: #ccc #f0f0f0;
+        }
+
+        /* Settings panel */
+        .settings-section {
+            margin-bottom: 20px;
+        }
+
+        .settings-label {
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+
+        .settings-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .settings-row:last-child { border-bottom: none; }
+
+        .settings-option {
+            font-size: 13px;
+            color: var(--text-primary);
+        }
+
+        .settings-desc {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+
+        select.settings-select {
+            padding: 6px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-family: inherit;
+            font-size: 13px;
+            outline: none;
+            cursor: pointer;
+        }
+
+        /* Toggle switch */
+        .toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+            background: var(--bg-active);
+            border-radius: 11px;
+            cursor: pointer;
+            transition: var(--transition);
+        }
+
+        .toggle.active { background: var(--accent-primary); }
+
+        .toggle::after {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 18px;
+            height: 18px;
+            background: white;
+            border-radius: 50%;
+            transition: var(--transition);
+        }
+
+        .toggle.active::after { left: 20px; }
+
+        /* Error display */
+        .error-panel {
+            display: none;
+            padding: 10px 14px;
+            background: rgba(239, 68, 68, 0.1);
+            border-top: 1px solid rgba(239, 68, 68, 0.3);
+            font-size: 12px;
+            color: var(--accent-danger);
+            max-height: 100px;
+            overflow-y: auto;
+        }
+
+        .error-panel.active { display: block; }
+
+        .error-panel .error-line {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 2px 0;
+        }
+
+        /* Find/Replace */
+        .find-replace {
+            display: none;
+            padding: 8px 12px;
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            gap: 8px;
+            align-items: center;
+        }
+
+        .find-replace.active { display: flex; }
+
+        .find-replace input {
+            padding: 5px 10px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            outline: none;
+            width: 200px;
+        }
+
+        .find-replace input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        /* Tooltip */
+        [data-tooltip] {
+            position: relative;
+        }
+
+        [data-tooltip]:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 4px 8px;
+            background: var(--bg-active);
+            color: var(--text-primary);
+            font-size: 11px;
+            border-radius: 4px;
+            white-space: nowrap;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        /* Print styles */
+        @media print {
+            .header, .sidebar, .toolbar, .editor-pane, .status-bar, .pane-header { display: none !important; }
+            .preview-pane { border: none !important; }
+            .preview-container { padding: 0 !important; }
+        }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <!-- Header -->
+    <header class="header">
+        <div class="header-left">
+            <a href="#" class="logo">
+                <svg viewBox="0 0 28 28" fill="none">
+                    <rect width="28" height="28" rx="6" fill="#6366f1"/>
+                    <path d="M8 8h12M14 8v12M10 20h8" stroke="white" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+                <span>Latexed</span>
+            </a>
+            <div class="project-name" onclick="editProjectName()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                </svg>
+                <input type="text" id="projectNameInput" value="Мой документ" onclick="event.stopPropagation()">
+            </div>
+        </div>
+
+        <div class="header-center">
+            <button class="btn btn-ghost" onclick="toggleSidebar()" data-tooltip="Файлы">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M3 3h7l2 2h9v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V3z"/>
+                </svg>
+            </button>
+            <button class="btn btn-ghost" onclick="toggleCommandPalette()" data-tooltip="Команды">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </button>
+            <button class="btn btn-ghost" onclick="toggleSettings()" data-tooltip="Настройки">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 20h9"/>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                </svg>
+            </button>
+        </div>
+
+        <div class="header-right">
+            <div class="split-view-toggle">
+                <button class="split-option active" onclick="setViewMode('split')" id="splitBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="18" height="18" rx="2"/>
+                        <line x1="12" y1="3" x2="12" y2="21"/>
+                    </svg>
+                </button>
+                <button class="split-option" onclick="setViewMode('editor')" id="editorBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="16 18 22 12 16 6"/>
+                        <polyline points="8 6 2 12 8 18"/>
+                    </svg>
+                </button>
+                <button class="split-option" onclick="setViewMode('preview')" id="previewBtn">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                        <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                </button>
+            </div>
+            <button class="compile-btn" onclick="compileLatex()" id="compileBtn">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                    <polygon points="5 3 19 12 5 21 5 3"/>
+                </svg>
+                <span>Компиляция</span>
+            </button>
+            <div class="dropdown">
+                <button class="btn btn-secondary" onclick="toggleExportMenu()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="7 10 12 15 17 10"/>
+                        <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                    Экспорт
+                </button>
+                <div class="dropdown-menu" id="exportMenu">
+                    <div class="dropdown-item" onclick="exportPDF()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        Экспорт в PDF
+                    </div>
+                    <div class="dropdown-item" onclick="exportHTML()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="16 18 22 12 16 6"/>
+                            <polyline points="8 6 2 12 8 18"/>
+                        </svg>
+                        Экспорт в HTML
+                    </div>
+                    <div class="dropdown-item" onclick="exportLatex()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <line x1="16" y1="13" x2="8" y2="13"/>
+                            <line x1="16" y1="17" x2="8" y2="17"/>
+                        </svg>
+                        Экспорт в .tex
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="main-content">
+        <!-- Sidebar -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-tabs">
+                <div class="sidebar-tab active" onclick="switchSidebarTab('files', this)">Файлы</div>
+                <div class="sidebar-tab" onclick="switchSidebarTab('snippets', this)">Сниппеты</div>
+                <div class="sidebar-tab" onclick="switchSidebarTab('history', this)">История</div>
+            </div>
+
+            <div class="sidebar-header">
+                <span class="sidebar-title">Проект</span>
+                <button class="btn-icon" onclick="createNewFile()" data-tooltip="Новый файл">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="12" y1="5" x2="12" y2="19"/>
+                        <line x1="5" y1="12" x2="19" y2="12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="file-tree" id="fileTree">
+                <!-- Files will be rendered here -->
+            </div>
+
+            <div class="sidebar-footer">
+                <button class="template-btn" onclick="showTemplates()">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="3" width="7" height="7"/>
+                        <rect x="14" y="3" width="7" height="7"/>
+                        <rect x="14" y="14" width="7" height="7"/>
+                        <rect x="3" y="14" width="7" height="7"/>
+                    </svg>
+                    Создать из шаблона
+                </button>
+            </div>
+        </aside>
+
+        <!-- Editor Area -->
+        <div class="editor-area">
+            <!-- Toolbar -->
+            <div class="toolbar">
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="insertLatex('\\section{}', 9)" data-tooltip="Секция">
+                        <strong style="font-size:14px">H</strong>₁
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\subsection{}', 12)" data-tooltip="Подсекция">
+                        <strong style="font-size:13px">H</strong>₂
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\subsubsection{}', 16)" data-tooltip="Подподсекция">
+                        <strong style="font-size:12px">H</strong>₃
+                    </button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="insertLatex('\\textbf{}', 8)" data-tooltip="Жирный">
+                        <strong>B</strong>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\textit{}', 8)" data-tooltip="Курсив">
+                        <em>I</em>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\underline{}', 10)" data-tooltip="Подчеркнутый">
+                        <u>U</u>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\texttt{}', 8)" data-tooltip="Моноширинный">
+                        <span style="font-family: monospace">TT</span>
+                    </button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="insertLatex('\\begin{itemize}\n    \\item \n\\end{itemize}', 18)" data-tooltip="Маркированный список">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <circle cx="4" cy="6" r="2"/><circle cx="4" cy="12" r="2"/><circle cx="4" cy="18" r="2"/>
+                            <line x1="10" y1="6" x2="20" y2="6" stroke="currentColor" stroke-width="2"/>
+                            <line x1="10" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2"/>
+                            <line x1="10" y1="18" x2="20" y2="18" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\begin{enumerate}\n    \\item \n\\end{enumerate}', 22)" data-tooltip="Нумерованный список">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <text x="1" y="8" font-size="8" font-weight="bold">1.</text>
+                            <text x="1" y="14" font-size="8" font-weight="bold">2.</text>
+                            <text x="1" y="20" font-size="8" font-weight="bold">3.</text>
+                            <line x1="10" y1="6" x2="20" y2="6" stroke="currentColor" stroke-width="2"/>
+                            <line x1="10" y1="12" x2="20" y2="12" stroke="currentColor" stroke-width="2"/>
+                            <line x1="10" y1="18" x2="20" y2="18" stroke="currentColor" stroke-width="2"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="insertLatex('\\begin{equation}\n    \n\\end{equation}', 20)" data-tooltip="Уравнение">
+                        <span style="font-style: italic">f(x)</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('$\\frac{a}{b}$', 7)" data-tooltip="Дробь">
+                        <span style="font-size:11px">a/b</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('$\\sqrt{x}$', 7)" data-tooltip="Корень">
+                        <span>√x</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('$\\sum_{i=0}^{n}$', 12)" data-tooltip="Сумма">
+                        <span>Σ</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('$\\int_{a}^{b}$', 12)" data-tooltip="Интеграл">
+                        <span>∫</span>
+                    </button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="insertLatex('\\begin{table}[]\n    \\centering\n    \\begin{tabular}{|c|c|}\n        \\hline\n         &  \\\\\\n        \\hline\n         &  \\\\\\n        \\hline\n    \\end{tabular}\n\\end{table}', 32)" data-tooltip="Таблица">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <line x1="3" y1="9" x2="21" y2="9"/>
+                            <line x1="3" y1="15" x2="21" y2="15"/>
+                            <line x1="9" y1="3" x2="9" y2="21"/>
+                            <line x1="15" y1="3" x2="15" y2="21"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\begin{figure}[h]\n    \\centering\n    % \\includegraphics[width=0.8\\textwidth]{image.png}\n    \\caption{}\n    \\label{}\n\\end{figure}', 15)" data-tooltip="Изображение">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2"/>
+                            <circle cx="8.5" cy="8.5" r="1.5"/>
+                            <polyline points="21 15 16 10 5 21"/>
+                        </svg>
+                    </button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="insertLatex('\\cite{}', 6)" data-tooltip="Цитата">
+                        <span style="font-size:11px">[ ]</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\footnote{}', 10)" data-tooltip="Сноска">
+                        <span style="font-size:11px">F<sup>n</sup></span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\label{}', 7)" data-tooltip="Метка">
+                        <span style="font-size:11px">L</span>
+                    </button>
+                    <button class="toolbar-btn" onclick="insertLatex('\\ref{}', 5)" data-tooltip="Ссылка">
+                        <span style="font-size:11px">R</span>
+                    </button>
+                </div>
+                <div class="toolbar-group">
+                    <button class="toolbar-btn" onclick="toggleFindReplace()" data-tooltip="Найти и заменить">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                        </svg>
+                    </button>
+                    <button class="toolbar-btn" onclick="toggleComment()" data-tooltip="Закомментировать">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/>
+                            <line x1="4" y1="22" x2="4" y2="15"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Find & Replace -->
+            <div class="find-replace" id="findReplace">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+                </svg>
+                <input type="text" placeholder="Найти..." id="findInput" oninput="findInEditor()">
+                <span id="findCount" style="font-size:11px; color: var(--text-muted); min-width: 60px;">0 результатов</span>
+                <input type="text" placeholder="Заменить..." id="replaceInput">
+                <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 12px;" onclick="replaceInEditor()">Заменить</button>
+                <button class="btn btn-ghost" style="padding: 4px 8px; font-size: 12px;" onclick="replaceAllInEditor()">Заменить все</button>
+                <button class="btn-icon" onclick="toggleFindReplace()">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Editor Panes -->
+            <div class="editor-panes" id="editorPanes">
+                <!-- Code Editor -->
+                <div class="editor-pane" id="editorPane">
+                    <div class="pane-header">
+                        <span id="currentFileName">main.tex</span>
+                        <div class="pane-tabs">
+                            <div class="pane-tab active">Исходный код</div>
+                        </div>
+                    </div>
+                    <div class="code-editor" id="codeEditor"></div>
+                </div>
+
+                <!-- Resizer -->
+                <div class="resizer" id="resizer"></div>
+
+                <!-- Preview -->
+                <div class="preview-pane" id="previewPane">
+                    <div class="pane-header">
+                        <span>Предпросмотр</span>
+                        <div class="pane-tabs">
+                            <div class="pane-tab active" onclick="switchPreviewTab('rendered', this)">Рендер</div>
+                            <div class="pane-tab" onclick="switchPreviewTab('source', this)">Источник</div>
+                        </div>
+                    </div>
+                    <div class="preview-container" id="previewContainer">
+                        <div class="preview-content" id="previewContent">
+                            <!-- Rendered LaTeX will appear here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Error Panel -->
+            <div class="error-panel" id="errorPanel">
+                <div class="error-line">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
+                    </svg>
+                    <span id="errorText"></span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="status-bar">
+        <div class="status-left">
+            <div class="status-indicator">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Готов</span>
+            </div>
+            <span id="lastCompiled" class="line-info">Не скомпилировано</span>
+        </div>
+        <div class="status-right">
+            <span class="word-count" id="wordCount">0 слов</span>
+            <span class="line-info" id="cursorPosition">Строка 1, Столбец 1</span>
+            <span class="line-info">LaTeX</span>
+        </div>
+    </div>
+</div>
+
+<!-- Command Palette -->
+<div class="command-palette" id="commandPalette">
+    <input type="text" class="command-input" placeholder="Введите команду..." id="commandInput" oninput="filterCommands(this.value)">
+    <div class="command-list" id="commandList"></div>
+</div>
+
+<!-- Template Modal -->
+<div class="modal-overlay" id="templateModal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">Выберите шаблон</span>
+            <button class="modal-close" onclick="closeModal('templateModal')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="template-grid" id="templateGrid">
+                <!-- Templates will be rendered here -->
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-overlay" id="settingsModal">
+    <div class="modal">
+        <div class="modal-header">
+            <span class="modal-title">Настройки</span>
+            <button class="modal-close" onclick="closeModal('settingsModal')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="settings-section">
+                <div class="settings-label">Редактор</div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Тема редактора</div>
+                        <div class="settings-desc">Цветовая схема редактора кода</div>
+                    </div>
+                    <select class="settings-select" id="editorTheme" onchange="changeEditorTheme(this.value)">
+                        <option value="monokai">Monokai</option>
+                        <option value="idea">Idea (светлая)</option>
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Размер шрифта</div>
+                        <div class="settings-desc">Размер шрифта в редакторе</div>
+                    </div>
+                    <select class="settings-select" id="fontSize" onchange="changeFontSize(this.value)">
+                        <option value="12">12px</option>
+                        <option value="13">13px</option>
+                        <option value="14" selected>14px</option>
+                        <option value="15">15px</option>
+                        <option value="16">16px</option>
+                        <option value="18">18px</option>
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Перенос строк</div>
+                        <div class="settings-desc">Автоматический перенос длинных строк</div>
+                    </div>
+                    <div class="toggle active" id="wordWrapToggle" onclick="toggleWordWrap(this)"></div>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Номера строк</div>
+                        <div class="settings-desc">Показывать номера строк</div>
+                    </div>
+                    <div class="toggle active" id="lineNumbersToggle" onclick="toggleLineNumbers(this)"></div>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Автокомпиляция</div>
+                        <div class="settings-desc">Автоматически компилировать при изменении</div>
+                    </div>
+                    <div class="toggle" id="autoCompileToggle" onclick="toggleAutoCompile(this)"></div>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="settings-label">Компиляция</div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Движок рендеринга</div>
+                        <div class="settings-desc">Библиотека для рендеринга LaTeX</div>
+                    </div>
+                    <select class="settings-select">
+                        <option selected>KaTeX</option>
+                    </select>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Задержка автокомпиляции</div>
+                        <div class="settings-desc">Время задержки в миллисекундах</div>
+                    </div>
+                    <select class="settings-select" id="compileDelay">
+                        <option value="500">500ms</option>
+                        <option value="1000" selected>1000ms</option>
+                        <option value="2000">2000ms</option>
+                        <option value="3000">3000ms</option>
+                    </select>
+                </div>
+            </div>
+            <div class="settings-section">
+                <div class="settings-label">Горячие клавиши</div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Компиляция</div>
+                    </div>
+                    <span class="line-info" style="color: var(--text-muted);">Ctrl + Enter</span>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Командная палитра</div>
+                    </div>
+                    <span class="line-info" style="color: var(--text-muted);">Ctrl + Shift + P</span>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Найти и заменить</div>
+                    </div>
+                    <span class="line-info" style="color: var(--text-muted);">Ctrl + H</span>
+                </div>
+                <div class="settings-row">
+                    <div>
+                        <div class="settings-option">Сохранить</div>
+                    </div>
+                    <span class="line-info" style="color: var(--text-muted);">Ctrl + S</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Context Menu -->
+<div class="context-menu" id="contextMenu">
+    <div class="context-item" onclick="contextAction('rename')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+        </svg>
+        Переименовать
+    </div>
+    <div class="context-item" onclick="contextAction('duplicate')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+        </svg>
+        Дублировать
+    </div>
+    <div class="context-divider"></div>
+    <div class="context-item danger" onclick="contextAction('delete')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"/>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+        </svg>
+        Удалить
+    </div>
+</div>
+
+<!-- Toast Container -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+    // ==================== STATE ====================
+    let editor = null;
+    let currentFileId = 'main';
+    let autoCompile = false;
+    let compileTimeout = null;
+    let contextMenuFileId = null;
+    let selectedCommandIndex = 0;
+
+    const files = {
+        main: {
+            name: 'main.tex',
+            content: `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+\\usepackage{graphicx}
+\\usepackage{hyperref}
+\\usepackage{geometry}
+\\geometry{margin=1in}
+
+\\title{Введение в линейную алгебру}
+\\author{Иванов И.И.}
+\\date{\\today}
+
+\\begin{document}
+
+\\maketitle
+
+\\begin{abstract}
+В данной работе рассматриваются основные понятия линейной алгебры,
+включая векторные пространства, линейные преобразования и собственные значения.
+Представлены теоретические основы и практические примеры.
+\\end{abstract}
+
+\\section{Введение}
+
+Линейная алгебра является одним из фундаментальных разделов математики.
+Она изучает векторные пространства и линейные отображения между ними.
+
+\\subsection{Определения}
+
+\\textbf{Векторное пространство} --- это множество $V$, элементы которого
+называются \\textit{векторами}, на котором определены две операции:
+
+\\begin{enumerate}
+\\item Сложение векторов: $\\vec{a} + \\vec{b} \\in V$
+\\item Умножение на скаляр: $\\alpha \\cdot \\vec{a} \\in V$, где $\\alpha \\in \\mathbb{R}$
+\\end{enumerate}
+
+\\section{Матрицы и определители}
+
+\\subsection{Операции с матрицами}
+
+Рассмотрим матрицу $A$ размера $n \\times m$:
+
+$$A = \\begin{pmatrix} a_{11} & a_{12} & \\cdots & a_{1m} \\\\ a_{21} & a_{22} & \\cdots & a_{2m} \\\\ \\vdots & \\vdots & \\ddots & \\vdots \\\\ a_{n1} & a_{n2} & \\cdots & a_{nm} \\end{pmatrix}$$
+
+\\subsection{Определитель}
+
+Определитель матрицы $2 \\times 2$ вычисляется по формуле:
+
+$$\\det(A) = \\begin{vmatrix} a & b \\\\ c & d \\end{vmatrix} = ad - bc$$
+
+Для матрицы $3 \\times 3$ используется правило Саррюса:
+
+$$\\det(A) = a_{11}a_{22}a_{33} + a_{12}a_{23}a_{31} + a_{13}a_{21}a_{32} - a_{13}a_{22}a_{31} - a_{11}a_{23}a_{32} - a_{12}a_{21}a_{33}$$
+
+\\section{Системы линейных уравнений}
+
+Система $n$ линейных уравнений с $m$ неизвестными записывается в виде:
+
+$$\\begin{cases} a_{11}x_1 + a_{12}x_2 + \\cdots + a_{1m}x_m = b_1 \\\\ a_{21}x_1 + a_{22}x_2 + \\cdots + a_{2m}x_m = b_2 \\\\ \\vdots \\\\ a_{n1}x_1 + a_{n2}x_2 + \\cdots + a_{nm}x_m = b_n \\end{cases}$$
+
+В матричной форме: $A\\vec{x} = \\vec{b}$
+
+\\section{Собственные значения и векторы}
+
+\\textbf{Собственное значение} $\\lambda$ и \\textbf{собственный вектор} $\\vec{v}$
+матрицы $A$ удовлетворяют уравнению:
+
+$$A\\vec{v} = \\lambda\\vec{v}$$
+
+Характеристическое уравнение:
+
+$$\\det(A - \\lambda I) = 0$$
+
+\\subsection{Пример}
+
+Для матрицы $A = \\begin{pmatrix} 4 & 1 \\\\ 2 & 3 \\end{pmatrix}$:
+
+$$\\det(A - \\lambda I) = \\begin{vmatrix} 4-\\lambda & 1 \\\\ 2 & 3-\\lambda \\end{vmatrix} = (4-\\lambda)(3-\\lambda) - 2 = \\lambda^2 - 7\\lambda + 10$$
+
+Корни: $\\lambda_1 = 5$, $\\lambda_2 = 2$
+
+\\section{Заключение}
+
+Линейная алгебра находит широкое применение в различных областях:
+
+\\begin{itemize}
+\\item Физика --- квантовая механика, теория относительности
+\\item Информатика --- машинное обучение, компьютерная графика
+\\item Экономика --- моделирование, оптимизация
+\\item Инженерия --- анализ цепей, теория управления
+\\end{itemize}
+
+\\section*{Формулы}
+
+Некоторые важные формулы линейной алгебры:
+
+$$e^{i\\pi} + 1 = 0$$
+
+$$\\sum_{i=1}^{n} i = \\frac{n(n+1)}{2}$$
+
+$$\\int_{-\\infty}^{\\infty} e^{-x^2} dx = \\sqrt{\\pi}$$
+
+\\end{document}`
+        },
+        preamble: {
+            name: 'preamble.tex',
+            content: `%% Преамбула документа
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath, amssymb, amsthm}
+\\usepackage{graphicx}
+\\usepackage{hyperref}
+\\usepackage{geometry}
+\\geometry{margin=1in}
+
+%% Теоремы
+\\newtheorem{theorem}{Теорема}
+\\newtheorem{lemma}{Лемма}
+\\newtheorem{definition}{Определение}
+\\newtheorem{example}{Пример}`
+        },
+        bibliography: {
+            name: 'bibliography.bib',
+            content: `@book{knuth1997,
+author = {Knuth, Donald E.},
+title = {The Art of Computer Programming},
+year = {1997},
+publisher = {Addison-Wesley},
+volume = {1}
+}
+
+@article{einstein1905,
+author = {Einstein, Albert},
+title = {Zur Elektrodynamik bewegter Körper},
+journal = {Annalen der Physik},
+year = {1905},
+volume = {322},
+pages = {891--921}
+}
+
+@book{gilbert_strang,
+author = {Strang, Gilbert},
+title = {Introduction to Linear Algebra},
+year = {2016},
+publisher = {Wellesley-Cambridge Press},
+edition = {5}
+}`
+        }
+    };
+
+    const templates = [
+        {
+            name: 'Статья (article)',
+            desc: 'Стандартная научная статья с заголовком, аннотацией и секциями',
+            content: `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+
+\\title{Заголовок статьи}
+\\author{Автор}
+\\date{\\today}
+
+\\begin{document}
+
+\\maketitle
+
+\\begin{abstract}
+Аннотация статьи.
+\\end{abstract}
+
+\\section{Введение}
+Текст введения.
+
+\\section{Основная часть}
+Основной текст.
+
+\\section{Заключение}
+Заключение.
+
+\\end{document}`
+        },
+        {
+            name: 'Отчёт (report)',
+            desc: 'Отчёт с главами и разделами',
+            content: `\\documentclass[12pt,a4paper]{report}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+
+\\title{Название отчёта}
+\\author{Автор}
+\\date{\\today}
+
+\\begin{document}
+
+\\maketitle
+\\tableofcontents
+\\newpage
+
+\\chapter{Введение}
+Текст введения.
+
+\\chapter{Основная часть}
+Основной текст.
+
+\\chapter{Заключение}
+Заключение.
+
+\\end{document}`
+        },
+        {
+            name: 'Презентация (beamer)',
+            desc: 'Презентация для выступления',
+            content: `\\documentclass{beamer}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath}
+\\usetheme{Madrid}
+
+\\title{Название презентации}
+\\author{Автор}
+\\date{\\today}
+
+\\begin{document}
+
+\\frame{\\titlepage}
+
+\\begin{frame}{Введение}
+\\begin{itemize}
+    \\item Первый пункт
+    \\item Второй пункт
+    \\item Третий пункт
+\\end{itemize}
+\\end{frame}
+
+\\begin{frame}{Формулы}
+$$E = mc^2$$
+\\end{frame}
+
+\\end{document}`
+        },
+        {
+            name: 'Книга (book)',
+            desc: 'Книга с главами, частями и оглавлением',
+            content: `\\documentclass[12pt,a4paper]{book}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+
+\\title{Название книги}
+\\author{Автор}
+\\date{\\today}
+
+\\begin{document}
+
+\\frontmatter
+\\maketitle
+\\tableofcontents
+
+\\mainmatter
+
+\\part{Часть первая}
+
+\\chapter{Введение}
+Текст главы.
+
+\\chapter{Основы}
+Текст главы.
+
+\\part{Часть вторая}
+
+\\chapter{Продвинутые темы}
+Текст главы.
+
+\\backmatter
+
+\\end{document}`
+        },
+        {
+            name: 'Письмо (letter)',
+            desc: 'Официальное письмо',
+            content: `\\documentclass[a4paper]{letter}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+
+\\address{Ваш адрес\\\\Город, Индекс}
+\\signature{Ваше Имя}
+
+\\begin{document}
+
+\\begin{letter}{Адресат\\\\Организация\\\\Город}
+
+\\opening{Уважаемый(ая),}
+
+Текст письма.
+
+\\closing{С уважением,}
+
+\\end{letter}
+
+\\end{document}`
+        },
+        {
+            name: 'Пустой документ',
+            desc: 'Минимальный пустой LaTeX документ',
+            content: `\\documentclass[12pt,a4paper]{article}
+\\usepackage[utf8]{inputenc}
+\\usepackage[russian]{babel}
+\\usepackage{amsmath}
+\\usepackage{amssymb}
+
+\\begin{document}
+
+
+\\end{document}`
+        }
+    ];
+
+    const commands = [
+        { name: 'Скомпилировать', shortcut: 'Ctrl+Enter', action: compileLatex },
+        { name: 'Создать новый файл', shortcut: 'Ctrl+N', action: createNewFile },
+        { name: 'Найти и заменить', shortcut: 'Ctrl+H', action: toggleFindReplace },
+        { name: 'Показать шаблоны', shortcut: '', action: showTemplates },
+        { name: 'Экспорт в PDF', shortcut: '', action: exportPDF },
+        { name: 'Экспорт в HTML', shortcut: '', action: exportHTML },
+        { name: 'Экспорт в .tex', shortcut: '', action: exportLatex },
+        { name: 'Настройки', shortcut: 'Ctrl+,', action: toggleSettings },
+        { name: 'Переключить тему', shortcut: '', action: toggleTheme },
+        { name: 'Полноэкранный режим', shortcut: 'F11', action: toggleFullscreen },
+    ];
+
+    // ==================== INIT ====================
+    function init() {
+        editor = CodeMirror(document.getElementById('codeEditor'), {
+            value: files.main.content,
+            mode: 'stex',
+            theme: 'monokai',
+            lineNumbers: true,
+            lineWrapping: true,
+            autoCloseBrackets: true,
+            matchBrackets: true,
+            styleActiveLine: true,
+            foldGutter: true,
+            gutters: ['CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+            indentUnit: 4,
+            tabSize: 4,
+            indentWithTabs: false,
+            keyMap: 'sublime',
+            extraKeys: {
+                'Ctrl-Enter': compileLatex,
+                'Ctrl-S': function(cm) { saveFile(); },
+                'Ctrl-H': function(cm) { toggleFindReplace(); },
+                'Ctrl-Shift-P': function(cm) { toggleCommandPalette(); },
+                'Ctrl-/': function(cm) { toggleComment(); },
+                'Ctrl-Space': function(cm) { cm.showHint({ hint: CodeMirror.hint.anyword }); }
+            }
+        });
+
+        editor.on('change', function() {
+            files[currentFileId].content = editor.getValue();
+            updateWordCount();
+            if (autoCompile) {
+                clearTimeout(compileTimeout);
+                const delay = parseInt(document.getElementById('compileDelay').value);
+                compileTimeout = setTimeout(compileLatex, delay);
+            }
+        });
+
+        editor.on('cursorActivity', function() {
+            const cursor = editor.getCursor();
+            document.getElementById('cursorPosition').textContent =
+                `Строка ${cursor.line + 1}, Столбец ${cursor.ch + 1}`;
+        });
+
+        renderFileTree();
+        compileLatex();
+        updateWordCount();
+
+        // Resizer
+        initResizer();
+
+        // Close menus on click outside
+        document.addEventListener('click', function(e) {
+            const contextMenu = document.getElementById('contextMenu');
+            if (!contextMenu.contains(e.target)) {
+                contextMenu.classList.remove('active');
+            }
+            const exportMenu = document.getElementById('exportMenu');
+            if (!exportMenu.contains(e.target) && !e.target.closest('.dropdown')) {
+                exportMenu.classList.remove('active');
+            }
+            const commandPalette = document.getElementById('commandPalette');
+            if (!commandPalette.contains(e.target) && !e.target.closest('[onclick*="commandPalette"]')) {
+                // keep open
+            }
+        });
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.ctrlKey && e.key === 'Enter') {
+                e.preventDefault();
+                compileLatex();
+            }
+            if (e.ctrlKey && e.shiftKey && e.key === 'P') {
+                e.preventDefault();
+                toggleCommandPalette();
+            }
+            if (e.ctrlKey && e.key === 'h' && !e.shiftKey) {
+                // Don't prevent - let CodeMirror handle it
+            }
+            if (e.key === 'Escape') {
+                closeModal('templateModal');
+                closeModal('settingsModal');
+                document.getElementById('commandPalette').classList.remove('active');
+                document.getElementById('contextMenu').classList.remove('active');
+            }
+            if (e.key === 'F11') {
+                e.preventDefault();
+                toggleFullscreen();
+            }
+        });
+    }
+
+    // ==================== FILE MANAGEMENT ====================
+    function renderFileTree() {
+        const tree = document.getElementById('fileTree');
+        tree.innerHTML = '';
+        Object.keys(files).forEach(id => {
+            const file = files[id];
+            const item = document.createElement('div');
+            item.className = `file-item ${id === currentFileId ? 'active' : ''}`;
+            item.dataset.id = id;
+            item.onclick = function() { switchFile(id); };
+            item.oncontextmenu = function(e) { showContextMenu(e, id); };
+
+            const icon = file.name.endsWith('.tex')
+                ? '<svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>'
+                : '<svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>';
+
+            item.innerHTML = `
+                ${icon}
+                <span class="file-name">${file.name}</span>
+                <div class="file-actions">
+                    <button class="file-action-btn" onclick="event.stopPropagation(); renameFile('${id}')">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
+                        </svg>
+                    </button>
+                    <button class="file-action-btn delete" onclick="event.stopPropagation(); deleteFile('${id}')">
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                        </svg>
+                    </button>
+                </div>
+            `;
+            tree.appendChild(item);
+        });
+    }
+
+    function switchFile(id) {
+        files[currentFileId].content = editor.getValue();
+        currentFileId = id;
+        editor.setValue(files[id].content);
+        editor.refresh();
+        editor.focus();
+        document.getElementById('currentFileName').textContent = files[id].name;
+        renderFileTree();
+        compileLatex();
+    }
+
+    function createNewFile() {
+        const name = prompt('Имя файла:', 'new_document.tex');
+        if (!name) return;
+        const id = 'file_' + Date.now();
+        files[id] = { name: name, content: '' };
+        switchFile(id);
+        showToast('Файл создан', 'success');
+    }
+
+    function deleteFile(id) {
+        if (Object.keys(files).length <= 1) {
+            showToast('Нельзя удалить последний файл', 'error');
+            return;
+        }
+        if (confirm(`Удалить файл "${files[id].name}"?`)) {
+            delete files[id];
+            if (currentFileId === id) {
+                switchFile(Object.keys(files)[0]);
+            } else {
+                renderFileTree();
+            }
+            showToast('Файл удалён', 'info');
+        }
+    }
+
+    function renameFile(id) {
+        const newName = prompt('Новое имя:', files[id].name);
+        if (newName && newName.trim()) {
+            files[id].name = newName.trim();
+            renderFileTree();
+            if (id === currentFileId) {
+                document.getElementById('currentFileName').textContent = newName.trim();
+            }
+            showToast('Файл переименован', 'success');
+        }
+    }
+
+    // ==================== CONTEXT MENU ====================
+    function showContextMenu(e, id) {
+        e.preventDefault();
+        contextMenuFileId = id;
+        const menu = document.getElementById('contextMenu');
+        menu.style.left = e.clientX + 'px';
+        menu.style.top = e.clientY + 'px';
+        menu.classList.add('active');
+    }
+
+    function contextAction(action) {
+        document.getElementById('contextMenu').classList.remove('active');
+        if (!contextMenuFileId) return;
+        switch (action) {
+            case 'rename': renameFile(contextMenuFileId); break;
+            case 'duplicate':
+                const id = 'file_' + Date.now();
+                files[id] = { name: 'copy_' + files[contextMenuFileId].name, content: files[contextMenuFileId].content };
+                switchFile(id);
+                showToast('Файл дублирован', 'success');
+                break;
+            case 'delete': deleteFile(contextMenuFileId); break;
+        }
+    }
+
+    // ==================== COMPILATION ====================
+    function compileLatex() {
+        const btn = document.getElementById('compileBtn');
+        btn.classList.add('compiling');
+        btn.innerHTML = '<div class="spinner"></div><span>Компиляция...</span>';
+
+        setTimeout(() => {
+            try {
+                const content = editor.getValue();
+                const rendered = renderLatex(content);
+                document.getElementById('previewContent').innerHTML = rendered;
+                document.getElementById('errorPanel').classList.remove('active');
+                document.getElementById('statusDot').className = 'status-dot';
+                document.getElementById('statusText').textContent = 'Скомпилировано';
+                document.getElementById('lastCompiled').textContent = 'Последняя компиляция: ' + new Date().toLocaleTimeString('ru');
+            } catch (e) {
+                document.getElementById('errorPanel').classList.add('active');
+                document.getElementById('errorText').textContent = e.message;
+                document.getElementById('statusDot').className = 'status-dot error';
+                document.getElementById('statusText').textContent = 'Ошибка';
+            }
+            btn.classList.remove('compiling');
+            btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Компиляция</span>';
+        }, 300);
+    }
+
+    function renderLatex(content) {
+        let html = content;
+
+        // Remove comments
+        html = html.replace(/%[^\n]*/g, '');
+
+        // Extract preamble
+        const preambleMatch = html.match(/\\documentclass\{[^}]+\}([\s\S]*?)\\begin\{document\}/);
+        const preamble = preambleMatch ? preambleMatch[1] : '';
+
+        // Extract title, author, date
+        const titleMatch = html.match(/\\title\{([^}]*)\}/);
+        const authorMatch = html.match(/\\author\{([^}]*)\}/);
+        const dateMatch = html.match(/\\date\{([^}]*)\}/);
+
+        // Process document body
+        let body = html.replace(/\\documentclass\{[^}]+\}[\s\S]*?\\begin\{document\}/, '');
+        body = body.replace(/\\end\{document\}[\s\S]*$/, '');
+
+        let result = '';
+
+        // Title/Author/Date
+        if (titleMatch) {
+            const title = processInlineLatex(titleMatch[1]);
+            result += `<h1>${title}</h1>`;
+            if (authorMatch) {
+                result += `<p class="author">${processInlineLatex(authorMatch[1])}</p>`;
+            }
+            if (dateMatch) {
+                const dateVal = dateMatch[1];
+                result += `<p class="date">${dateVal === '\\today' ? new Date().toLocaleDateString('ru') : processInlineLatex(dateVal)}</p>`;
+            }
+            result += '<hr style="border: none; border-top: 1px solid #ccc; margin: 1.5em 0;">';
+        }
+
+        // Abstract
+        body = body.replace(/\\begin\{abstract\}([\s\S]*?)\\end\{abstract\}/g, function(m, c) {
+            return `<div class="abstract">${processInlineLatex(c.trim())}</div>`;
+        });
+
+        // Sections
+        body = body.replace(/\\section\*?\{([^}]*)\}/g, '<h2>$1</h2>');
+        body = body.replace(/\\subsection\*?\{([^}]*)\}/g, '<h3>$1</h3>');
+        body = body.replace(/\\subsubsection\*?\{([^}]*)\}/g, '<h4>$1</h4>');
+
+        // Bold, Italic, Underline
+        body = body.replace(/\\textbf\{([^}]*)\}/g, '<strong>$1</strong>');
+        body = body.replace(/\\textit\{([^}]*)\}/g, '<em>$1</em>');
+        body = body.replace(/\\underline\{([^}]*)\}/g, '<u>$1</u>');
+        body = body.replace(/\\texttt\{([^}]*)\}/g, '<code style="background:#f5f5f5;padding:2px 4px;border-radius:3px;font-family:monospace">$1</code>');
+        body = body.replace(/\\emph\{([^}]*)\}/g, '<em>$1</em>');
+        body = body.replace(/\\textsc\{([^}]*)\}/g, '<span style="font-variant:small-caps">$1</span>');
+
+        // Footnote
+        body = body.replace(/\\footnote\{([^}]*)\}/g, '<sup style="color:#6366f1;cursor:pointer" title="$1">†</sup>');
+
+        // New paragraph
+        body = body.replace(/\n\n/g, '</p><p>');
+        body = body.replace(/\\\\/g, '<br>');
+
+        // Line breaks within paragraphs
+        body = body.replace(/\n/g, ' ');
+
+        // Display equations $$...$$
+        body = body.replace(/\$\$([\s\S]*?)\$\$/g, function(m, eq) {
+            try {
+                const rendered = katex.renderToString(eq.trim(), { displayMode: true, throwOnError: false });
+                return `<div class="equation-block">${rendered}</div>`;
+            } catch (e) {
+                return `<div class="equation-block" style="color:red;font-family:monospace">${eq}</div>`;
+            }
+        });
+
+        // Inline equations $...$
+        body = body.replace(/\$([^$]+?)\$/g, function(m, eq) {
+            try {
+                return katex.renderToString(eq.trim(), { displayMode: false, throwOnError: false });
+            } catch (e) {
+                return `<span style="color:red;font-family:monospace">${eq}</span>`;
+            }
+        });
+
+        // Itemize
+        body = body.replace(/\\begin\{itemize\}([\s\S]*?)\\end\{itemize\}/g, function(m, c) {
+            const items = c.replace(/\\item\s*/g, '<li>').replace(/<\/li>/g, '</li>');
+            return `<ul>${items}</ul>`;
+        });
+
+        // Enumerate
+        body = body.replace(/\\begin\{enumerate\}([\s\S]*?)\\end\{enumerate\}/g, function(m, c) {
+            const items = c.replace(/\\item\s*/g, '<li>').replace(/<\/li>/g, '</li>');
+            return `<ol>${items}</ol>`;
+        });
+
+        // Table
+        body = body.replace(/\\begin\{table\}[\s\S]*?\\begin\{tabular\}\{[^}]*\}([\s\S]*?)\\end\{tabular\}[\s\S]*?\\end\{table\}/g, function(m, c) {
+            let tableHtml = '<table>';
+            const rows = c.trim().split('\\\\').map(r => r.trim()).filter(r => r);
+            rows.forEach((row, i) => {
+                const tag = i === 0 ? 'th' : 'td';
+                const cells = row.replace(/\\hline/g, '').split('&').map(c => c.trim());
+                tableHtml += '<tr>' + cells.map(c => `<${tag}>${processInlineLatex(c)}</${tag}>`).join('') + '</tr>';
+            });
+            tableHtml += '</table>';
+            return tableHtml;
+        });
+
+        // Figure
+        body = body.replace(/\\begin\{figure\}[\s\S]*?\\end\{figure\}/g, function(m) {
+            const caption = m.match(/\\caption\{([^}]*)\}/);
+            return `<figure style="text-align:center;margin:1.5em 0">
+                <div style="background:#f0f0f0;padding:40px;border-radius:8px;color:#999">[Изображение]</div>
+                ${caption ? `<figcaption style="margin-top:8px;font-size:0.9em;color:#666">${caption[1]}</figcaption>` : ''}
+            </figure>`;
+        });
+
+        // Centering
+        body = body.replace(/\\centering/g, '');
+
+        // Clear page
+        body = body.replace(/\\clearpage/g, '');
+        body = body.replace(/\\newpage/g, '');
+
+        // Part/Chapter (for book/report)
+        body = body.replace(/\\part\*?\{([^}]*)\}/g, '<h1 style="text-align:center;margin:2em 0">$1</h1>');
+        body = body.replace(/\\chapter\*?\{([^}]*)\}/g, '<h2 style="page-break-before:always">$1</h2>');
+
+        // Table of contents placeholder
+        body = body.replace(/\\tableofcontents/g, '<div style="text-align:center;color:#666;padding:1em">[Оглавление]</div>');
+
+        // Maketitle placeholder (if not caught above)
+        body = body.replace(/\\maketitle/g, '');
+
+        // New line
+        body = body.replace(/\\newline/g, '<br>');
+
+        // Horizontal rule
+        body = body.replace(/\\hrulefill/g, '<hr>');
+        body = body.replace(/\\hrule/g, '<hr>');
+
+        // Today
+        body = body.replace(/\\today/g, new Date().toLocaleDateString('ru'));
+
+        // Wrap in paragraphs
+        result += `<p>${body}</p>`;
+
+        return result;
+    }
+
+    function processInlineLatex(text) {
+        // Process inline math in text
+        text = text.replace(/\$([^$]+?)\$/g, function(m, eq) {
+            try {
+                return katex.renderToString(eq.trim(), { displayMode: false, throwOnError: false });
+            } catch (e) {
+                return eq;
+            }
+        });
+        text = text.replace(/\\textbf\{([^}]*)\}/g, '<strong>$1</strong>');
+        text = text.replace(/\\textit\{([^}]*)\}/g, '<em>$1</em>');
+        text = text.replace(/\\emph\{([^}]*)\}/g, '<em>$1</em>');
+        text = text.replace(/\\underline\{([^}]*)\}/g, '<u>$1</u>');
+        text = text.replace(/\\texttt\{([^}]*)\}/g, '<code style="background:#f5f5f5;padding:2px 4px;border-radius:3px;font-family:monospace">$1</code>');
+        text = text.replace(/\\cite\{([^}]*)\}/g, '[$1]');
+        text = text.replace(/\\ref\{([^}]*)\}/g, '→$1');
+        text = text.replace(/\\label\{([^}]*)\}/g, '');
+        return text;
+    }
+
+    // ==================== TOOLBAR ====================
+    function insertLatex(text, cursorOffset) {
+        const doc = editor.getDoc();
+        const selection = doc.getSelection();
+        if (selection) {
+            // Check if the template has {} placeholders
+            if (text.includes('{}')) {
+                const newText = text.replace('{}', `{${selection}}`);
+                doc.replaceSelection(newText);
+            } else {
+                doc.replaceSelection(text.replace(/\n/g, ''));
+            }
+        } else {
+            doc.replaceSelection(text);
+            if (cursorOffset) {
+                const cursor = doc.getCursor();
+                // Simple positioning - move cursor to common positions
+                if (text.includes('{}')) {
+                    const beforeCursor = text.substring(0, text.indexOf('{}') + 1);
+                    const lineOffset = beforeCursor.split('\n').length - 1;
+                    const charOffset = lineOffset > 0 ? beforeCursor.split('\n').pop().length : beforeCursor.length;
+                    doc.setCursor(cursor.line - lineOffset, cursor.ch - (text.replace(/\n/g, '').length - charOffset) + 1);
+                }
+            }
+        }
+        editor.focus();
+    }
+
+    function toggleComment() {
+        editor.toggleComment();
+    }
+
+    function toggleFindReplace() {
+        const fr = document.getElementById('findReplace');
+        fr.classList.toggle('active');
+        if (fr.classList.contains('active')) {
+            document.getElementById('findInput').focus();
+            // Auto-fill with selection
+            const selection = editor.getSelection();
+            if (selection) {
+                document.getElementById('findInput').value = selection;
+                findInEditor();
+            }
+        }
+    }
+
+    function findInEditor() {
+        const query = document.getElementById('findInput').value;
+        if (!query) {
+            document.getElementById('findCount').textContent = '0 результатов';
+            return;
+        }
+        const cursor = editor.getSearchCursor(query);
+        let count = 0;
+        while (cursor.findNext()) count++;
+        document.getElementById('findCount').textContent = `${count} результат${count === 1 ? '' : count < 5 ? 'а' : 'ов'}`;
+
+        // Jump to first match
+        const firstCursor = editor.getSearchCursor(query);
+        if (firstCursor.findNext()) {
+            editor.setSelection(firstCursor.from(), firstCursor.to());
+        }
+    }
+
+    function replaceInEditor() {
+        const query = document.getElementById('findInput').value;
+        const replacement = document.getElementById('replaceInput').value;
+        if (!query) return;
+
+        const cursor = editor.getSearchCursor(query);
+        if (cursor.findNext()) {
+            cursor.replace(replacement);
+            findInEditor();
+        }
+    }
+
+    function replaceAllInEditor() {
+        const query = document.getElementById('findInput').value;
+        const replacement = document.getElementById('replaceInput').value;
+        if (!query) return;
+
+        let count = 0;
+        const cursor = editor.getSearchCursor(query);
+        while (cursor.findNext()) {
+            cursor.replace(replacement);
+            count++;
+        }
+        document.getElementById('findCount').textContent = `Заменено: ${count}`;
+        showToast(`Заменено ${count} вхождений`, 'success');
+    }
+
+    // ==================== VIEW MODES ====================
+    function setViewMode(mode) {
+        const editorPane = document.getElementById('editorPane');
+        const previewPane = document.getElementById('previewPane');
+        const resizer = document.getElementById('resizer');
+
+        document.querySelectorAll('.split-option').forEach(b => b.classList.remove('active'));
+
+        switch (mode) {
+            case 'split':
+                editorPane.style.display = 'flex';
+                previewPane.style.display = 'flex';
+                resizer.style.display = 'block';
+                editorPane.style.flex = '1';
+                previewPane.style.flex = '1';
+                document.getElementById('splitBtn').classList.add('active');
+                break;
+            case 'editor':
+                editorPane.style.display = 'flex';
+                previewPane.style.display = 'none';
+                resizer.style.display = 'none';
+                editorPane.style.flex = '1';
+                document.getElementById('editorBtn').classList.add('active');
+                break;
+            case 'preview':
+                editorPane.style.display = 'none';
+                previewPane.style.display = 'flex';
+                resizer.style.display = 'none';
+                previewPane.style.flex = '1';
+                document.getElementById('previewBtn').classList.add('active');
+                break;
+        }
+        editor.refresh();
+    }
+
+    function switchPreviewTab(tab, el) {
+        el.parentElement.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+
+        if (tab === 'source') {
+            document.getElementById('previewContent').textContent = editor.getValue();
+            document.getElementById('previewContent').style.fontFamily = "'JetBrains Mono', monospace";
+            document.getElementById('previewContent').style.whiteSpace = 'pre-wrap';
+            document.getElementById('previewContent').style.fontSize = '13px';
+            document.getElementById('previewContent').style.lineHeight = '1.6';
+        } else {
+            document.getElementById('previewContent').style.fontFamily = '';
+            document.getElementById('previewContent').style.whiteSpace = '';
+            document.getElementById('previewContent').style.fontSize = '';
+            document.getElementById('previewContent').style.lineHeight = '';
+            compileLatex();
+        }
+    }
+
+    // ==================== RESIZER ====================
+    function initResizer() {
+        const resizer = document.getElementById('resizer');
+        const editorPane = document.getElementById('editorPane');
+        const previewPane = document.getElementById('previewPane');
+        let isResizing = false;
+
+        resizer.addEventListener('mousedown', function(e) {
+            isResizing = true;
+            resizer.classList.add('active');
+            document.body.style.cursor = 'col-resize';
+            document.body.style.userSelect = 'none';
+        });
+
+        document.addEventListener('mousemove', function(e) {
+            if (!isResizing) return;
+            const container = document.getElementById('editorPanes');
+            const rect = container.getBoundingClientRect();
+            const offset = e.clientX - rect.left;
+            const total = rect.width;
+            const percent = (offset / total) * 100;
+
+            if (percent > 20 && percent < 80) {
+                editorPane.style.flex = `0 0 ${percent}%`;
+                previewPane.style.flex = `0 0 ${100 - percent}%`;
+                editor.refresh();
+            }
+        });
+
+        document.addEventListener('mouseup', function() {
+            isResizing = false;
+            resizer.classList.remove('active');
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+        });
+    }
+
+    // ==================== SIDEBAR ====================
+    function toggleSidebar() {
+        document.getElementById('sidebar').classList.toggle('collapsed');
+        setTimeout(() => editor.refresh(), 200);
+    }
+
+    function switchSidebarTab(tab, el) {
+        el.parentElement.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+        el.classList.add('active');
+
+        const tree = document.getElementById('fileTree');
+        const footer = document.querySelector('.sidebar-footer');
+
+        if (tab === 'snippets') {
+            tree.innerHTML = `
+                <div class="file-item" onclick="insertLatex('\\alpha', 0)"><span style="font-size:14px">α</span> <span class="file-name">\\alpha</span></div>
+                <div class="file-item" onclick="insertLatex('\\beta', 0)"><span style="font-size:14px">β</span> <span class="file-name">\\beta</span></div>
+                <div class="file-item" onclick="insertLatex('\\gamma', 0)"><span style="font-size:14px">γ</span> <span class="file-name">\\gamma</span></div>
+                <div class="file-item" onclick="insertLatex('\\delta', 0)"><span style="font-size:14px">δ</span> <span class="file-name">\\delta</span></div>
+                <div class="file-item" onclick="insertLatex('\\epsilon', 0)"><span style="font-size:14px">ε</span> <span class="file-name">\\epsilon</span></div>
+                <div class="file-item" onclick="insertLatex('\\theta', 0)"><span style="font-size:14px">θ</span> <span class="file-name">\\theta</span></div>
+                <div class="file-item" onclick="insertLatex('\\lambda', 0)"><span style="font-size:14px">λ</span> <span class="file-name">\\lambda</span></div>
+                <div class="file-item" onclick="insertLatex('\\mu', 0)"><span style="font-size:14px">μ</span> <span class="file-name">\\mu</span></div>
+                <div class="file-item" onclick="insertLatex('\\pi', 0)"><span style="font-size:14px">π</span> <span class="file-name">\\pi</span></div>
+                <div class="file-item" onclick="insertLatex('\\sigma', 0)"><span style="font-size:14px">σ</span> <span class="file-name">\\sigma</span></div>
+                <div class="file-item" onclick="insertLatex('\\phi', 0)"><span style="font-size:14px">φ</span> <span class="file-name">\\phi</span></div>
+                <div class="file-item" onclick="insertLatex('\\omega', 0)"><span style="font-size:14px">ω</span> <span class="file-name">\\omega</span></div>
+                <div class="file-item" onclick="insertLatex('\\infty', 0)"><span style="font-size:14px">∞</span> <span class="file-name">\\infty</span></div>
+                <div class="file-item" onclick="insertLatex('\\partial', 0)"><span style="font-size:14px">∂</span> <span class="file-name">\\partial</span></div>
+                <div class="file-item" onclick="insertLatex('\\nabla', 0)"><span style="font-size:14px">∇</span> <span class="file-name">\\nabla</span></div>
+                <div class="file-item" onclick="insertLatex('\\in', 0)"><span style="font-size:14px">∈</span> <span class="file-name">\\in</span></div>
+                <div class="file-item" onclick="insertLatex('\\notin', 0)"><span style="font-size:14px">∉</span> <span class="file-name">\\notin</span></div>
+                <div class="file-item" onclick="insertLatex('\\subset', 0)"><span style="font-size:14px">⊂</span> <span class="file-name">\\subset</span></div>
+                <div class="file-item" onclick="insertLatex('\\cup', 0)"><span style="font-size:14px">∪</span> <span class="file-name">\\cup</span></div>
+                <div class="file-item" onclick="insertLatex('\\cap', 0)"><span style="font-size:14px">∩</span> <span class="file-name">\\cap</span></div>
+            `;
+            footer.style.display = 'none';
+        } else if (tab === 'history') {
+            tree.innerHTML = `
+                <div class="file-item" style="cursor:default">
+                    <svg class="file-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <span class="file-name">Автосохранение — ${new Date().toLocaleTimeString('ru')}</span>
+                </div>
+            `;
+            footer.style.display = 'none';
+        } else {
+            renderFileTree();
+            footer.style.display = 'block';
+        }
+    }
+
+    // ==================== TEMPLATES ====================
+    function showTemplates() {
+        const grid = document.getElementById('templateGrid');
+        grid.innerHTML = templates.map((t, i) => `
+            <div class="template-card" onclick="applyTemplate(${i})">
+                <h4>${t.name}</h4>
+                <p>${t.desc}</p>
+            </div>
+        `).join('');
+        document.getElementById('templateModal').classList.add('active');
+    }
+
+    function applyTemplate(index) {
+        const template = templates[index];
+        editor.setValue(template.content);
+        files[currentFileId].content = template.content;
+        closeModal('templateModal');
+        compileLatex();
+        showToast(`Шаблон "${template.name}" применён`, 'success');
+    }
+
+    // ==================== EXPORT ====================
+    function toggleExportMenu() {
+        document.getElementById('exportMenu').classList.toggle('active');
+    }
+
+    function exportPDF() {
+        document.getElementById('exportMenu').classList.remove('active');
+        const element = document.getElementById('previewContent');
+        const opt = {
+            margin: 10,
+            filename: document.getElementById('projectNameInput').value + '.pdf',
+            image: { type: 'jpeg', quality: 0.98 },
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+        };
+        showToast('Генерация PDF...', 'info');
+        html2pdf().set(opt).from(element).save().then(() => {
+            showToast('PDF сохранён', 'success');
+        });
+    }
+
+    function exportHTML() {
+        document.getElementById('exportMenu').classList.remove('active');
+        const content = document.getElementById('previewContent').innerHTML;
+        const html = `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${document.getElementById('projectNameInput').value}</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"><\/script>
+<style>
+body { font-family: Georgia, serif; max-width: 700px; margin: 40px auto; padding: 0 20px; line-height: 1.7; color: #000; }
+h1 { text-align: center; font-size: 2em; }
+h2 { font-size: 1.5em; margin-top: 1.5em; }
+h3 { font-size: 1.25em; margin-top: 1em; }
+.equation-block { text-align: center; margin: 1.5em 0; }
+.abstract { margin: 1em 2em; font-style: italic; }
+.author { text-align: center; font-size: 1.1em; }
+.date { text-align: center; color: #555; }
+table { border-collapse: collapse; width: 100%; margin: 1em 0; }
+td, th { border: 1px solid #ccc; padding: 8px 12px; text-align: center; }
+th { background: #f5f5f5; }
+</style>
+</head>
+<body>
+${content}
+</body>
+</html>`;
+        downloadFile(html, document.getElementById('projectNameInput').value + '.html', 'text/html');
+        showToast('HTML сохранён', 'success');
+    }
+
+    function exportLatex() {
+        document.getElementById('exportMenu').classList.remove('active');
+        downloadFile(editor.getValue(), document.getElementById('projectNameInput').value + '.tex', 'text/plain');
+        showToast('LaTeX файл сохранён', 'success');
+    }
+
+    function downloadFile(content, filename, type) {
+        const blob = new Blob([content], { type: type + ';charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    }
+
+    function saveFile() {
+        files[currentFileId].content = editor.getValue();
+        showToast('Файл сохранён', 'success');
+    }
+
+    // ==================== MODALS ====================
+    function closeModal(id) {
+        document.getElementById(id).classList.remove('active');
+    }
+
+    function toggleSettings() {
+        document.getElementById('settingsModal').classList.add('active');
+    }
+
+    function editProjectName() {
+        document.getElementById('projectNameInput').select();
+    }
+
+    // ==================== COMMAND PALETTE ====================
+    function toggleCommandPalette() {
+        const palette = document.getElementById('commandPalette');
+        palette.classList.toggle('active');
+        if (palette.classList.contains('active')) {
+            document.getElementById('commandInput').value = '';
+            document.getElementById('commandInput').focus();
+            renderCommands(commands);
+            selectedCommandIndex = 0;
+        }
+    }
+
+    function filterCommands(query) {
+        const filtered = commands.filter(c =>
+            c.name.toLowerCase().includes(query.toLowerCase())
+        );
+        renderCommands(filtered);
+        selectedCommandIndex = 0;
+        updateCommandSelection();
+    }
+
+    function renderCommands(cmds) {
+        const list = document.getElementById('commandList');
+        list.innerHTML = cmds.map((c, i) => `
+            <div class="command-item ${i === 0 ? 'selected' : ''}" onclick="executeCommand(${commands.indexOf(c)})" data-index="${i}">
+                <span>${c.name}</span>
+                ${c.shortcut ? `<span class="shortcut">${c.shortcut}</span>` : ''}
+            </div>
+        `).join('');
+    }
+
+    function updateCommandSelection() {
+        document.querySelectorAll('.command-item').forEach((item, i) => {
+            item.classList.toggle('selected', i === selectedCommandIndex);
+        });
+    }
+
+    function executeCommand(index) {
+        if (commands[index]) {
+            commands[index].action();
+            document.getElementById('commandPalette').classList.remove('active');
+        }
+    }
+
+    document.getElementById('commandInput').addEventListener('keydown', function(e) {
+        const items = document.querySelectorAll('.command-item');
+        if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            selectedCommandIndex = (selectedCommandIndex + 1) % items.length;
+            updateCommandSelection();
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            selectedCommandIndex = (selectedCommandIndex - 1 + items.length) % items.length;
+            updateCommandSelection();
+        } else if (e.key === 'Enter') {
+            e.preventDefault();
+            const selected = document.querySelector('.command-item.selected');
+            if (selected) selected.click();
+        }
+    });
+
+    // ==================== SETTINGS ====================
+    function changeEditorTheme(theme) {
+        editor.setOption('theme', theme);
+    }
+
+    function changeFontSize(size) {
+        editor.getWrapperElement().style.fontSize = size + 'px';
+        editor.refresh();
+    }
+
+    function toggleWordWrap(el) {
+        el.classList.toggle('active');
+        editor.setOption('lineWrapping', el.classList.contains('active'));
+    }
+
+    function toggleLineNumbers(el) {
+        el.classList.toggle('active');
+        editor.setOption('lineNumbers', el.classList.contains('active'));
+    }
+
+    function toggleAutoCompile(el) {
+        el.classList.toggle('active');
+        autoCompile = el.classList.contains('active');
+        showToast(autoCompile ? 'Автокомпиляция включена' : 'Автокомпиляция выключена', 'info');
+    }
+
+    function toggleTheme() {
+        const current = editor.getOption('theme');
+        editor.setOption('theme', current === 'monokai' ? 'idea' : 'monokai');
+        document.getElementById('editorTheme').value = current === 'monokai' ? 'idea' : 'monokai';
+    }
+
+    function toggleFullscreen() {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen();
+        } else {
+            document.exitFullscreen();
+        }
+    }
+
+    // ==================== UTILITIES ====================
+    function updateWordCount() {
+        const text = editor.getValue();
+        const words = text.trim().split(/\s+/).filter(w => w.length > 0).length;
+        const chars = text.length;
+        document.getElementById('wordCount').textContent = `${words} слов, ${chars} символов`;
+    }
+
+    function showToast(message, type = 'info') {
+        const container = document.getElementById('toastContainer');
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+
+        const icons = {
+            success: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>',
+            error: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>',
+            info: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
+        };
+
+        toast.innerHTML = `${icons[type] || icons.info}<span>${message}</span>`;
+        container.appendChild(toast);
+
+        setTimeout(() => {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateX(20px)';
+            toast.style.transition = 'all 0.3s ease';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    // ==================== INIT ====================
+    window.addEventListener('DOMContentLoaded', init);
+</script>
+</body>
+</html>
+
