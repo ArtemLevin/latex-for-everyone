@@ -1777,6 +1777,7 @@
     let backendAvailable = false;
     let compileTimeout = null;
     let saveTimeout = null;
+    let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
 
@@ -2156,8 +2157,12 @@ $$E = mc^2$$
             await loadTemplates();
             openInitialFile();
             renderFileTree();
-            await compileLatex();
             showToast('Соединение с backend установлено', 'success');
+            try {
+                await compileLatex();
+            } catch (compileError) {
+                showCompileError(compileError.message);
+            }
         } catch (error) {
             backendAvailable = false;
             renderFileTree();
@@ -2182,7 +2187,8 @@ $$E = mc^2$$
             method: 'POST',
             body: JSON.stringify({
                 name: document.getElementById('projectNameInput').value || 'Мой документ',
-                is_public: false
+                is_public: false,
+                template: 'article'
             })
         });
         localStorage.setItem(LOCAL_PROJECT_KEY, currentProject.id);
@@ -2205,7 +2211,9 @@ $$E = mc^2$$
         const mainFile = Object.values(files).find(file => file.is_main) || Object.values(files)[0];
         if (!mainFile) return;
         currentFileId = mainFile.id;
+        suppressEditorChange = true;
         editor.setValue(mainFile.content || '');
+        suppressEditorChange = false;
         document.getElementById('currentFileName').textContent = mainFile.name;
     }
 
@@ -2240,6 +2248,7 @@ $$E = mc^2$$
     }
 
     async function saveCurrentFile() {
+        clearTimeout(saveTimeout);
         if (!currentFileId || !files[currentFileId]) return null;
         const file = files[currentFileId];
         file.content = editor.getValue();
@@ -2307,10 +2316,13 @@ $$E = mc^2$$
         });
 
         editor.on('change', function() {
+            if (!currentFileId || !files[currentFileId]) return;
             files[currentFileId].content = editor.getValue();
             updateWordCount();
-            scheduleSaveCurrentFile();
-            if (autoCompile) {
+            if (!suppressEditorChange) {
+                scheduleSaveCurrentFile();
+            }
+            if (!suppressEditorChange && autoCompile) {
                 clearTimeout(compileTimeout);
                 const delay = parseInt(document.getElementById('compileDelay').value);
                 compileTimeout = setTimeout(compileLatex, delay);
@@ -2423,7 +2435,9 @@ $$E = mc^2$$
             showToast(`Ошибка сохранения текущего файла: ${error.message}`, 'error');
         }
         currentFileId = id;
+        suppressEditorChange = true;
         editor.setValue(files[id].content || '');
+        suppressEditorChange = false;
         editor.refresh();
         editor.focus();
         document.getElementById('currentFileName').textContent = files[id].name;

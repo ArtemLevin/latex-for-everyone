@@ -1,19 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from app.dependencies import get_project
+from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
 from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, RawCompileRequest
 from app.services.latex_compiler import LatexCompiler
 from sqlalchemy.orm import Session
 from app.database import get_db
 from fastapi.responses import FileResponse
-from datetime import datetime
-from typing import Optional
 from pathlib import Path
 from app.config import settings
-import logging
 
 router = APIRouter()
-logger = logging.getLogger(__name__)
 
 compiler = LatexCompiler()
 
@@ -21,7 +16,6 @@ compiler = LatexCompiler()
 @router.post("/", response_model=CompileResponse)
 async def compile_project(
     request: CompileRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     project = db.query(Project).filter(Project.id == request.project_id).first()
@@ -93,7 +87,8 @@ async def compile_raw_latex(request: RawCompileRequest):
     )
 
 
-@router.get("/history/{project_id}")
+@router.get("/history/project/{project_id}", response_model=list[CompileHistoryResponse])
+@router.get("/history/{project_id}", response_model=list[CompileHistoryResponse], deprecated=True)
 async def get_compile_history(
     project_id: str,
     limit: int = 20,
@@ -109,7 +104,8 @@ async def get_compile_history(
     return history
 
 
-@router.get("/history/detail/{history_id}")
+@router.get("/history/item/{history_id}", response_model=CompileHistoryResponse)
+@router.get("/history/detail/{history_id}", response_model=CompileHistoryResponse, deprecated=True)
 async def get_compile_history_detail(
     history_id: str,
     db: Session = Depends(get_db),

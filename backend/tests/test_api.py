@@ -122,18 +122,91 @@ def test_list_templates():
     assert len(data) > 0
 
 
-def test_compile_raw():
+def test_compile_raw(monkeypatch):
+    from app.routers import compile as compile_router
+
     content = r"""\documentclass{article}
 \begin{document}
 Hello World!
 \end{document}"""
 
+    def fake_compile(main_content, files):
+        assert main_content == content
+        assert files == {"chapter.tex": "Chapter text"}
+        return {
+            "status": "success",
+            "output": "Compiled",
+            "compile_time": "0.01s",
+            "pdf_url": "/api/compile/download/test.pdf",
+        }
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
     response = client.post(
         "/api/compile/raw",
-        json={"content": content},
+        json={"content": content, "files": {"chapter.tex": "Chapter text"}},
     )
-    # May fail if pdflatex not installed, but endpoint should respond
-    assert response.status_code in [200, 500]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["pdf_url"] == "/api/compile/download/test.pdf"
+
+
+def test_compile_history_project_and_item_routes(monkeypatch):
+    from app.routers import compile as compile_router
+
+    def fake_compile(main_content, files):
+        return {
+            "status": "success",
+            "output": "Compiled",
+            "compile_time": "0.01s",
+            "pdf_url": "/api/compile/download/test.pdf",
+        }
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Compile History Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    compile_response = client.post(
+        "/api/compile/",
+        json={"project_id": project_id},
+    )
+    assert compile_response.status_code == 200
+    history_id = compile_response.json()["history_id"]
+
+    project_history_response = client.get(f"/api/compile/history/project/{project_id}")
+    assert project_history_response.status_code == 200
+    project_history = project_history_response.json()
+    assert len(project_history) == 1
+    assert project_history[0]["id"] == history_id
+
+    history_item_response = client.get(f"/api/compile/history/item/{history_id}")
+    assert history_item_response.status_code == 200
+    assert history_item_response.json()["project_id"] == project_id
+
+
+def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
+    from app.routers import compile as compile_router
+
+    pdf_dir = tmp_path / "pdfs"
+    pdf_dir.mkdir()
+    pdf_file = pdf_dir / "compiled.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 test pdf")
+    monkeypatch.setattr(compile_router.settings, "COMPILE_WORK_DIR", str(tmp_path))
+
+    response = client.get("/api/compile/download/compiled.pdf")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/pdf"
+    assert response.content == b"%PDF-1.4 test pdf"
+
+
+def test_compile_pdf_download_rejects_invalid_filename():
+    response = client.get("/api/compile/download/not-a-pdf.txt")
+    assert response.status_code == 400
 
 
 def test_openapi_schema():
