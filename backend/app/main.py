@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from app.config import settings
 from app.database import engine, Base
-from app.routers import files, compile, export, templates, projects
+from app.routers import files, compile, export, templates, projects, generation
 import time
 import logging
 
@@ -68,6 +68,7 @@ app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(compile.router, prefix="/api/compile", tags=["compile"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
+app.include_router(generation.router, prefix="/api/generation", tags=["generation"])
 
 
 # Health check
