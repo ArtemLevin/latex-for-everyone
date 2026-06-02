@@ -1781,15 +1781,22 @@
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
 
-    const IS_LOCAL_FRONTEND = ['localhost', '127.0.0.1'].includes(window.location.hostname)
-        && window.location.port
-        && window.location.port !== '8000';
-    const DEFAULT_API_ORIGIN = (window.location.protocol === 'http:' || window.location.protocol === 'https:') && !IS_LOCAL_FRONTEND
-        ? window.location.origin
-        : 'http://localhost:8000';
-    const API_BASE_URL = (window.LATEXED_API_BASE_URL || `${DEFAULT_API_ORIGIN}/api`).replace(/\/$/, '');
-    const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
     const LOCAL_PROJECT_KEY = 'latexed_project_id';
+    const API_BASE_URL = getApiBaseUrl();
+    const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
+
+    function getApiBaseUrl() {
+        const configured = window.LATEXED_API_BASE_URL
+            || document.querySelector('meta[name="latexed-api-base-url"]')?.content;
+        if (configured) return configured.replace(/\/$/, '');
+
+        const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+        const isLocalFrontend = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+            && window.location.port
+            && window.location.port !== '8000';
+        const origin = isHttp && !isLocalFrontend ? window.location.origin : 'http://localhost:8000';
+        return `${origin}/api`;
+    }
 
     let files = {
         main: {
@@ -2148,10 +2155,30 @@ $$E = mc^2$$
         return new URL(url, API_ORIGIN).toString();
     }
 
+    function setBackendAvailability(isAvailable) {
+        backendAvailable = isAvailable;
+        document.body.dataset.backend = isAvailable ? 'online' : 'offline';
+        const lastCompiled = document.getElementById('lastCompiled');
+        if (lastCompiled) {
+            lastCompiled.textContent = isAvailable
+                ? `Backend: подключён (${API_BASE_URL})`
+                : `Backend: недоступен (${API_BASE_URL})`;
+        }
+    }
+
+    function setEditorContent(content) {
+        suppressEditorChange = true;
+        try {
+            editor.setValue(content || '');
+        } finally {
+            suppressEditorChange = false;
+        }
+    }
+
     async function bootstrapBackend() {
         try {
             await apiRequest('/health');
-            backendAvailable = true;
+            setBackendAvailability(true);
             await loadOrCreateProject();
             await loadProjectFiles();
             await loadTemplates();
@@ -2164,7 +2191,7 @@ $$E = mc^2$$
                 showCompileError(compileError.message);
             }
         } catch (error) {
-            backendAvailable = false;
+            setBackendAvailability(false);
             renderFileTree();
             compileLatexLocal();
             showToast(`Backend недоступен: ${error.message}. Работаем локально.`, 'error');
@@ -2211,9 +2238,7 @@ $$E = mc^2$$
         const mainFile = Object.values(files).find(file => file.is_main) || Object.values(files)[0];
         if (!mainFile) return;
         currentFileId = mainFile.id;
-        suppressEditorChange = true;
-        editor.setValue(mainFile.content || '');
-        suppressEditorChange = false;
+        setEditorContent(mainFile.content);
         document.getElementById('currentFileName').textContent = mainFile.name;
     }
 
@@ -2435,14 +2460,16 @@ $$E = mc^2$$
             showToast(`Ошибка сохранения текущего файла: ${error.message}`, 'error');
         }
         currentFileId = id;
-        suppressEditorChange = true;
-        editor.setValue(files[id].content || '');
-        suppressEditorChange = false;
+        setEditorContent(files[id].content);
         editor.refresh();
         editor.focus();
         document.getElementById('currentFileName').textContent = files[id].name;
         renderFileTree();
-        compileLatex();
+        if (autoCompile) {
+            compileLatex();
+        } else {
+            compileLatexLocal();
+        }
     }
 
     async function createNewFile() {
