@@ -122,18 +122,39 @@ def test_list_templates():
     assert len(data) > 0
 
 
-def test_compile_raw():
+def test_compile_raw(monkeypatch):
+    from app.routers import compile as compile_router
+
     content = r"""\documentclass{article}
 \begin{document}
 Hello World!
 \end{document}"""
 
+    def fake_compile(main_content, files):
+        assert main_content == content
+        assert files == {"chapter.tex": "Chapter text"}
+        return {
+            "status": "success",
+            "output": "Compiled",
+            "compile_time": "0.01s",
+            "pdf_url": "/api/compile/download/test.pdf",
+        }
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
     response = client.post(
         "/api/compile/raw",
-        json={"content": content},
+        json={"content": content, "files": {"chapter.tex": "Chapter text"}},
     )
-    # May fail if pdflatex not installed, but endpoint should respond
-    assert response.status_code in [200, 500]
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["pdf_url"] == "/api/compile/download/test.pdf"
+
+
+def test_compile_pdf_download_rejects_invalid_filename():
+    response = client.get("/api/compile/download/not-a-pdf.txt")
+    assert response.status_code == 400
 
 
 def test_openapi_schema():

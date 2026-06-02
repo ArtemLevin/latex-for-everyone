@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from app.dependencies import get_project
 from app.models import Project, CompileHistory
-from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse
+from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, RawCompileRequest
 from app.services.latex_compiler import LatexCompiler
 from sqlalchemy.orm import Session
 from app.database import get_db
+from fastapi.responses import FileResponse
 from datetime import datetime
 from typing import Optional
+from pathlib import Path
+from app.config import settings
 import logging
 
 router = APIRouter()
@@ -78,12 +81,8 @@ async def compile_project(
 
 
 @router.post("/raw", response_model=CompileResponse)
-async def compile_raw_latex(
-    content: str,
-    files: Optional[dict[str, str]] = None,
-    db: Session = Depends(get_db),
-):
-    result = compiler.compile(content, files or {})
+async def compile_raw_latex(request: RawCompileRequest):
+    result = compiler.compile(request.content, request.files)
 
     return CompileResponse(
         status=result["status"],
@@ -110,7 +109,7 @@ async def get_compile_history(
     return history
 
 
-@router.get("/history/{history_id}")
+@router.get("/history/detail/{history_id}")
 async def get_compile_history_detail(
     history_id: str,
     db: Session = Depends(get_db),
@@ -119,3 +118,19 @@ async def get_compile_history_detail(
     if not history:
         raise HTTPException(status_code=404, detail="Compile history not found")
     return history
+
+
+@router.get("/download/{filename}")
+async def download_compiled_pdf(filename: str):
+    if not filename.endswith(".pdf") or Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Invalid PDF filename")
+
+    filepath = Path(settings.COMPILE_WORK_DIR) / "pdfs" / filename
+    if not filepath.exists():
+        raise HTTPException(status_code=404, detail="PDF not found")
+
+    return FileResponse(
+        path=str(filepath),
+        filename=filename,
+        media_type="application/pdf",
+    )
