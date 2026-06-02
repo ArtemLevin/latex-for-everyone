@@ -1,55 +1,117 @@
-# Latexed Backend
+# Latexed
 
-Backend API for **Latexed** — online LaTeX editor with live preview.
+**Latexed** is an online LaTeX editor with a FastAPI backend, a single-page HTML frontend, live/local preview, server-side compilation, and export endpoints.
 
 ## Stack
 
-- **FastAPI** — web framework
+- **FastAPI** — backend API
 - **SQLAlchemy** — ORM
 - **SQLite/PostgreSQL** — database
-- **pdflatex** — LaTeX compiler
-- **Celery + Redis** — async task queue (prod)
-- **Docker + Nginx** — deployment
+- **pdflatex** — LaTeX compiler binary used by compile/export flows
+- **CodeMirror + KaTeX** — frontend editor and local preview
+- **Docker + Nginx** — containerized deployment path
+- **Celery + Redis** — async task queue scaffolding for production tasks
 
-## Quick Start
+## Repository layout
 
-### Development
+```text
+backend/            FastAPI application, tests, Docker/Nginx config
+frontend/main.html  Browser editor UI and backend API client
+```
+
+## Quick start
+
+### 1. Start the backend
 
 ```bash
-# Clone and setup
-git clone <repo>
-cd latex-for-everyone/backend
-
-# Run setup script
-chmod +x scripts/setup.sh
-./scripts/setup.sh
-
-# Start server
+cd backend
+pip install -r requirements.txt
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-API docs: http://localhost:8000/api/docs
+Useful backend URLs:
 
-### Docker
+- API docs: http://localhost:8000/api/docs
+- Health check: http://localhost:8000/api/health
+
+> Server-side compilation and PDF export require `pdflatex` to be installed and available on `PATH` unless you override `LATEX_COMPILER`.
+
+### 2. Start the frontend
+
+From the repository root, serve the frontend with any static server. For example:
+
+```bash
+python -m http.server 8080 --directory frontend
+```
+
+Open http://localhost:8080/main.html.
+
+The frontend will try to connect to `http://localhost:8000/api` when it is served from a local development port such as `8080`. If the backend is not reachable, the editor remains usable in local preview/export fallback mode.
+
+### 3. Docker backend
 
 ```bash
 cd backend
 docker-compose up --build
 ```
 
-### Production
+The Docker image installs a TeX Live distribution, so backend compilation/export is available inside the container.
 
-```bash
-# Set environment variables
-cp .env.example .env
-# Edit .env with production values
+## Frontend/backend integration
 
-# Deploy
-chmod +x scripts/deploy.sh
-./scripts/deploy.sh
+`frontend/main.html` contains a small API client. On startup it:
+
+1. calls `GET /api/health`;
+2. loads a saved project from `localStorage` or creates a new one with the `article` template;
+3. loads project files from `GET /api/files/project/{project_id}`;
+4. loads templates from `GET /api/templates/`;
+5. autosaves the current file with `PUT /api/files/{file_id}`;
+6. compiles with `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
+7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online.
+
+### Configuring the API base URL
+
+The frontend resolves its API base URL in this order:
+
+1. `window.LATEXED_API_BASE_URL`, for example:
+
+   ```html
+   <script>
+     window.LATEXED_API_BASE_URL = 'https://example.com/api';
+   </script>
+   ```
+
+2. a page-level meta tag:
+
+   ```html
+   <meta name="latexed-api-base-url" content="https://example.com/api">
+   ```
+
+3. same-origin `/api` when served by the backend or reverse proxy;
+4. `http://localhost:8000/api` when served locally from another localhost port or from `file://`.
+
+### CORS notes
+
+For separate local frontend/backend processes, ensure `CORS_ORIGINS` includes the frontend origin. The default configuration includes:
+
+```text
+http://localhost:3000
+http://localhost:8080
 ```
 
-## API Endpoints
+If you serve the frontend from a different port or host, update `CORS_ORIGINS` accordingly.
+
+### Reverse proxy notes
+
+For production, the simplest shape is:
+
+- serve `frontend/main.html` and frontend assets from the public origin;
+- proxy `/api/*` to the FastAPI backend;
+- keep the frontend API base URL unset so same-origin `/api` is used.
+
+If the API lives on a different host, configure `window.LATEXED_API_BASE_URL` or the `latexed-api-base-url` meta tag.
+
+## API endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
@@ -64,32 +126,62 @@ chmod +x scripts/deploy.sh
 | POST | `/api/files/project/{id}` | Create file |
 | PUT | `/api/files/{id}` | Update file |
 | DELETE | `/api/files/{id}` | Delete file |
-| POST | `/api/compile/` | Compile project |
-| POST | `/api/compile/raw` | Compile raw LaTeX |
-| GET | `/api/compile/history/{id}` | Compile history |
+| POST | `/api/compile/` | Compile a project payload |
+| POST | `/api/compile/raw` | Compile raw LaTeX JSON payload |
+| GET | `/api/compile/history/project/{id}` | Compile history for a project |
+| GET | `/api/compile/history/item/{id}` | Compile history item details |
+| GET | `/api/compile/download/{filename}` | Download compiled PDF |
 | POST | `/api/export/pdf` | Export to PDF |
 | POST | `/api/export/html` | Export to HTML |
-| POST | `/api/export/tex` | Export to TEX (zip) |
+| POST | `/api/export/tex` | Export to TEX ZIP |
+| GET | `/api/export/download/{filename}` | Download exported file |
 | GET | `/api/templates/` | List templates |
+| GET | `/api/templates/{id}` | Get template details |
 
-## Environment Variables
+Deprecated compatibility routes are still available for compile history:
+
+- `GET /api/compile/history/{project_id}`
+- `GET /api/compile/history/detail/{history_id}`
+
+## Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:///./latexed.db` | Database connection string |
 | `DEBUG` | `false` | Debug mode |
-| `SECRET_KEY` | `change-me` | Secret key for JWT |
+| `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
-| `COMPILE_TIMEOUT` | `30` | Compilation timeout (seconds) |
-| `CORS_ORIGINS` | `["http://localhost:3000"]` | Allowed CORS origins |
+| `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
+| `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
+| `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
+| `CORS_ORIGINS` | `['http://localhost:3000', 'http://localhost:8080']` | Allowed CORS origins |
 
 ## Testing
 
 ```bash
 cd backend
 pip install -r requirements.txt
-pytest tests/ -v
+PYTHONPATH=. pytest tests/ -q
 ```
+
+Frontend syntax smoke check:
+
+```bash
+python - <<'PY'
+from pathlib import Path
+text = Path('frontend/main.html').read_text()
+start = text.rfind('<script>') + len('<script>')
+end = text.rfind('</script>')
+Path('/tmp/frontend-main.js').write_text(text[start:end])
+PY
+node --check /tmp/frontend-main.js
+```
+
+## Known limitations
+
+- `frontend/main.html` is still a monolithic HTML/CSS/JS file. A future cleanup should split API, state, file operations, compile/export, and UI helpers into separate modules.
+- Local preview is an approximate HTML/KaTeX rendering path; authoritative PDF output comes from the backend LaTeX compiler.
+- Server-side compile/export requires a working LaTeX installation. Without `pdflatex`, compile endpoints return errors while the frontend can still use local preview fallback.
 
 ## License
 
