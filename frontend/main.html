@@ -851,6 +851,84 @@
             line-height: 1.5;
         }
 
+        .modal.modal-wide {
+            max-width: 860px;
+        }
+
+        .generation-form {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .generation-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+        }
+
+        .generation-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .generation-field.full {
+            grid-column: 1 / -1;
+        }
+
+        .generation-field label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .generation-field input,
+        .generation-field select,
+        .generation-field textarea {
+            width: 100%;
+            padding: 9px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-sm);
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            font-size: 13px;
+            font-family: inherit;
+        }
+
+        .generation-field textarea {
+            min-height: 96px;
+            resize: vertical;
+            line-height: 1.5;
+        }
+
+        .generation-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .generation-status {
+            min-height: 18px;
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .generation-status.error {
+            color: var(--accent-danger);
+        }
+
+        .generation-status.success {
+            color: var(--accent-success);
+        }
+
+        @media (max-width: 768px) {
+            .generation-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
         /* Context Menu */
         .context-menu {
             display: none;
@@ -1327,6 +1405,13 @@
                     </svg>
                 </button>
             </div>
+            <button class="btn btn-secondary" onclick="showGenerationModal()" id="generationBtn" data-tooltip="Сгенерировать пособие">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M12 2l1.8 5.2L19 9l-5.2 1.8L12 16l-1.8-5.2L5 9l5.2-1.8L12 2z"/>
+                    <path d="M19 15l.9 2.6L22 18l-2.1.4L19 21l-.9-2.6L16 18l2.1-.4L19 15z"/>
+                </svg>
+                AI
+            </button>
             <button class="compile-btn" onclick="compileLatex()" id="compileBtn">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
                     <polygon points="5 3 19 12 5 21 5 3"/>
@@ -1625,6 +1710,100 @@
     </div>
 </div>
 
+<!-- Generation Modal -->
+<div class="modal-overlay" id="generationModal">
+    <div class="modal modal-wide">
+        <div class="modal-header">
+            <span class="modal-title">AI-генерация LaTeX-пособия</span>
+            <button class="modal-close" onclick="closeModal('generationModal')">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body">
+            <div class="generation-form">
+                <div class="generation-grid">
+                    <div class="generation-field">
+                        <label for="generationProvider">Провайдер</label>
+                        <select id="generationProvider" onchange="updateGenerationModelDefault()">
+                            <option value="ollama" selected>Ollama локально</option>
+                            <option value="vendor">Vendor / OpenAI-compatible</option>
+                        </select>
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationModel">Модель</label>
+                        <input id="generationModel" type="text" value="qwen2.5:14b" placeholder="qwen2.5:14b или gpt-4o-mini">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationLevel">Уровень</label>
+                        <input id="generationLevel" type="text" value="ЕГЭ">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationGrade">Класс</label>
+                        <input id="generationGrade" type="text" value="11 класс">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationSubject">Предмет</label>
+                        <input id="generationSubject" type="text" value="математика">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationStudent">ФИО ученика</label>
+                        <input id="generationStudent" type="text" placeholder="Михаил Романов">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationAlpha">Альфа-код</label>
+                        <select id="generationAlpha">
+                            <option value="0">0 — без тренировки</option>
+                            <option value="1" selected>1 — тренировка после задачи</option>
+                            <option value="2">2 — задачи в конце пособия</option>
+                        </select>
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationBeta">Бетта-код: количество</label>
+                        <input id="generationBeta" type="number" min="0" max="50" value="1">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationGamma">Гамма-код: сложность</label>
+                        <select id="generationGamma">
+                            <option value="1">1 — легкие</option>
+                            <option value="2">2 — средние</option>
+                            <option value="3">3 — средние+</option>
+                            <option value="4" selected>4 — сложные</option>
+                            <option value="5">5 — олимпиадные</option>
+                        </select>
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationGraphAnalytic">Графо-аналитическое решение</label>
+                        <input id="generationGraphAnalytic" type="text" value="по ситуации">
+                    </div>
+                    <div class="generation-field full">
+                        <label for="generationTopic">Тема</label>
+                        <input id="generationTopic" type="text" placeholder="Например: показательные неравенства">
+                    </div>
+                    <div class="generation-field full">
+                        <label for="generationPriorityMethod">Приоритетный метод</label>
+                        <input id="generationPriorityMethod" type="text" value="нейросеть выбирает самостоятельно по отношению к уровню и классу">
+                    </div>
+                    <div class="generation-field full">
+                        <label for="generationMaterials">Материалы / условия задач</label>
+                        <textarea id="generationMaterials" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
+                    </div>
+                </div>
+                <div id="generationStatus" class="generation-status">Заполните тему и нажмите «Сгенерировать и вставить».</div>
+                <div class="generation-actions">
+                    <button class="btn btn-secondary" onclick="previewGenerationPrompt()">Проверить prompt</button>
+                    <button class="btn btn-secondary" onclick="validateCurrentLatex()">Проверить .tex</button>
+                    <button class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
+                    <button class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
+                        <span>Сгенерировать и вставить</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Settings Modal -->
 <div class="modal-overlay" id="settingsModal">
     <div class="modal">
@@ -1771,13 +1950,35 @@
 <script>
     // ==================== STATE ====================
     let editor = null;
+    let currentProject = null;
     let currentFileId = 'main';
     let autoCompile = false;
+    let backendAvailable = false;
     let compileTimeout = null;
+    let saveTimeout = null;
+    let generationPresets = [];
+    let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
 
-    const files = {
+    const LOCAL_PROJECT_KEY = 'latexed_project_id';
+    const API_BASE_URL = getApiBaseUrl();
+    const API_ORIGIN = API_BASE_URL.replace(/\/api\/?$/, '');
+
+    function getApiBaseUrl() {
+        const configured = window.LATEXED_API_BASE_URL
+            || document.querySelector('meta[name="latexed-api-base-url"]')?.content;
+        if (configured) return configured.replace(/\/$/, '');
+
+        const isHttp = window.location.protocol === 'http:' || window.location.protocol === 'https:';
+        const isLocalFrontend = ['localhost', '127.0.0.1'].includes(window.location.hostname)
+            && window.location.port
+            && window.location.port !== '8000';
+        const origin = isHttp && !isLocalFrontend ? window.location.origin : 'http://localhost:8000';
+        return `${origin}/api`;
+    }
+
+    let files = {
         main: {
             name: 'main.tex',
             content: `\\documentclass[12pt,a4paper]{article}
@@ -1933,7 +2134,7 @@ edition = {5}
         }
     };
 
-    const templates = [
+    let templates = [
         {
             name: 'Статья (article)',
             desc: 'Стандартная научная статья с заголовком, аннотацией и секциями',
@@ -2105,11 +2306,186 @@ $$E = mc^2$$
         }
     ];
 
+    // ==================== BACKEND API ====================
+    async function apiRequest(path, options = {}) {
+        const response = await fetch(`${API_BASE_URL}${path}`, {
+            ...options,
+            headers: {
+                'Content-Type': 'application/json',
+                ...(options.headers || {})
+            }
+        });
+
+        if (!response.ok) {
+            let message = `HTTP ${response.status}`;
+            try {
+                const data = await response.json();
+                message = data.detail || message;
+            } catch (e) {
+                message = response.statusText || message;
+            }
+            throw new Error(message);
+        }
+
+        if (response.status === 204) return null;
+        return response.json();
+    }
+
+    function resolveApiUrl(url) {
+        return new URL(url, API_ORIGIN).toString();
+    }
+
+    function setBackendAvailability(isAvailable) {
+        backendAvailable = isAvailable;
+        document.body.dataset.backend = isAvailable ? 'online' : 'offline';
+        const lastCompiled = document.getElementById('lastCompiled');
+        if (lastCompiled) {
+            lastCompiled.textContent = isAvailable
+                ? `Backend: подключён (${API_BASE_URL})`
+                : `Backend: недоступен (${API_BASE_URL})`;
+        }
+    }
+
+    function setEditorContent(content) {
+        suppressEditorChange = true;
+        try {
+            editor.setValue(content || '');
+        } finally {
+            suppressEditorChange = false;
+        }
+    }
+
+    async function bootstrapBackend() {
+        try {
+            await apiRequest('/health');
+            setBackendAvailability(true);
+            await loadOrCreateProject();
+            await loadProjectFiles();
+            await loadTemplates();
+            openInitialFile();
+            renderFileTree();
+            showToast('Соединение с backend установлено', 'success');
+            try {
+                await compileLatex();
+            } catch (compileError) {
+                showCompileError(compileError.message);
+            }
+        } catch (error) {
+            setBackendAvailability(false);
+            renderFileTree();
+            compileLatexLocal();
+            showToast(`Backend недоступен: ${error.message}. Работаем локально.`, 'error');
+        }
+    }
+
+    async function loadOrCreateProject() {
+        const savedProjectId = localStorage.getItem(LOCAL_PROJECT_KEY);
+        if (savedProjectId) {
+            try {
+                currentProject = await apiRequest(`/projects/${savedProjectId}`);
+                document.getElementById('projectNameInput').value = currentProject.name;
+                return;
+            } catch (error) {
+                localStorage.removeItem(LOCAL_PROJECT_KEY);
+            }
+        }
+
+        currentProject = await apiRequest('/projects/', {
+            method: 'POST',
+            body: JSON.stringify({
+                name: document.getElementById('projectNameInput').value || 'Мой документ',
+                is_public: false,
+                template: 'article'
+            })
+        });
+        localStorage.setItem(LOCAL_PROJECT_KEY, currentProject.id);
+        document.getElementById('projectNameInput').value = currentProject.name;
+    }
+
+    async function loadProjectFiles() {
+        const backendFiles = await apiRequest(`/files/project/${currentProject.id}`);
+        files = {};
+        backendFiles.forEach(file => {
+            files[file.id] = file;
+        });
+    }
+
+    async function loadTemplates() {
+        templates = await apiRequest('/templates/');
+    }
+
+    function openInitialFile() {
+        const mainFile = Object.values(files).find(file => file.is_main) || Object.values(files)[0];
+        if (!mainFile) return;
+        currentFileId = mainFile.id;
+        setEditorContent(mainFile.content);
+        document.getElementById('currentFileName').textContent = mainFile.name;
+    }
+
+    function collectFilesByName() {
+        if (currentFileId && files[currentFileId]) {
+            files[currentFileId].content = editor.getValue();
+        }
+        const byName = {};
+        Object.values(files).forEach(file => {
+            byName[file.name] = file.content || '';
+        });
+        return byName;
+    }
+
+    function showCompileError(message) {
+        document.getElementById('errorPanel').classList.add('active');
+        document.getElementById('errorText').textContent = message;
+        document.getElementById('statusDot').className = 'status-dot error';
+        document.getElementById('statusText').textContent = 'Ошибка';
+    }
+
+    function showHtmlPreviewFallback() {
+        const rendered = renderLatex(editor.getValue());
+        document.getElementById('previewContent').innerHTML = rendered;
+    }
+
+    function showPdfPreview(pdfUrl) {
+        const url = resolveApiUrl(pdfUrl);
+        document.getElementById('previewContent').innerHTML = `
+            <iframe src="${url}" title="PDF preview" style="width:100%;height:100%;min-height:70vh;border:0;background:white;border-radius:8px;"></iframe>
+        `;
+    }
+
+    async function saveCurrentFile() {
+        clearTimeout(saveTimeout);
+        if (!currentFileId || !files[currentFileId]) return null;
+        const file = files[currentFileId];
+        file.content = editor.getValue();
+
+        if (!backendAvailable) return file;
+
+        const updated = await apiRequest(`/files/${file.id}`, {
+            method: 'PUT',
+            body: JSON.stringify({ content: file.content })
+        });
+        files[updated.id] = updated;
+        return updated;
+    }
+
+    function scheduleSaveCurrentFile() {
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(async () => {
+            try {
+                await saveCurrentFile();
+                document.getElementById('statusText').textContent = 'Сохранено';
+            } catch (error) {
+                showToast(`Ошибка сохранения: ${error.message}`, 'error');
+            }
+        }, 800);
+    }
+
     const commands = [
         { name: 'Скомпилировать', shortcut: 'Ctrl+Enter', action: compileLatex },
         { name: 'Создать новый файл', shortcut: 'Ctrl+N', action: createNewFile },
         { name: 'Найти и заменить', shortcut: 'Ctrl+H', action: toggleFindReplace },
         { name: 'Показать шаблоны', shortcut: '', action: showTemplates },
+        { name: 'AI-генерация LaTeX', shortcut: '', action: showGenerationModal },
         { name: 'Экспорт в PDF', shortcut: '', action: exportPDF },
         { name: 'Экспорт в HTML', shortcut: '', action: exportHTML },
         { name: 'Экспорт в .tex', shortcut: '', action: exportLatex },
@@ -2146,9 +2522,13 @@ $$E = mc^2$$
         });
 
         editor.on('change', function() {
+            if (!currentFileId || !files[currentFileId]) return;
             files[currentFileId].content = editor.getValue();
             updateWordCount();
-            if (autoCompile) {
+            if (!suppressEditorChange) {
+                scheduleSaveCurrentFile();
+            }
+            if (!suppressEditorChange && autoCompile) {
                 clearTimeout(compileTimeout);
                 const delay = parseInt(document.getElementById('compileDelay').value);
                 compileTimeout = setTimeout(compileLatex, delay);
@@ -2162,8 +2542,15 @@ $$E = mc^2$$
         });
 
         renderFileTree();
-        compileLatex();
         updateWordCount();
+        document.getElementById('projectNameInput').addEventListener('blur', saveProjectName);
+        document.getElementById('projectNameInput').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                e.target.blur();
+            }
+        });
+        bootstrapBackend();
 
         // Resizer
         initResizer();
@@ -2199,6 +2586,7 @@ $$E = mc^2$$
             }
             if (e.key === 'Escape') {
                 closeModal('templateModal');
+                closeModal('generationModal');
                 closeModal('settingsModal');
                 document.getElementById('commandPalette').classList.remove('active');
                 document.getElementById('contextMenu').classList.remove('active');
@@ -2246,51 +2634,95 @@ $$E = mc^2$$
         });
     }
 
-    function switchFile(id) {
-        files[currentFileId].content = editor.getValue();
+    async function switchFile(id) {
+        if (!files[id]) return;
+        try {
+            await saveCurrentFile();
+        } catch (error) {
+            showToast(`Ошибка сохранения текущего файла: ${error.message}`, 'error');
+        }
         currentFileId = id;
-        editor.setValue(files[id].content);
+        setEditorContent(files[id].content);
         editor.refresh();
         editor.focus();
         document.getElementById('currentFileName').textContent = files[id].name;
         renderFileTree();
-        compileLatex();
+        if (autoCompile) {
+            compileLatex();
+        } else {
+            compileLatexLocal();
+        }
     }
 
-    function createNewFile() {
+    async function createNewFile() {
         const name = prompt('Имя файла:', 'new_document.tex');
         if (!name) return;
-        const id = 'file_' + Date.now();
-        files[id] = { name: name, content: '' };
-        switchFile(id);
-        showToast('Файл создан', 'success');
+
+        try {
+            if (backendAvailable && currentProject) {
+                const file = await apiRequest(`/files/project/${currentProject.id}`, {
+                    method: 'POST',
+                    body: JSON.stringify({ name, content: '', is_main: false })
+                });
+                files[file.id] = file;
+                await switchFile(file.id);
+            } else {
+                const id = 'file_' + Date.now();
+                files[id] = { id, name: name, content: '', is_main: false };
+                await switchFile(id);
+            }
+            showToast('Файл создан', 'success');
+        } catch (error) {
+            showToast(`Ошибка создания файла: ${error.message}`, 'error');
+        }
     }
 
-    function deleteFile(id) {
+    async function deleteFile(id) {
         if (Object.keys(files).length <= 1) {
             showToast('Нельзя удалить последний файл', 'error');
             return;
         }
-        if (confirm(`Удалить файл "${files[id].name}"?`)) {
+        if (!confirm(`Удалить файл "${files[id].name}"?`)) return;
+
+        try {
+            if (backendAvailable) {
+                await apiRequest(`/files/${id}`, { method: 'DELETE' });
+            }
             delete files[id];
             if (currentFileId === id) {
-                switchFile(Object.keys(files)[0]);
+                await switchFile(Object.keys(files)[0]);
             } else {
                 renderFileTree();
             }
             showToast('Файл удалён', 'info');
+        } catch (error) {
+            showToast(`Ошибка удаления файла: ${error.message}`, 'error');
         }
     }
 
-    function renameFile(id) {
+    async function renameFile(id) {
         const newName = prompt('Новое имя:', files[id].name);
-        if (newName && newName.trim()) {
-            files[id].name = newName.trim();
+        if (!newName || !newName.trim()) return;
+
+        try {
+            if (backendAvailable) {
+                const updated = await apiRequest(`/files/${id}`, {
+                    method: 'PUT',
+                    body: JSON.stringify({ name: newName.trim() })
+                });
+                delete files[id];
+                files[updated.id] = updated;
+                if (currentFileId === id) currentFileId = updated.id;
+            } else {
+                files[id].name = newName.trim();
+            }
             renderFileTree();
-            if (id === currentFileId) {
+            if (id === currentFileId || files[currentFileId]?.name === newName.trim()) {
                 document.getElementById('currentFileName').textContent = newName.trim();
             }
             showToast('Файл переименован', 'success');
+        } catch (error) {
+            showToast(`Ошибка переименования файла: ${error.message}`, 'error');
         }
     }
 
@@ -2304,45 +2736,100 @@ $$E = mc^2$$
         menu.classList.add('active');
     }
 
-    function contextAction(action) {
+    async function contextAction(action) {
         document.getElementById('contextMenu').classList.remove('active');
         if (!contextMenuFileId) return;
         switch (action) {
-            case 'rename': renameFile(contextMenuFileId); break;
-            case 'duplicate':
-                const id = 'file_' + Date.now();
-                files[id] = { name: 'copy_' + files[contextMenuFileId].name, content: files[contextMenuFileId].content };
-                switchFile(id);
-                showToast('Файл дублирован', 'success');
+            case 'rename':
+                renameFile(contextMenuFileId);
                 break;
-            case 'delete': deleteFile(contextMenuFileId); break;
+            case 'duplicate':
+                try {
+                    const source = files[contextMenuFileId];
+                    const copyName = 'copy_' + source.name;
+                    if (backendAvailable && currentProject) {
+                        const file = await apiRequest(`/files/project/${currentProject.id}`, {
+                            method: 'POST',
+                            body: JSON.stringify({ name: copyName, content: source.content || '', is_main: false })
+                        });
+                        files[file.id] = file;
+                        await switchFile(file.id);
+                    } else {
+                        const id = 'file_' + Date.now();
+                        files[id] = { id, name: copyName, content: source.content || '', is_main: false };
+                        await switchFile(id);
+                    }
+                    showToast('Файл дублирован', 'success');
+                } catch (error) {
+                    showToast(`Ошибка дублирования файла: ${error.message}`, 'error');
+                }
+                break;
+            case 'delete':
+                deleteFile(contextMenuFileId);
+                break;
         }
     }
 
     // ==================== COMPILATION ====================
-    function compileLatex() {
+    async function compileLatex() {
         const btn = document.getElementById('compileBtn');
         btn.classList.add('compiling');
         btn.innerHTML = '<div class="spinner"></div><span>Компиляция...</span>';
 
-        setTimeout(() => {
-            try {
-                const content = editor.getValue();
-                const rendered = renderLatex(content);
-                document.getElementById('previewContent').innerHTML = rendered;
-                document.getElementById('errorPanel').classList.remove('active');
-                document.getElementById('statusDot').className = 'status-dot';
-                document.getElementById('statusText').textContent = 'Скомпилировано';
-                document.getElementById('lastCompiled').textContent = 'Последняя компиляция: ' + new Date().toLocaleTimeString('ru');
-            } catch (e) {
-                document.getElementById('errorPanel').classList.add('active');
-                document.getElementById('errorText').textContent = e.message;
-                document.getElementById('statusDot').className = 'status-dot error';
-                document.getElementById('statusText').textContent = 'Ошибка';
+        try {
+            if (backendAvailable && currentProject) {
+                await saveCurrentFile();
+                const allFiles = collectFilesByName();
+                const mainFile = Object.values(files).find(file => file.is_main) || files[currentFileId];
+                const result = await apiRequest('/compile/', {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        project_id: currentProject.id,
+                        main_file_content: mainFile?.content || editor.getValue(),
+                        all_files: allFiles
+                    })
+                });
+
+                if (result.status === 'success') {
+                    document.getElementById('errorPanel').classList.remove('active');
+                    document.getElementById('statusDot').className = 'status-dot';
+                    document.getElementById('statusText').textContent = result.compile_time
+                        ? `Скомпилировано за ${result.compile_time}`
+                        : 'Скомпилировано';
+                    if (result.pdf_url) {
+                        showPdfPreview(result.pdf_url);
+                    } else {
+                        showHtmlPreviewFallback();
+                    }
+                } else {
+                    showCompileError(result.error || 'Ошибка компиляции');
+                }
+            } else {
+                compileLatexLocal();
             }
+            document.getElementById('lastCompiled').textContent = 'Последняя компиляция: ' + new Date().toLocaleTimeString('ru');
+        } catch (e) {
+            showCompileError(e.message);
+            if (!backendAvailable) {
+                compileLatexLocal();
+            }
+        } finally {
             btn.classList.remove('compiling');
             btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"/></svg><span>Компиляция</span>';
-        }, 300);
+        }
+    }
+
+    function compileLatexLocal() {
+        try {
+            const content = editor.getValue();
+            const rendered = renderLatex(content);
+            document.getElementById('previewContent').innerHTML = rendered;
+            document.getElementById('errorPanel').classList.remove('active');
+            document.getElementById('statusDot').className = 'status-dot';
+            document.getElementById('statusText').textContent = 'Локальный preview';
+        } catch (e) {
+            showCompileError(e.message);
+        }
     }
 
     function renderLatex(content) {
@@ -2749,13 +3236,203 @@ $$E = mc^2$$
         }
     }
 
+    // ==================== AI GENERATION ====================
+    function getGenerationFieldValue(id) {
+        const element = document.getElementById(id);
+        return element ? element.value.trim() : '';
+    }
+
+    function setGenerationStatus(message, type = '') {
+        const status = document.getElementById('generationStatus');
+        if (!status) return;
+        status.textContent = message;
+        status.className = `generation-status ${type}`.trim();
+    }
+
+    function updateGenerationModelDefault() {
+        const provider = getGenerationFieldValue('generationProvider');
+        const modelInput = document.getElementById('generationModel');
+        if (!modelInput) return;
+        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'qwen2.5:14b')) {
+            modelInput.value = 'gpt-4o-mini';
+        }
+        if (provider === 'ollama' && (!modelInput.value || modelInput.value === 'gpt-4o-mini')) {
+            modelInput.value = 'qwen2.5:14b';
+        }
+    }
+
+    async function showGenerationModal() {
+        const modal = document.getElementById('generationModal');
+        modal.classList.add('active');
+
+        if (backendAvailable) {
+            try {
+                generationPresets = await apiRequest('/generation/presets');
+                applyGenerationPreset(generationPresets[0]);
+                setGenerationStatus('Поля предзаполнены. Укажите тему или материалы и запустите генерацию.');
+            } catch (error) {
+                setGenerationStatus(`Не удалось загрузить пресеты: ${error.message}`, 'error');
+            }
+        } else {
+            setGenerationStatus('Backend недоступен: AI-генерация требует запущенный backend.', 'error');
+        }
+    }
+
+    function applyGenerationPreset(preset) {
+        if (!preset || !preset.defaults) return;
+        const mapping = {
+            level: 'generationLevel',
+            alpha_code: 'generationAlpha',
+            beta_code: 'generationBeta',
+            gamma_code: 'generationGamma',
+            grade: 'generationGrade',
+            subject: 'generationSubject',
+            priority_method: 'generationPriorityMethod',
+            graph_analytic: 'generationGraphAnalytic'
+        };
+        Object.entries(mapping).forEach(([key, id]) => {
+            const element = document.getElementById(id);
+            if (element && preset.defaults[key] !== undefined) {
+                element.value = preset.defaults[key];
+            }
+        });
+    }
+
+    function collectGenerationRequest() {
+        return {
+            provider: getGenerationFieldValue('generationProvider') || 'ollama',
+            model: getGenerationFieldValue('generationModel') || null,
+            project_id: currentProject?.id || null,
+            fields: {
+                level: getGenerationFieldValue('generationLevel') || 'ЕГЭ',
+                alpha_code: parseInt(getGenerationFieldValue('generationAlpha') || '1', 10),
+                beta_code: parseInt(getGenerationFieldValue('generationBeta') || '1', 10),
+                gamma_code: parseInt(getGenerationFieldValue('generationGamma') || '4', 10),
+                grade: getGenerationFieldValue('generationGrade') || '11 класс',
+                student_name: getGenerationFieldValue('generationStudent'),
+                subject: getGenerationFieldValue('generationSubject') || 'математика',
+                topic: getGenerationFieldValue('generationTopic'),
+                priority_method: getGenerationFieldValue('generationPriorityMethod') || 'нейросеть выбирает самостоятельно по отношению к уровню и классу',
+                graph_analytic: getGenerationFieldValue('generationGraphAnalytic') || 'по ситуации'
+            },
+            materials: getGenerationFieldValue('generationMaterials')
+        };
+    }
+
+    async function previewGenerationPrompt() {
+        if (!backendAvailable) {
+            setGenerationStatus('Backend недоступен: невозможно собрать prompt через API.', 'error');
+            return;
+        }
+
+        try {
+            setGenerationStatus('Собираю prompt...');
+            const result = await apiRequest('/generation/prompt', {
+                method: 'POST',
+                body: JSON.stringify(collectGenerationRequest())
+            });
+            const warnings = result.warnings?.length ? ` Предупреждения: ${result.warnings.join(' ')}` : '';
+            setGenerationStatus(`Prompt готов: ${result.prompt.length} символов.${warnings}`, result.warnings?.length ? '' : 'success');
+            showToast('Prompt успешно собран backend-ом', 'success');
+        } catch (error) {
+            setGenerationStatus(`Ошибка prompt preview: ${error.message}`, 'error');
+            showToast(`Ошибка prompt preview: ${error.message}`, 'error');
+        }
+    }
+
+    function formatValidation(validation) {
+        const errors = validation.errors?.length ? ` Ошибки: ${validation.errors.join(' ')}` : '';
+        const warnings = validation.warnings?.length ? ` Предупреждения: ${validation.warnings.join(' ')}` : '';
+        return `${validation.valid ? 'LaTeX прошел структурную проверку.' : 'LaTeX не прошел структурную проверку.'}${errors}${warnings}`;
+    }
+
+    async function validateCurrentLatex() {
+        if (!backendAvailable) {
+            setGenerationStatus('Backend недоступен: проверка .tex невозможна.', 'error');
+            return;
+        }
+
+        try {
+            setGenerationStatus('Проверяю текущий .tex...');
+            const validation = await apiRequest('/generation/validate', {
+                method: 'POST',
+                body: JSON.stringify({ latex_code: editor.getValue() })
+            });
+            setGenerationStatus(formatValidation(validation), validation.valid ? 'success' : 'error');
+            showToast(validation.valid ? 'LaTeX прошел проверку' : 'LaTeX требует исправлений', validation.valid ? 'success' : 'error');
+        } catch (error) {
+            setGenerationStatus(`Ошибка проверки .tex: ${error.message}`, 'error');
+            showToast(`Ошибка проверки .tex: ${error.message}`, 'error');
+        }
+    }
+
+    async function generateLatexFromAi() {
+        if (!backendAvailable) {
+            setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
+            showToast('Запустите backend для AI-генерации', 'error');
+            return;
+        }
+
+        const btn = document.getElementById('generateLatexBtn');
+        const previousContent = editor.getValue();
+        btn.disabled = true;
+        setGenerationStatus('Генерация LaTeX через AI-provider...');
+        document.getElementById('statusText').textContent = 'AI-генерация...';
+
+        try {
+            await saveCurrentFile();
+            const result = await apiRequest('/generation/generate', {
+                method: 'POST',
+                body: JSON.stringify(collectGenerationRequest())
+            });
+
+            if (!result.latex_code || !result.latex_code.includes('\\documentclass')) {
+                throw new Error('Модель не вернула компилируемый LaTeX от \\documentclass');
+            }
+            if (result.validation && !result.validation.valid) {
+                throw new Error(formatValidation(result.validation));
+            }
+            if (result.validation?.warnings?.length) {
+                setGenerationStatus(formatValidation(result.validation));
+            }
+
+            suppressEditorChange = true;
+            editor.setValue(result.latex_code);
+            suppressEditorChange = false;
+            files[currentFileId].content = result.latex_code;
+            updateWordCount();
+            await saveCurrentFile();
+            closeModal('generationModal');
+            showToast(`LaTeX сгенерирован (${result.provider}/${result.model || 'default'})`, 'success');
+            document.getElementById('statusText').textContent = 'AI-документ вставлен';
+            compileLatex();
+        } catch (error) {
+            suppressEditorChange = true;
+            editor.setValue(previousContent);
+            suppressEditorChange = false;
+            files[currentFileId].content = previousContent;
+            setGenerationStatus(`Ошибка генерации: ${error.message}`, 'error');
+            document.getElementById('statusText').textContent = 'Ошибка AI-генерации';
+            showToast(`Ошибка AI-генерации: ${error.message}`, 'error');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
     // ==================== TEMPLATES ====================
-    function showTemplates() {
+    async function showTemplates() {
         const grid = document.getElementById('templateGrid');
+        if (backendAvailable) {
+            try {
+                await loadTemplates();
+            } catch (error) {
+                showToast(`Ошибка загрузки шаблонов: ${error.message}`, 'error');
+            }
+        }
         grid.innerHTML = templates.map((t, i) => `
             <div class="template-card" onclick="applyTemplate(${i})">
                 <h4>${t.name}</h4>
-                <p>${t.desc}</p>
+                <p>${t.description || t.desc || ''}</p>
             </div>
         `).join('');
         document.getElementById('templateModal').classList.add('active');
@@ -2765,6 +3442,7 @@ $$E = mc^2$$
         const template = templates[index];
         editor.setValue(template.content);
         files[currentFileId].content = template.content;
+        scheduleSaveCurrentFile();
         closeModal('templateModal');
         compileLatex();
         showToast(`Шаблон "${template.name}" применён`, 'success');
@@ -2775,8 +3453,23 @@ $$E = mc^2$$
         document.getElementById('exportMenu').classList.toggle('active');
     }
 
-    function exportPDF() {
+    async function exportPDF() {
         document.getElementById('exportMenu').classList.remove('active');
+        if (backendAvailable && currentProject) {
+            try {
+                await saveCurrentFile();
+                const result = await apiRequest('/export/pdf', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_id: currentProject.id, format: 'pdf', content: collectFilesByName() })
+                });
+                window.open(resolveApiUrl(result.url), '_blank');
+                showToast('PDF экспортирован', 'success');
+                return;
+            } catch (error) {
+                showToast(`Ошибка PDF экспорта: ${error.message}`, 'error');
+            }
+        }
+
         const element = document.getElementById('previewContent');
         const opt = {
             margin: 10,
@@ -2787,12 +3480,27 @@ $$E = mc^2$$
         };
         showToast('Генерация PDF...', 'info');
         html2pdf().set(opt).from(element).save().then(() => {
-            showToast('PDF сохранён', 'success');
+            showToast('PDF сохранён локально', 'success');
         });
     }
 
-    function exportHTML() {
+    async function exportHTML() {
         document.getElementById('exportMenu').classList.remove('active');
+        if (backendAvailable && currentProject) {
+            try {
+                await saveCurrentFile();
+                const result = await apiRequest('/export/html', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_id: currentProject.id, format: 'html', content: collectFilesByName() })
+                });
+                window.open(resolveApiUrl(result.url), '_blank');
+                showToast('HTML экспортирован', 'success');
+                return;
+            } catch (error) {
+                showToast(`Ошибка HTML экспорта: ${error.message}`, 'error');
+            }
+        }
+
         const content = document.getElementById('previewContent').innerHTML;
         const html = `<!DOCTYPE html>
 <html lang="ru">
@@ -2821,13 +3529,27 @@ ${content}
 </body>
 </html>`;
         downloadFile(html, document.getElementById('projectNameInput').value + '.html', 'text/html');
-        showToast('HTML сохранён', 'success');
+        showToast('HTML сохранён локально', 'success');
     }
 
-    function exportLatex() {
+    async function exportLatex() {
         document.getElementById('exportMenu').classList.remove('active');
+        if (backendAvailable && currentProject) {
+            try {
+                await saveCurrentFile();
+                const result = await apiRequest('/export/tex', {
+                    method: 'POST',
+                    body: JSON.stringify({ project_id: currentProject.id, format: 'tex', content: collectFilesByName() })
+                });
+                window.open(resolveApiUrl(result.url), '_blank');
+                showToast('TEX архив экспортирован', 'success');
+                return;
+            } catch (error) {
+                showToast(`Ошибка TEX экспорта: ${error.message}`, 'error');
+            }
+        }
         downloadFile(editor.getValue(), document.getElementById('projectNameInput').value + '.tex', 'text/plain');
-        showToast('LaTeX файл сохранён', 'success');
+        showToast('LaTeX файл сохранён локально', 'success');
     }
 
     function downloadFile(content, filename, type) {
@@ -2840,9 +3562,13 @@ ${content}
         URL.revokeObjectURL(url);
     }
 
-    function saveFile() {
-        files[currentFileId].content = editor.getValue();
-        showToast('Файл сохранён', 'success');
+    async function saveFile() {
+        try {
+            await saveCurrentFile();
+            showToast('Файл сохранён', 'success');
+        } catch (error) {
+            showToast(`Ошибка сохранения файла: ${error.message}`, 'error');
+        }
     }
 
     // ==================== MODALS ====================
@@ -2856,6 +3582,28 @@ ${content}
 
     function editProjectName() {
         document.getElementById('projectNameInput').select();
+    }
+
+    async function saveProjectName() {
+        const input = document.getElementById('projectNameInput');
+        const name = input.value.trim();
+        if (!name) return;
+
+        if (!backendAvailable || !currentProject) {
+            showToast('Название обновлено локально', 'info');
+            return;
+        }
+
+        try {
+            currentProject = await apiRequest(`/projects/${currentProject.id}`, {
+                method: 'PUT',
+                body: JSON.stringify({ name })
+            });
+            input.value = currentProject.name;
+            showToast('Название проекта сохранено', 'success');
+        } catch (error) {
+            showToast(`Ошибка сохранения проекта: ${error.message}`, 'error');
+        }
     }
 
     // ==================== COMMAND PALETTE ====================
