@@ -56,6 +56,18 @@ def test_request_logging_adds_request_id_header():
     assert "X-Process-Time" in response.headers
 
 
+def test_cors_preflight_allows_local_development_origins():
+    response = client.options(
+        "/api/health",
+        headers={
+            "Origin": "http://127.0.0.1:8080",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://127.0.0.1:8080"
+
+
 def test_create_project():
     response = client.post(
         "/api/projects/",

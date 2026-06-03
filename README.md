@@ -187,6 +187,8 @@ For production, the simplest shape is:
 
 If the API lives on a different host, configure `window.LATEXED_API_BASE_URL` or the `latexed-api-base-url` meta tag.
 
+If the browser shows a failed `OPTIONS /api/health` preflight, check that the frontend origin is allowed by `CORS_ORIGINS` or `CORS_ORIGIN_REGEX`. Local development defaults allow `localhost`, `127.0.0.1`, and `0.0.0.0` on any port.
+
 ## API endpoints
 
 | Method | Path | Description |
@@ -235,7 +237,8 @@ Deprecated compatibility routes are still available for compile history:
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
 | `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
-| `CORS_ORIGINS` | `['http://localhost:3000', 'http://localhost:8080']` | Allowed CORS origins |
+| `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
+| `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
 | `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
