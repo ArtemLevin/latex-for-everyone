@@ -103,6 +103,8 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make frontend` | Serve `frontend/main.html` on `FRONTEND_PORT` (default `8080`). |
 | `make open` | Print backend, docs, health, and frontend URLs. |
 | `make health` | Call `GET /api/health`. |
+| `make ai-provider-status` | Check configured AI provider/model availability. |
+| `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Extract inline frontend JavaScript and run `node --check`. |
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
@@ -120,6 +122,7 @@ make backend BACKEND_PORT=9000
 make frontend FRONTEND_PORT=3000
 make frontend PYTHON=python
 make migration MSG="add users table"
+make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 ```
 
 ## uv notes
@@ -241,6 +244,84 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
+
+## Manual AI generation smoke test
+
+Use this checklist to verify the complete generation path manually after the backend and frontend are running.
+
+### Prerequisites
+
+- Run `make sync` once to install Python dependencies.
+- Start the backend in one terminal with `make backend`.
+- Start the frontend in another terminal with `make frontend`.
+- Open http://localhost:8080/main.html.
+- For server-side PDF compilation, ensure `pdflatex` is installed and available on `PATH`.
+
+### Option A: local Ollama
+
+1. Install and start Ollama.
+2. Pull the configured model, for example:
+
+   ```bash
+   ollama pull qwen2.5:14b
+   ```
+
+3. Check that the backend can reach Ollama:
+
+   ```bash
+   make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
+   ```
+
+4. In the browser, click **AI** → **Проверить провайдера**. The status should say that Ollama is reachable and the model is available.
+
+### Option B: OpenAI-compatible vendor
+
+1. Export vendor settings before starting the backend:
+
+   ```bash
+   export AI_PROVIDER=vendor
+   export AI_VENDOR_BASE_URL=https://api.openai.com/v1
+   export AI_VENDOR_API_KEY=your_api_key_here
+   export AI_VENDOR_MODEL=gpt-4o-mini
+   make backend
+   ```
+
+2. Check provider status:
+
+   ```bash
+   make ai-provider-status AI_PROVIDER=vendor AI_MODEL=gpt-4o-mini
+   ```
+
+3. In the browser, select **Vendor / OpenAI-compatible**, set the model, and click **Проверить провайдера**.
+
+### Browser end-to-end checklist
+
+1. Confirm the status bar shows that the backend is online, or verify `make health` succeeds.
+2. Click **AI** in the header.
+3. Fill at least **Тема**; optionally fill **ФИО ученика** and **Материалы / условия задач**.
+4. Click **Проверить prompt** and confirm the prompt preview status is successful.
+5. Click **Проверить провайдера** and confirm the selected provider/model is available.
+6. Click **Сгенерировать и вставить**.
+7. Confirm generated LaTeX appears in the active `.tex` editor and begins with `\documentclass`.
+8. Click **Проверить .tex** if you want to validate the current editor content again.
+9. Compile with **Компиляция** or `Ctrl+Enter`.
+10. Confirm the PDF preview loads when `pdflatex` is available, or review the compile error panel if LaTeX needs correction.
+11. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
+
+### API-only smoke commands
+
+These commands are useful when debugging without the browser:
+
+```bash
+make health
+make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
+make ai-validate-smoke
+curl -fsS -X POST http://localhost:8000/api/generation/prompt \
+  -H 'Content-Type: application/json' \
+  --data '{"provider":"ollama","model":"qwen2.5:14b","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов"},"materials":"Решить уравнение 2^x = 8."}'
+```
+
+If generation fails, check provider status first, then inspect backend logs for provider errors, timeout messages, or missing API key/model configuration.
 
 ## Testing
 

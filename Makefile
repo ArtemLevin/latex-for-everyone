@@ -16,6 +16,8 @@ UV_PROJECT := --project $(ROOT_DIR)
 PYTHONPATH_BACKEND := PYTHONPATH=$(BACKEND_DIR)
 BACKEND_URL := http://localhost:$(BACKEND_PORT)
 FRONTEND_URL := http://localhost:$(FRONTEND_PORT)/main.html
+AI_PROVIDER ?= ollama
+AI_MODEL ?= qwen2.5:14b
 
 .DEFAULT_GOAL := help
 
@@ -59,6 +61,16 @@ open: ## Print URLs to open after starting backend and frontend.
 .PHONY: health
 health: ## Call the backend health endpoint.
 	curl -fsS $(BACKEND_URL)/api/health
+	@echo
+
+.PHONY: ai-provider-status
+ai-provider-status: ## Check configured AI provider/model: make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b.
+	curl -fsS "$(BACKEND_URL)/api/generation/providers/status?provider=$(AI_PROVIDER)&model=$(AI_MODEL)"
+	@echo
+
+.PHONY: ai-validate-smoke
+ai-validate-smoke: ## Validate a minimal LaTeX document through the generation validator endpoint.
+	curl -fsS -X POST "$(BACKEND_URL)/api/generation/validate" -H "Content-Type: application/json" --data '{"latex_code":"\\documentclass{article}\\begin{document}Smoke\\end{document}"}'
 	@echo
 
 # ---- Tests and checks ------------------------------------------------------
