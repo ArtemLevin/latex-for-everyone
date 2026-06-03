@@ -49,6 +49,13 @@ def test_root():
     assert response.status_code == 200
 
 
+def test_request_logging_adds_request_id_header():
+    response = client.get("/api/health", headers={"X-Request-ID": "test-request-id"})
+    assert response.status_code == 200
+    assert response.headers["X-Request-ID"] == "test-request-id"
+    assert "X-Process-Time" in response.headers
+
+
 def test_create_project():
     response = client.post(
         "/api/projects/",
@@ -362,6 +369,28 @@ def test_generation_presets():
     assert len(presets) >= 1
     assert presets[0]["id"] == "ege_math_11_hard"
     assert presets[0]["defaults"]["gamma_code"] == 4
+
+
+def test_generation_prompt_logs_safe_summary(caplog, monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_LOG_PROMPT_PREVIEW_CHARS", 0)
+    caplog.set_level("INFO", logger="app.routers.generation")
+
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {"topic": "Логарифмы"},
+            "materials": "Решить log_2(x)=3.",
+        },
+    )
+    assert response.status_code == 200
+
+    messages = "\n".join(record.getMessage() for record in caplog.records)
+    assert "ai prompt preview requested" in messages
+    assert "ai prompt built" in messages
+    assert "topic=Логарифмы" in messages
+    assert "prompt_sha=" in messages
 
 
 def test_generation_prompt_preview_includes_fields_and_materials():

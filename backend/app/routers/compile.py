@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
 from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, RawCompileRequest
@@ -7,6 +9,8 @@ from app.database import get_db
 from fastapi.responses import FileResponse
 from pathlib import Path
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -18,8 +22,15 @@ async def compile_project(
     request: CompileRequest,
     db: Session = Depends(get_db),
 ):
+    logger.info(
+        "compile project requested project_id=%s has_main_content=%s override_files=%s",
+        request.project_id,
+        bool(request.main_file_content),
+        len(request.all_files or {}),
+    )
     project = db.query(Project).filter(Project.id == request.project_id).first()
     if not project:
+        logger.warning("compile project not found project_id=%s", request.project_id)
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Get all files
@@ -44,6 +55,7 @@ async def compile_project(
             main_content = files.get("main.tex", "")
 
     if not main_content:
+        logger.warning("compile project missing main file project_id=%s files=%s", request.project_id, len(files))
         raise HTTPException(status_code=400, detail="No main LaTeX file found")
 
     # Create history record
@@ -53,6 +65,7 @@ async def compile_project(
     )
     db.add(history)
     db.flush()
+    logger.info("compile history created project_id=%s history_id=%s files=%s", request.project_id, history.id, len(files))
 
     # Compile
     result = compiler.compile(main_content, files)
@@ -63,6 +76,14 @@ async def compile_project(
     history.error = result.get("error")
     history.compile_time = result.get("compile_time")
     db.commit()
+    logger.info(
+        "compile project completed project_id=%s history_id=%s status=%s compile_time=%s pdf_url=%s",
+        request.project_id,
+        history.id,
+        result["status"],
+        result.get("compile_time"),
+        result.get("pdf_url"),
+    )
 
     return CompileResponse(
         status=result["status"],
@@ -76,7 +97,14 @@ async def compile_project(
 
 @router.post("/raw", response_model=CompileResponse)
 async def compile_raw_latex(request: RawCompileRequest):
+    logger.info("compile raw requested content_chars=%s files=%s", len(request.content), len(request.files))
     result = compiler.compile(request.content, request.files)
+    logger.info(
+        "compile raw completed status=%s compile_time=%s pdf_url=%s",
+        result["status"],
+        result.get("compile_time"),
+        result.get("pdf_url"),
+    )
 
     return CompileResponse(
         status=result["status"],
@@ -118,13 +146,17 @@ async def get_compile_history_detail(
 
 @router.get("/download/{filename}")
 async def download_compiled_pdf(filename: str):
+    logger.info("compile pdf download requested filename=%s", filename)
     if not filename.endswith(".pdf") or Path(filename).name != filename:
+        logger.warning("compile pdf download rejected invalid filename=%s", filename)
         raise HTTPException(status_code=400, detail="Invalid PDF filename")
 
     filepath = Path(settings.COMPILE_WORK_DIR) / "pdfs" / filename
     if not filepath.exists():
+        logger.warning("compile pdf download missing filename=%s path=%s", filename, filepath)
         raise HTTPException(status_code=404, detail="PDF not found")
 
+    logger.info("compile pdf download served filename=%s size=%s", filename, filepath.stat().st_size)
     return FileResponse(
         path=str(filepath),
         filename=filename,

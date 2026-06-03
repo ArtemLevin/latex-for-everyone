@@ -1,9 +1,13 @@
+import logging
 import re
+import time
 from typing import Any
 
 import httpx
 
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class AIGenerationError(Exception):
@@ -37,27 +41,64 @@ class AIGenerationService:
     """Provider adapter for AI-backed LaTeX generation."""
 
     def resolve_provider_model(self, provider: str | None = None, model: str | None = None) -> tuple[str, str]:
-        resolved_provider = (provider or settings.AI_PROVIDER).strip().lower()
+        requested_provider = provider or settings.AI_PROVIDER
+        resolved_provider = requested_provider.strip().lower()
         if resolved_provider == "ollama":
-            return "ollama", model or settings.OLLAMA_MODEL
-        if resolved_provider in {"openai", "vendor", "openai_compatible"}:
-            return "openai_compatible", model or settings.AI_VENDOR_MODEL
-        raise AIGenerationError(f"Unsupported AI provider: {provider}", status_code=400)
+            resolved = ("ollama", model or settings.OLLAMA_MODEL)
+        elif resolved_provider in {"openai", "vendor", "openai_compatible"}:
+            resolved = ("openai_compatible", model or settings.AI_VENDOR_MODEL)
+        else:
+            logger.warning("ai provider unsupported provider=%s", provider)
+            raise AIGenerationError(f"Unsupported AI provider: {provider}", status_code=400)
+        logger.debug(
+            "ai provider resolved requested_provider=%s requested_model=%s provider=%s model=%s",
+            requested_provider,
+            model or "default",
+            resolved[0],
+            resolved[1],
+        )
+        return resolved
 
     async def get_provider_status(self, provider: str | None = None, model: str | None = None) -> dict[str, object]:
         resolved_provider, resolved_model = self.resolve_provider_model(provider, model)
+        logger.info("ai provider status start provider=%s model=%s", resolved_provider, resolved_model)
+        started_at = time.perf_counter()
         if resolved_provider == "ollama":
-            return await self._get_ollama_status(resolved_model)
-        return await self._get_openai_compatible_status(resolved_model)
+            status = await self._get_ollama_status(resolved_model)
+        else:
+            status = await self._get_openai_compatible_status(resolved_model)
+        logger.info(
+            "ai provider status result provider=%s model=%s available=%s model_available=%s duration_ms=%.2f",
+            resolved_provider,
+            resolved_model,
+            status.get("available"),
+            status.get("model_available"),
+            (time.perf_counter() - started_at) * 1000,
+        )
+        return status
 
     async def generate(self, prompt: str, provider: str | None = None, model: str | None = None) -> tuple[str, str, str]:
         resolved_provider, resolved_model = self.resolve_provider_model(provider, model)
+        logger.info(
+            "ai generation provider call start provider=%s model=%s prompt_chars=%s",
+            resolved_provider,
+            resolved_model,
+            len(prompt),
+        )
+        started_at = time.perf_counter()
 
         if resolved_provider == "ollama":
             output = await self._generate_ollama(prompt, resolved_model)
         else:
             output = await self._generate_openai_compatible(prompt, resolved_model)
 
+        logger.info(
+            "ai generation provider call completed provider=%s model=%s output_chars=%s duration_ms=%.2f",
+            resolved_provider,
+            resolved_model,
+            len(output),
+            (time.perf_counter() - started_at) * 1000,
+        )
         return output, resolved_provider, resolved_model
 
     async def _get_ollama_status(self, model: str) -> dict[str, object]:
@@ -68,6 +109,7 @@ class AIGenerationService:
                 response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("ollama status unavailable model=%s url=%s error=%s", model, url, exc)
             return {
                 "provider": "ollama",
                 "model": model,
@@ -90,6 +132,7 @@ class AIGenerationService:
 
     async def _get_openai_compatible_status(self, model: str) -> dict[str, object]:
         if not settings.AI_VENDOR_API_KEY:
+            logger.warning("vendor status skipped model=%s reason=missing_api_key", model)
             return {
                 "provider": "openai_compatible",
                 "model": model,
@@ -107,6 +150,7 @@ class AIGenerationService:
                 response.raise_for_status()
             data = response.json()
         except (httpx.HTTPError, ValueError) as exc:
+            logger.warning("vendor status unavailable model=%s base_url=%s error=%s", model, settings.AI_VENDOR_BASE_URL, exc)
             return {
                 "provider": "openai_compatible",
                 "model": model,
@@ -134,11 +178,13 @@ class AIGenerationService:
             "prompt": prompt,
             "stream": False,
         }
+        logger.info("ollama generation request model=%s url=%s prompt_chars=%s", model, url, len(prompt))
         try:
             async with httpx.AsyncClient(timeout=settings.AI_GENERATION_TIMEOUT) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
         except httpx.HTTPError as exc:
+            logger.exception("ollama generation http error model=%s url=%s", model, url)
             raise AIGenerationError(f"Ollama generation failed: {exc}") from exc
 
         try:
@@ -148,11 +194,14 @@ class AIGenerationService:
 
         generated = data.get("response")
         if not isinstance(generated, str) or not generated.strip():
+            logger.warning("ollama generation empty response model=%s", model)
             raise AIGenerationError("Ollama returned an empty generation response")
+        logger.info("ollama generation response model=%s output_chars=%s", model, len(generated))
         return generated
 
     async def _generate_openai_compatible(self, prompt: str, model: str) -> str:
         if not settings.AI_VENDOR_API_KEY:
+            logger.warning("vendor generation rejected model=%s reason=missing_api_key", model)
             raise AIGenerationError("AI_VENDOR_API_KEY is required for vendor generation", status_code=400)
 
         url = f"{settings.AI_VENDOR_BASE_URL.rstrip('/')}/chat/completions"
@@ -169,11 +218,13 @@ class AIGenerationService:
             "Content-Type": "application/json",
         }
 
+        logger.info("vendor generation request model=%s base_url=%s prompt_chars=%s", model, settings.AI_VENDOR_BASE_URL, len(prompt))
         try:
             async with httpx.AsyncClient(timeout=settings.AI_GENERATION_TIMEOUT) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
         except httpx.HTTPError as exc:
+            logger.exception("vendor generation http error model=%s base_url=%s", model, settings.AI_VENDOR_BASE_URL)
             raise AIGenerationError(f"Vendor generation failed: {exc}") from exc
 
         try:
@@ -187,5 +238,7 @@ class AIGenerationService:
             raise AIGenerationError("Vendor returned an unexpected generation response") from exc
 
         if not isinstance(generated, str) or not generated.strip():
+            logger.warning("vendor generation empty response model=%s", model)
             raise AIGenerationError("Vendor returned an empty generation response")
+        logger.info("vendor generation response model=%s output_chars=%s", model, len(generated))
         return generated

@@ -244,12 +244,37 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_MAX_PROMPT_CHARS` | `60000` | Maximum generated prompt size before a provider call is allowed |
 | `AI_MAX_RAW_OUTPUT_CHARS` | `200000` | Maximum provider raw output / LaTeX validation payload size |
 | `AI_EXPOSE_PROVIDER_ERRORS` | `false` | Expose upstream provider error details to clients; keep `false` in production |
+| `LOG_LEVEL` | `INFO` | Backend log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
+| `LOG_FORMAT` | timestamped text format | Python logging format; includes `request_id` by default |
+| `LOG_SLOW_REQUEST_MS` | `1000` | Requests at or above this duration are logged as warnings |
+| `AI_LOG_PROMPT_PREVIEW_CHARS` | `500` | Max compact prompt preview characters in AI logs; set `0` to disable previews |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Default Ollama model for LaTeX generation |
 | `AI_VENDOR_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible vendor API base URL |
 | `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
+
+## Logging and observability
+
+The backend writes structured text logs to stdout/stderr so they are visible in local terminals, Docker logs and process managers.
+
+What is logged:
+
+- every HTTP request start/completion with method, path, status, duration, client and `X-Request-ID`;
+- slow requests as warnings based on `LOG_SLOW_REQUEST_MS`;
+- AI prompt preview/generation events with provider, model, topic, lengths, SHA-256 short digests and validation counts;
+- provider status checks and provider HTTP failures without logging API keys;
+- rate-limit and payload-limit rejections for AI endpoints.
+
+Useful local commands:
+
+```bash
+make backend
+make docker-logs
+```
+
+To correlate a browser/API call with backend logs, pass or inspect `X-Request-ID`; the backend echoes it in the response and includes it in log lines.
 
 ## Manual AI generation smoke test
 

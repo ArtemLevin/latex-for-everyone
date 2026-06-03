@@ -48,6 +48,7 @@
 
 - Заменить in-memory limiter на Redis/DB-backed limiter для multi-process deployment.
 - Делать лимиты user/project scoped после появления авторизации.
+- Заменить stdout-логирование на централизованный sink (ELK/Loki/OpenTelemetry) для production.
 - Добавить audit-log по заблокированным generation запросам.
 - Добавить отдельные лимиты для `/generate` и дешевых endpoint-ов (`/prompt`, `/validate`, `/providers/status`).
 

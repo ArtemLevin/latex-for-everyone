@@ -47,6 +47,12 @@ class Settings(BaseSettings):
     AI_VENDOR_MODEL: str = "gpt-4o-mini"
     AI_VENDOR_TEMPERATURE: float = 0.2
 
+    # Logging
+    LOG_LEVEL: str = "INFO"
+    LOG_FORMAT: str = "%(asctime)s %(levelname)s [%(name)s] [request_id=%(request_id)s] %(message)s"
+    LOG_SLOW_REQUEST_MS: int = 1000
+    AI_LOG_PROMPT_PREVIEW_CHARS: int = 500
+
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     COMPILE_RATE_LIMIT_PER_HOUR: int = 100
