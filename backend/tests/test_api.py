@@ -248,6 +248,12 @@ def test_frontend_generation_ui_contract():
     assert "generateLatexFromAi" in content
     assert "validateCurrentLatex" in content
     assert "checkGenerationProvider" in content
+    assert 'id="generationInsertMode"' in content
+    assert 'id="generationFilename"' in content
+    assert "copyGenerationPrompt" in content
+    assert "copyGenerationRawOutput" in content
+    assert "applyGeneratedLatex" in content
+    assert "createFileWithContent" in content
     assert "'/generation/validate'" in content
     assert "generation/providers/status" in content
     assert "'/generation/generate'" in content

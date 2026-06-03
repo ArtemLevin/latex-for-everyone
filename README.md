@@ -143,7 +143,7 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 5. autosaves the current file with `PUT /api/files/{file_id}`;
 6. compiles with `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
-8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, validates returned `latex_code`, inserts it into the active `.tex` file, saves it, and starts compilation.
+8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, validates returned `latex_code`, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
 
 ### Configuring the API base URL
 
@@ -301,12 +301,13 @@ Use this checklist to verify the complete generation path manually after the bac
 3. Fill at least **Тема**; optionally fill **ФИО ученика** and **Материалы / условия задач**.
 4. Click **Проверить prompt** and confirm the prompt preview status is successful.
 5. Click **Проверить провайдера** and confirm the selected provider/model is available.
-6. Click **Сгенерировать и вставить**.
-7. Confirm generated LaTeX appears in the active `.tex` editor and begins with `\documentclass`.
-8. Click **Проверить .tex** if you want to validate the current editor content again.
-9. Compile with **Компиляция** or `Ctrl+Enter`.
-10. Confirm the PDF preview loads when `pdflatex` is available, or review the compile error panel if LaTeX needs correction.
-11. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
+6. Choose where to place the result: create a new `generated.tex`, replace the active file, or append to the active file.
+7. Click **Сгенерировать и вставить**.
+8. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`.
+9. Click **Проверить .tex** if you want to validate the current editor content again.
+10. Compile with **Компиляция** or `Ctrl+Enter`.
+11. Confirm the PDF preview loads when `pdflatex` is available, or review the compile error panel if LaTeX needs correction.
+12. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands
 

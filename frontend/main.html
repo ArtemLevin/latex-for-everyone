@@ -923,6 +923,31 @@
             color: var(--accent-success);
         }
 
+        .generation-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+
+        .generation-details ul {
+            margin: 6px 0 0 18px;
+            padding: 0;
+        }
+
+        .generation-details.error {
+            color: var(--accent-danger);
+        }
+
+        .generation-details.success {
+            color: var(--accent-success);
+        }
+
+        .generation-hint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 4px;
+        }
+
         @media (max-width: 768px) {
             .generation-grid {
                 grid-template-columns: 1fr;
@@ -1789,12 +1814,28 @@
                         <label for="generationMaterials">Материалы / условия задач</label>
                         <textarea id="generationMaterials" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
                     </div>
+                    <div class="generation-field">
+                        <label for="generationInsertMode">Куда вставить результат</label>
+                        <select id="generationInsertMode">
+                            <option value="new" selected>Создать новый файл</option>
+                            <option value="replace">Заменить текущий файл</option>
+                            <option value="append">Вставить в конец текущего файла</option>
+                        </select>
+                        <div class="generation-hint">Замена текущего файла потребует подтверждения.</div>
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationFilename">Имя нового файла</label>
+                        <input id="generationFilename" type="text" value="generated.tex" placeholder="generated.tex">
+                    </div>
                 </div>
                 <div id="generationStatus" class="generation-status">Заполните тему и нажмите «Сгенерировать и вставить».</div>
+                <div id="generationDetails" class="generation-details"></div>
                 <div class="generation-actions">
-                    <button class="btn btn-secondary" onclick="previewGenerationPrompt()">Проверить prompt</button>
-                    <button class="btn btn-secondary" onclick="checkGenerationProvider()">Проверить провайдера</button>
-                    <button class="btn btn-secondary" onclick="validateCurrentLatex()">Проверить .tex</button>
+                    <button class="btn btn-secondary" id="previewPromptBtn" onclick="previewGenerationPrompt()">Проверить prompt</button>
+                    <button class="btn btn-secondary" onclick="copyGenerationPrompt()">Скопировать prompt</button>
+                    <button class="btn btn-secondary" id="checkProviderBtn" onclick="checkGenerationProvider()">Проверить провайдера</button>
+                    <button class="btn btn-secondary" id="validateLatexBtn" onclick="validateCurrentLatex()">Проверить .tex</button>
+                    <button class="btn btn-secondary" onclick="copyGenerationRawOutput()">Скопировать raw output</button>
                     <button class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
                     <button class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
                         <span>Сгенерировать и вставить</span>
@@ -1958,6 +1999,8 @@
     let compileTimeout = null;
     let saveTimeout = null;
     let generationPresets = [];
+    let lastGenerationPrompt = '';
+    let lastGenerationRawOutput = '';
     let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
@@ -3250,6 +3293,41 @@ $$E = mc^2$$
         status.className = `generation-status ${type}`.trim();
     }
 
+    function setGenerationDetails(items = [], type = '') {
+        const details = document.getElementById('generationDetails');
+        if (!details) return;
+        details.className = `generation-details ${type}`.trim();
+        if (!items.length) {
+            details.innerHTML = '';
+            return;
+        }
+        details.innerHTML = `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
+    }
+
+    function setButtonLoading(id, isLoading, loadingText = 'Выполняется...') {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        if (isLoading) {
+            btn.dataset.originalText = btn.textContent.trim();
+            btn.disabled = true;
+            btn.textContent = loadingText;
+        } else {
+            btn.disabled = false;
+            if (btn.dataset.originalText) {
+                btn.textContent = btn.dataset.originalText;
+            }
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
     function updateGenerationModelDefault() {
         const provider = getGenerationFieldValue('generationProvider');
         const modelInput = document.getElementById('generationModel');
@@ -3265,6 +3343,7 @@ $$E = mc^2$$
     async function showGenerationModal() {
         const modal = document.getElementById('generationModal');
         modal.classList.add('active');
+        setGenerationDetails();
 
         if (backendAvailable) {
             try {
@@ -3326,18 +3405,25 @@ $$E = mc^2$$
             return;
         }
 
+        setButtonLoading('previewPromptBtn', true, 'Собираю...');
         try {
+            setGenerationDetails();
             setGenerationStatus('Собираю prompt...');
             const result = await apiRequest('/generation/prompt', {
                 method: 'POST',
                 body: JSON.stringify(collectGenerationRequest())
             });
-            const warnings = result.warnings?.length ? ` Предупреждения: ${result.warnings.join(' ')}` : '';
-            setGenerationStatus(`Prompt готов: ${result.prompt.length} символов.${warnings}`, result.warnings?.length ? '' : 'success');
+            lastGenerationPrompt = result.prompt || '';
+            const warnings = result.warnings || [];
+            setGenerationStatus(`Prompt готов: ${lastGenerationPrompt.length} символов.`, warnings.length ? '' : 'success');
+            setGenerationDetails(warnings, warnings.length ? '' : 'success');
             showToast('Prompt успешно собран backend-ом', 'success');
         } catch (error) {
             setGenerationStatus(`Ошибка prompt preview: ${error.message}`, 'error');
+            setGenerationDetails([error.message], 'error');
             showToast(`Ошибка prompt preview: ${error.message}`, 'error');
+        } finally {
+            setButtonLoading('previewPromptBtn', false);
         }
     }
 
@@ -3347,23 +3433,35 @@ $$E = mc^2$$
         return `${validation.valid ? 'LaTeX прошел структурную проверку.' : 'LaTeX не прошел структурную проверку.'}${errors}${warnings}`;
     }
 
+    function renderValidationDetails(validation) {
+        const items = [];
+        (validation.errors || []).forEach(error => items.push(`Ошибка: ${error}`));
+        (validation.warnings || []).forEach(warning => items.push(`Предупреждение: ${warning}`));
+        setGenerationDetails(items, validation.valid ? 'success' : 'error');
+    }
+
     async function validateCurrentLatex() {
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: проверка .tex невозможна.', 'error');
             return;
         }
 
+        setButtonLoading('validateLatexBtn', true, 'Проверяю...');
         try {
             setGenerationStatus('Проверяю текущий .tex...');
             const validation = await apiRequest('/generation/validate', {
                 method: 'POST',
                 body: JSON.stringify({ latex_code: editor.getValue() })
             });
-            setGenerationStatus(formatValidation(validation), validation.valid ? 'success' : 'error');
+            setGenerationStatus(validation.valid ? 'LaTeX прошел проверку.' : 'LaTeX требует исправлений.', validation.valid ? 'success' : 'error');
+            renderValidationDetails(validation);
             showToast(validation.valid ? 'LaTeX прошел проверку' : 'LaTeX требует исправлений', validation.valid ? 'success' : 'error');
         } catch (error) {
             setGenerationStatus(`Ошибка проверки .tex: ${error.message}`, 'error');
+            setGenerationDetails([error.message], 'error');
             showToast(`Ошибка проверки .tex: ${error.message}`, 'error');
+        } finally {
+            setButtonLoading('validateLatexBtn', false);
         }
     }
 
@@ -3376,16 +3474,125 @@ $$E = mc^2$$
         const provider = encodeURIComponent(getGenerationFieldValue('generationProvider') || 'ollama');
         const model = encodeURIComponent(getGenerationFieldValue('generationModel'));
         const suffix = model ? `&model=${model}` : '';
+        setButtonLoading('checkProviderBtn', true, 'Проверяю...');
         try {
+            setGenerationDetails();
             setGenerationStatus('Проверяю AI-provider...');
             const status = await apiRequest(`/generation/providers/status?provider=${provider}${suffix}`);
             const modelInfo = status.model_available === false ? ' Модель не найдена.' : '';
+            const details = [
+                `Провайдер: ${status.provider}`,
+                `Модель: ${status.model}`,
+                `Доступен: ${status.available ? 'да' : 'нет'}`,
+                `Модель доступна: ${status.model_available === null ? 'неизвестно' : (status.model_available ? 'да' : 'нет')}`
+            ];
             setGenerationStatus(`${status.message}${modelInfo}`, status.available ? 'success' : 'error');
+            setGenerationDetails(details, status.available ? 'success' : 'error');
             showToast(status.available ? 'AI-provider доступен' : 'AI-provider недоступен', status.available ? 'success' : 'error');
         } catch (error) {
             setGenerationStatus(`Ошибка проверки провайдера: ${error.message}`, 'error');
+            setGenerationDetails([error.message], 'error');
             showToast(`Ошибка проверки провайдера: ${error.message}`, 'error');
+        } finally {
+            setButtonLoading('checkProviderBtn', false);
         }
+    }
+
+    function getGenerationInsertMode() {
+        return getGenerationFieldValue('generationInsertMode') || 'new';
+    }
+
+    function ensureTexFilename(name) {
+        const fallback = 'generated.tex';
+        const cleaned = (name || fallback).trim().replace(/[\\/]/g, '_');
+        return cleaned.endsWith('.tex') ? cleaned : `${cleaned}.tex`;
+    }
+
+    function uniqueFileName(baseName) {
+        const safeName = ensureTexFilename(baseName);
+        const existingNames = new Set(Object.values(files).map(file => file.name));
+        if (!existingNames.has(safeName)) return safeName;
+        const stem = safeName.replace(/\.tex$/i, '');
+        let index = 2;
+        let candidate = `${stem}_${index}.tex`;
+        while (existingNames.has(candidate)) {
+            index += 1;
+            candidate = `${stem}_${index}.tex`;
+        }
+        return candidate;
+    }
+
+    async function createFileWithContent(name, content) {
+        const filename = uniqueFileName(name);
+        if (backendAvailable && currentProject) {
+            const file = await apiRequest(`/files/project/${currentProject.id}`, {
+                method: 'POST',
+                body: JSON.stringify({ name: filename, content, is_main: false })
+            });
+            files[file.id] = file;
+            await switchFile(file.id);
+            return file;
+        }
+
+        const id = 'file_' + Date.now();
+        files[id] = { id, name: filename, content, is_main: false };
+        await switchFile(id);
+        return files[id];
+    }
+
+    async function applyGeneratedLatex(latexCode) {
+        const mode = getGenerationInsertMode();
+        const currentName = files[currentFileId]?.name || 'текущий файл';
+
+        if (mode === 'replace') {
+            if (!confirm(`Заменить содержимое файла "${currentName}" сгенерированным LaTeX?`)) {
+                setGenerationStatus('Вставка отменена пользователем.');
+                return false;
+            }
+            suppressEditorChange = true;
+            editor.setValue(latexCode);
+            suppressEditorChange = false;
+            files[currentFileId].content = latexCode;
+            updateWordCount();
+            await saveCurrentFile();
+            return true;
+        }
+
+        if (mode === 'append') {
+            const separator = editor.getValue().trim() ? '\n\n' : '';
+            suppressEditorChange = true;
+            editor.setValue(`${editor.getValue()}${separator}${latexCode}`);
+            suppressEditorChange = false;
+            files[currentFileId].content = editor.getValue();
+            updateWordCount();
+            await saveCurrentFile();
+            return true;
+        }
+
+        await createFileWithContent(getGenerationFieldValue('generationFilename'), latexCode);
+        updateWordCount();
+        return true;
+    }
+
+    async function copyTextToClipboard(text, successMessage, emptyMessage) {
+        if (!text) {
+            showToast(emptyMessage, 'error');
+            return;
+        }
+        try {
+            await navigator.clipboard.writeText(text);
+            showToast(successMessage, 'success');
+        } catch (error) {
+            showToast(`Не удалось скопировать: ${error.message}`, 'error');
+        }
+    }
+
+    async function copyGenerationPrompt() {
+        await copyTextToClipboard(lastGenerationPrompt, 'Prompt скопирован', 'Сначала выполните «Проверить prompt»');
+    }
+
+    async function copyGenerationRawOutput() {
+        await copyTextToClipboard(lastGenerationRawOutput, 'Raw output скопирован', 'Raw output появится после генерации');
     }
 
     async function generateLatexFromAi() {
@@ -3397,8 +3604,10 @@ $$E = mc^2$$
 
         const btn = document.getElementById('generateLatexBtn');
         const previousContent = editor.getValue();
-        btn.disabled = true;
+        const previousFileId = currentFileId;
+        setButtonLoading('generateLatexBtn', true, 'Генерация...');
         setGenerationStatus('Генерация LaTeX через AI-provider...');
+        setGenerationDetails();
         document.getElementById('statusText').textContent = 'AI-генерация...';
 
         try {
@@ -3407,9 +3616,13 @@ $$E = mc^2$$
                 method: 'POST',
                 body: JSON.stringify(collectGenerationRequest())
             });
+            lastGenerationRawOutput = result.raw_output || '';
 
             if (!result.latex_code || !result.latex_code.includes('\\documentclass')) {
                 throw new Error('Модель не вернула компилируемый LaTeX от \\documentclass');
+            }
+            if (result.validation) {
+                renderValidationDetails(result.validation);
             }
             if (result.validation && !result.validation.valid) {
                 throw new Error(formatValidation(result.validation));
@@ -3418,26 +3631,28 @@ $$E = mc^2$$
                 setGenerationStatus(formatValidation(result.validation));
             }
 
-            suppressEditorChange = true;
-            editor.setValue(result.latex_code);
-            suppressEditorChange = false;
-            files[currentFileId].content = result.latex_code;
-            updateWordCount();
-            await saveCurrentFile();
+            const applied = await applyGeneratedLatex(result.latex_code);
+            if (!applied) return;
+
             closeModal('generationModal');
             showToast(`LaTeX сгенерирован (${result.provider}/${result.model || 'default'})`, 'success');
             document.getElementById('statusText').textContent = 'AI-документ вставлен';
             compileLatex();
         } catch (error) {
-            suppressEditorChange = true;
-            editor.setValue(previousContent);
-            suppressEditorChange = false;
-            files[currentFileId].content = previousContent;
+            if (getGenerationInsertMode() !== 'new' && files[previousFileId]) {
+                currentFileId = previousFileId;
+                suppressEditorChange = true;
+                editor.setValue(previousContent);
+                suppressEditorChange = false;
+                files[currentFileId].content = previousContent;
+                renderFileTree();
+            }
             setGenerationStatus(`Ошибка генерации: ${error.message}`, 'error');
+            setGenerationDetails([error.message], 'error');
             document.getElementById('statusText').textContent = 'Ошибка AI-генерации';
             showToast(`Ошибка AI-генерации: ${error.message}`, 'error');
         } finally {
-            btn.disabled = false;
+            setButtonLoading('generateLatexBtn', false);
         }
     }
 
