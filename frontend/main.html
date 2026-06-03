@@ -1793,6 +1793,7 @@
                 <div id="generationStatus" class="generation-status">Заполните тему и нажмите «Сгенерировать и вставить».</div>
                 <div class="generation-actions">
                     <button class="btn btn-secondary" onclick="previewGenerationPrompt()">Проверить prompt</button>
+                    <button class="btn btn-secondary" onclick="validateCurrentLatex()">Проверить .tex</button>
                     <button class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
                     <button class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
                         <span>Сгенерировать и вставить</span>
@@ -3339,6 +3340,32 @@ $$E = mc^2$$
         }
     }
 
+    function formatValidation(validation) {
+        const errors = validation.errors?.length ? ` Ошибки: ${validation.errors.join(' ')}` : '';
+        const warnings = validation.warnings?.length ? ` Предупреждения: ${validation.warnings.join(' ')}` : '';
+        return `${validation.valid ? 'LaTeX прошел структурную проверку.' : 'LaTeX не прошел структурную проверку.'}${errors}${warnings}`;
+    }
+
+    async function validateCurrentLatex() {
+        if (!backendAvailable) {
+            setGenerationStatus('Backend недоступен: проверка .tex невозможна.', 'error');
+            return;
+        }
+
+        try {
+            setGenerationStatus('Проверяю текущий .tex...');
+            const validation = await apiRequest('/generation/validate', {
+                method: 'POST',
+                body: JSON.stringify({ latex_code: editor.getValue() })
+            });
+            setGenerationStatus(formatValidation(validation), validation.valid ? 'success' : 'error');
+            showToast(validation.valid ? 'LaTeX прошел проверку' : 'LaTeX требует исправлений', validation.valid ? 'success' : 'error');
+        } catch (error) {
+            setGenerationStatus(`Ошибка проверки .tex: ${error.message}`, 'error');
+            showToast(`Ошибка проверки .tex: ${error.message}`, 'error');
+        }
+    }
+
     async function generateLatexFromAi() {
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
@@ -3361,6 +3388,12 @@ $$E = mc^2$$
 
             if (!result.latex_code || !result.latex_code.includes('\\documentclass')) {
                 throw new Error('Модель не вернула компилируемый LaTeX от \\documentclass');
+            }
+            if (result.validation && !result.validation.valid) {
+                throw new Error(formatValidation(result.validation));
+            }
+            if (result.validation?.warnings?.length) {
+                setGenerationStatus(formatValidation(result.validation));
             }
 
             suppressEditorChange = true;

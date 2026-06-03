@@ -246,6 +246,8 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationMaterials"' in content
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
+    assert "validateCurrentLatex" in content
+    assert "'/generation/validate'" in content
     assert "'/generation/generate'" in content
 
 
@@ -394,6 +396,29 @@ def test_generation_prompt_preview_warns_without_topic_or_materials():
     assert "Материалы не переданы" in data["prompt"]
 
 
+def test_generation_validate_rejects_markdown_and_missing_document_end():
+    response = client.post(
+        "/api/generation/validate",
+        json={"latex_code": "```latex\n\\documentclass{article}\n\\begin{document}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is False
+    assert any("markdown" in error for error in data["errors"])
+    assert any("\\end{document}" in error for error in data["errors"])
+
+
+def test_generation_validate_accepts_minimal_document_with_warnings():
+    response = client.post(
+        "/api/generation/validate",
+        json={"latex_code": r"\documentclass{article}\begin{document}Ok\end{document}"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is True
+    assert data["warnings"]
+
+
 def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
     from app.routers import generation as generation_router
 
@@ -431,6 +456,8 @@ def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
     assert data["model"] == "qwen2.5:14b"
     assert data["latex_code"] == r"\documentclass{article}\begin{document}Generated\end{document}"
     assert data["raw_output"].startswith("```latex")
+    assert data["validation"]["valid"] is True
+    assert data["validation"]["warnings"]
 
 
 def test_generation_generate_provider_error_returns_bad_gateway(monkeypatch):

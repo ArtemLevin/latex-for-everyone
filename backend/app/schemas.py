@@ -149,9 +149,20 @@ class GenerationPromptResponse(BaseModel):
     model: Optional[str] = None
 
 
+class GenerationValidationRequest(BaseModel):
+    latex_code: str
+
+
+class GenerationValidationResponse(BaseModel):
+    valid: bool
+    errors: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class GenerationResultResponse(GenerationPromptResponse):
     latex_code: str
     raw_output: str
+    validation: GenerationValidationResponse
 
 
 class GenerationPresetResponse(BaseModel):

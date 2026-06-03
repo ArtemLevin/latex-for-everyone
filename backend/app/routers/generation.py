@@ -5,9 +5,12 @@ from app.schemas import (
     GenerationPromptResponse,
     GenerationRequest,
     GenerationResultResponse,
+    GenerationValidationRequest,
+    GenerationValidationResponse,
 )
 from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
 from app.services.prompt_builder import build_latex_generation_prompt
+from app.services.latex_validator import validate_latex_document
 
 router = APIRouter()
 
@@ -59,6 +62,11 @@ async def preview_generation_prompt(request: GenerationRequest):
     return build_generation_prompt_response(request)
 
 
+@router.post("/validate", response_model=GenerationValidationResponse)
+async def validate_generated_latex(request: GenerationValidationRequest):
+    return GenerationValidationResponse(**validate_latex_document(request.latex_code))
+
+
 @router.post("/generate", response_model=GenerationResultResponse)
 async def generate_latex(request: GenerationRequest):
     prompt_response = build_generation_prompt_response(request)
@@ -72,12 +80,16 @@ async def generate_latex(request: GenerationRequest):
     except AIGenerationError as exc:
         raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
 
+    latex_code = extract_latex_code(raw_output)
+    validation = validate_latex_document(latex_code)
+
     return GenerationResultResponse(
         status="success",
         prompt=prompt_response.prompt,
         warnings=prompt_response.warnings,
         provider=provider,
         model=model,
-        latex_code=extract_latex_code(raw_output),
+        latex_code=latex_code,
         raw_output=raw_output,
+        validation=GenerationValidationResponse(**validation),
     )

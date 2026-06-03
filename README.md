@@ -140,7 +140,7 @@ make migration MSG="add users table"
 5. autosaves the current file with `PUT /api/files/{file_id}`;
 6. compiles with `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
-8. opens the AI generation dialog, sends prompt fields to `/api/generation/generate`, inserts returned `latex_code` into the active `.tex` file, saves it, and starts compilation.
+8. opens the AI generation dialog, sends prompt fields to `/api/generation/generate`, validates returned `latex_code`, inserts it into the active `.tex` file, saves it, and starts compilation.
 
 ### Configuring the API base URL
 
@@ -212,6 +212,7 @@ If the API lives on a different host, configure `window.LATEXED_API_BASE_URL` or
 | GET | `/api/templates/{id}` | Get template details |
 | GET | `/api/generation/presets` | List generation presets |
 | POST | `/api/generation/prompt` | Preview the AI LaTeX generation prompt |
+| POST | `/api/generation/validate` | Validate generated or edited LaTeX structure before compile |
 | POST | `/api/generation/generate` | Generate LaTeX through Ollama or an OpenAI-compatible vendor |
 
 Deprecated compatibility routes are still available for compile history:
