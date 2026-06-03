@@ -604,6 +604,32 @@ def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
     assert data["validation"]["warnings"]
 
 
+def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError(
+            "Ollama generation timed out after 120 seconds. Check that Ollama is running, the model is pulled and loaded, or increase AI_GENERATION_TIMEOUT.",
+            status_code=504,
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
+            "fields": {"topic": "Логарифмы"},
+            "materials": "Решить log_2(x)=3.",
+        },
+    )
+    assert response.status_code == 504
+    assert "timed out after 120 seconds" in response.json()["detail"]
+    assert "AI_GENERATION_TIMEOUT" in response.json()["detail"]
+
+
 def test_generation_generate_provider_error_returns_bad_gateway(monkeypatch):
     from app.routers import generation as generation_router
     from app.services.ai_generation import AIGenerationError

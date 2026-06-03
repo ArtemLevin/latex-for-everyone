@@ -82,7 +82,7 @@ def enforce_text_limit(label: str, value: str, max_chars: int) -> None:
 
 
 def provider_error_detail(exc: AIGenerationError) -> str:
-    if settings.DEBUG or settings.AI_EXPOSE_PROVIDER_ERRORS or exc.status_code < 500:
+    if settings.DEBUG or settings.AI_EXPOSE_PROVIDER_ERRORS or exc.status_code < 500 or exc.status_code == 504:
         return str(exc)
     return "AI provider request failed. Check backend logs or provider configuration."
 
@@ -161,11 +161,12 @@ async def get_generation_provider_status(
     try:
         status = await ai_generator.get_provider_status(provider=provider, model=model)
     except AIGenerationError as exc:
-        logger.exception(
-            "ai provider status failed provider=%s model=%s status_code=%s",
+        logger.warning(
+            "ai provider status failed provider=%s model=%s status_code=%s error=%s",
             provider or "default",
             model or "default",
             exc.status_code,
+            exc,
         )
         raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
     logger.info(
@@ -215,13 +216,14 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
             model=generation_request.model,
         )
     except AIGenerationError as exc:
-        logger.exception(
-            "ai generation failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f",
+        logger.warning(
+            "ai generation failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f error=%s",
             generation_request.provider or "default",
             generation_request.model or "default",
             exc.status_code,
             text_digest(prompt_response.prompt),
             (time.perf_counter() - started_at) * 1000,
+            exc,
         )
         raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
 

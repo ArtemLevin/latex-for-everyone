@@ -240,7 +240,7 @@ Deprecated compatibility routes are still available for compile history:
 | `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
-| `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds |
+| `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds; increase for slow local Ollama models such as 14B+ |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
 | `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint in-memory limit for AI endpoints; set `0` to disable |
 | `AI_MAX_MATERIALS_CHARS` | `20000` | Maximum size of user materials accepted by AI prompt/generate endpoints |
@@ -357,6 +357,8 @@ curl -fsS -X POST http://localhost:8000/api/generation/prompt \
 ```
 
 If generation fails, check provider status first, then inspect backend logs for provider errors, timeout messages, or missing API key/model configuration.
+
+For local Ollama timeouts (`ReadTimeout` / HTTP 504), first run `ollama list` and `ollama pull <model>`, then try a smaller model or increase `AI_GENERATION_TIMEOUT` before restarting the backend. Large models can exceed 120 seconds on CPU-only or low-memory machines.
 
 ## Testing
 

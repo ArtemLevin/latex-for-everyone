@@ -183,8 +183,20 @@ class AIGenerationService:
             async with httpx.AsyncClient(timeout=settings.AI_GENERATION_TIMEOUT) as client:
                 response = await client.post(url, json=payload)
                 response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            logger.warning(
+                "ollama generation timeout model=%s url=%s timeout_seconds=%s",
+                model,
+                url,
+                settings.AI_GENERATION_TIMEOUT,
+            )
+            raise AIGenerationError(
+                f"Ollama generation timed out after {settings.AI_GENERATION_TIMEOUT} seconds. "
+                "Check that Ollama is running, the model is pulled and loaded, or increase AI_GENERATION_TIMEOUT.",
+                status_code=504,
+            ) from exc
         except httpx.HTTPError as exc:
-            logger.exception("ollama generation http error model=%s url=%s", model, url)
+            logger.warning("ollama generation http error model=%s url=%s error=%s", model, url, exc)
             raise AIGenerationError(f"Ollama generation failed: {exc}") from exc
 
         try:
@@ -223,8 +235,20 @@ class AIGenerationService:
             async with httpx.AsyncClient(timeout=settings.AI_GENERATION_TIMEOUT) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
+        except httpx.TimeoutException as exc:
+            logger.warning(
+                "vendor generation timeout model=%s base_url=%s timeout_seconds=%s",
+                model,
+                settings.AI_VENDOR_BASE_URL,
+                settings.AI_GENERATION_TIMEOUT,
+            )
+            raise AIGenerationError(
+                f"Vendor generation timed out after {settings.AI_GENERATION_TIMEOUT} seconds. "
+                "Check provider availability or increase AI_GENERATION_TIMEOUT.",
+                status_code=504,
+            ) from exc
         except httpx.HTTPError as exc:
-            logger.exception("vendor generation http error model=%s base_url=%s", model, settings.AI_VENDOR_BASE_URL)
+            logger.warning("vendor generation http error model=%s base_url=%s error=%s", model, settings.AI_VENDOR_BASE_URL, exc)
             raise AIGenerationError(f"Vendor generation failed: {exc}") from exc
 
         try:
