@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from app.schemas import (
     GenerationPresetResponse,
     GenerationPromptResponse,
+    GenerationProviderStatusResponse,
     GenerationRequest,
     GenerationResultResponse,
     GenerationValidationRequest,
@@ -60,6 +61,18 @@ async def list_generation_presets():
 @router.post("/prompt", response_model=GenerationPromptResponse)
 async def preview_generation_prompt(request: GenerationRequest):
     return build_generation_prompt_response(request)
+
+
+@router.get("/providers/status", response_model=GenerationProviderStatusResponse)
+async def get_generation_provider_status(
+    provider: str | None = Query(default=None),
+    model: str | None = Query(default=None),
+):
+    try:
+        status = await ai_generator.get_provider_status(provider=provider, model=model)
+    except AIGenerationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+    return GenerationProviderStatusResponse(**status)
 
 
 @router.post("/validate", response_model=GenerationValidationResponse)

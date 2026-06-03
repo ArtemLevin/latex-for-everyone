@@ -36,20 +36,96 @@ def extract_latex_code(text: str) -> str:
 class AIGenerationService:
     """Provider adapter for AI-backed LaTeX generation."""
 
-    async def generate(self, prompt: str, provider: str | None = None, model: str | None = None) -> tuple[str, str, str]:
+    def resolve_provider_model(self, provider: str | None = None, model: str | None = None) -> tuple[str, str]:
         resolved_provider = (provider or settings.AI_PROVIDER).strip().lower()
+        if resolved_provider == "ollama":
+            return "ollama", model or settings.OLLAMA_MODEL
+        if resolved_provider in {"openai", "vendor", "openai_compatible"}:
+            return "openai_compatible", model or settings.AI_VENDOR_MODEL
+        raise AIGenerationError(f"Unsupported AI provider: {provider}", status_code=400)
+
+    async def get_provider_status(self, provider: str | None = None, model: str | None = None) -> dict[str, object]:
+        resolved_provider, resolved_model = self.resolve_provider_model(provider, model)
+        if resolved_provider == "ollama":
+            return await self._get_ollama_status(resolved_model)
+        return await self._get_openai_compatible_status(resolved_model)
+
+    async def generate(self, prompt: str, provider: str | None = None, model: str | None = None) -> tuple[str, str, str]:
+        resolved_provider, resolved_model = self.resolve_provider_model(provider, model)
 
         if resolved_provider == "ollama":
-            resolved_model = model or settings.OLLAMA_MODEL
             output = await self._generate_ollama(prompt, resolved_model)
-        elif resolved_provider in {"openai", "vendor", "openai_compatible"}:
-            resolved_provider = "openai_compatible"
-            resolved_model = model or settings.AI_VENDOR_MODEL
-            output = await self._generate_openai_compatible(prompt, resolved_model)
         else:
-            raise AIGenerationError(f"Unsupported AI provider: {provider}", status_code=400)
+            output = await self._generate_openai_compatible(prompt, resolved_model)
 
         return output, resolved_provider, resolved_model
+
+    async def _get_ollama_status(self, model: str) -> dict[str, object]:
+        url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/tags"
+        try:
+            async with httpx.AsyncClient(timeout=min(settings.AI_GENERATION_TIMEOUT, 10)) as client:
+                response = await client.get(url)
+                response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            return {
+                "provider": "ollama",
+                "model": model,
+                "available": False,
+                "message": f"Ollama unavailable: {exc}",
+                "models": [],
+                "model_available": False,
+            }
+
+        models = [item.get("name", "") for item in data.get("models", []) if item.get("name")]
+        model_available = any(name == model or name.startswith(f"{model}:") for name in models)
+        return {
+            "provider": "ollama",
+            "model": model,
+            "available": True,
+            "message": "Ollama is reachable." if model_available else "Ollama is reachable, but the requested model was not found.",
+            "models": models,
+            "model_available": model_available,
+        }
+
+    async def _get_openai_compatible_status(self, model: str) -> dict[str, object]:
+        if not settings.AI_VENDOR_API_KEY:
+            return {
+                "provider": "openai_compatible",
+                "model": model,
+                "available": False,
+                "message": "AI_VENDOR_API_KEY is not configured.",
+                "models": [],
+                "model_available": None,
+            }
+
+        url = f"{settings.AI_VENDOR_BASE_URL.rstrip('/')}/models"
+        headers = {"Authorization": f"Bearer {settings.AI_VENDOR_API_KEY}"}
+        try:
+            async with httpx.AsyncClient(timeout=min(settings.AI_GENERATION_TIMEOUT, 10)) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+            data = response.json()
+        except (httpx.HTTPError, ValueError) as exc:
+            return {
+                "provider": "openai_compatible",
+                "model": model,
+                "available": False,
+                "message": f"Vendor unavailable: {exc}",
+                "models": [],
+                "model_available": None,
+            }
+
+        models = [item.get("id", "") for item in data.get("data", []) if item.get("id")]
+        model_available = model in models if models else None
+        return {
+            "provider": "openai_compatible",
+            "model": model,
+            "available": True,
+            "message": "Vendor is reachable." if model_available is not False else "Vendor is reachable, but the requested model was not listed.",
+            "models": models,
+            "model_available": model_available,
+        }
 
     async def _generate_ollama(self, prompt: str, model: str) -> str:
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/generate"

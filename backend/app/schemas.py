@@ -1,6 +1,6 @@
 from datetime import datetime
 from typing import Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # File Schemas
@@ -157,6 +157,17 @@ class GenerationValidationResponse(BaseModel):
     valid: bool
     errors: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class GenerationProviderStatusResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    provider: str
+    model: str
+    available: bool
+    message: str
+    models: list[str] = Field(default_factory=list)
+    model_available: Optional[bool] = None
 
 
 class GenerationResultResponse(GenerationPromptResponse):

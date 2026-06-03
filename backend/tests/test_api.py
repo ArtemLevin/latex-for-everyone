@@ -247,7 +247,9 @@ def test_frontend_generation_ui_contract():
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
     assert "validateCurrentLatex" in content
+    assert "checkGenerationProvider" in content
     assert "'/generation/validate'" in content
+    assert "generation/providers/status" in content
     assert "'/generation/generate'" in content
 
 
@@ -394,6 +396,31 @@ def test_generation_prompt_preview_warns_without_topic_or_materials():
     data = response.json()
     assert len(data["warnings"]) == 2
     assert "Материалы не переданы" in data["prompt"]
+
+
+def test_generation_provider_status_uses_selected_provider_and_model(monkeypatch):
+    from app.routers import generation as generation_router
+
+    async def fake_status(provider, model):
+        assert provider == "ollama"
+        assert model == "qwen2.5:14b"
+        return {
+            "provider": "ollama",
+            "model": "qwen2.5:14b",
+            "available": True,
+            "message": "Ollama is reachable.",
+            "models": ["qwen2.5:14b"],
+            "model_available": True,
+        }
+
+    monkeypatch.setattr(generation_router.ai_generator, "get_provider_status", fake_status)
+
+    response = client.get("/api/generation/providers/status?provider=ollama&model=qwen2.5:14b")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["available"] is True
+    assert data["model_available"] is True
+    assert data["models"] == ["qwen2.5:14b"]
 
 
 def test_generation_validate_rejects_markdown_and_missing_document_end():

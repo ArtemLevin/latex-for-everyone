@@ -1793,6 +1793,7 @@
                 <div id="generationStatus" class="generation-status">Заполните тему и нажмите «Сгенерировать и вставить».</div>
                 <div class="generation-actions">
                     <button class="btn btn-secondary" onclick="previewGenerationPrompt()">Проверить prompt</button>
+                    <button class="btn btn-secondary" onclick="checkGenerationProvider()">Проверить провайдера</button>
                     <button class="btn btn-secondary" onclick="validateCurrentLatex()">Проверить .tex</button>
                     <button class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
                     <button class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
@@ -3363,6 +3364,27 @@ $$E = mc^2$$
         } catch (error) {
             setGenerationStatus(`Ошибка проверки .tex: ${error.message}`, 'error');
             showToast(`Ошибка проверки .tex: ${error.message}`, 'error');
+        }
+    }
+
+    async function checkGenerationProvider() {
+        if (!backendAvailable) {
+            setGenerationStatus('Backend недоступен: проверка провайдера невозможна.', 'error');
+            return;
+        }
+
+        const provider = encodeURIComponent(getGenerationFieldValue('generationProvider') || 'ollama');
+        const model = encodeURIComponent(getGenerationFieldValue('generationModel'));
+        const suffix = model ? `&model=${model}` : '';
+        try {
+            setGenerationStatus('Проверяю AI-provider...');
+            const status = await apiRequest(`/generation/providers/status?provider=${provider}${suffix}`);
+            const modelInfo = status.model_available === false ? ' Модель не найдена.' : '';
+            setGenerationStatus(`${status.message}${modelInfo}`, status.available ? 'success' : 'error');
+            showToast(status.available ? 'AI-provider доступен' : 'AI-provider недоступен', status.available ? 'success' : 'error');
+        } catch (error) {
+            setGenerationStatus(`Ошибка проверки провайдера: ${error.message}`, 'error');
+            showToast(`Ошибка проверки провайдера: ${error.message}`, 'error');
         }
     }
 
