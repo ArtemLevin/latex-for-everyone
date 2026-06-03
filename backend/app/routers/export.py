@@ -1,12 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
-from app.dependencies import get_project
-from app.models import Project, File
+from app.models import Project
 from app.schemas import ExportRequest, ExportResponse
 from app.services.pdf_generator import PDFGenerator
 from sqlalchemy.orm import Session
 from app.database import get_db
-import os
 from pathlib import Path
 
 router = APIRouter()
@@ -17,7 +15,6 @@ pdf_generator = PDFGenerator()
 @router.post("/pdf", response_model=ExportResponse)
 async def export_pdf(
     request: ExportRequest,
-    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
 ):
     project = db.query(Project).filter(Project.id == request.project_id).first()
@@ -97,9 +94,15 @@ async def export_tex(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
+    files = {}
+    for f in project.files:
+        files[f.name] = f.content
+
+    if request.content:
+        files.update(request.content)
+
     from app.config import settings
     from zipfile import ZipFile
-    import tempfile
 
     output_dir = Path(settings.UPLOAD_DIR) / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -108,8 +111,8 @@ async def export_tex(
     filepath = output_dir / filename
 
     with ZipFile(filepath, "w") as zf:
-        for f in project.files:
-            zf.writestr(f.name, f.content)
+        for name, content in files.items():
+            zf.writestr(name, content)
 
     return ExportResponse(
         url=f"/api/export/download/{filename}",
