@@ -26,21 +26,30 @@
 
 ## Этап 8 — Безопасность, лимиты и hardening
 
+**Статус:** реализован в текущей итерации.
+
 **Цель:** подготовить AI endpoints к реальному использованию и защитить backend от больших/опасных payload-ов.
 
-**Работы:**
+**Реализовано:**
 
-- Ограничить размер `materials`, prompt и raw output.
-- Добавить отдельный timeout для provider status, например `AI_PROVIDER_STATUS_TIMEOUT`.
-- Добавить rate limiting для generation endpoints.
-- В production скрывать подробные provider errors от пользователя.
-- Расширить LaTeX validator запретами на потенциально опасные команды:
+- Добавлены конфигурируемые лимиты на размер `materials`, итогового prompt, raw output и payload для LaTeX validation.
+- Добавлен отдельный timeout `AI_PROVIDER_STATUS_TIMEOUT` для быстрых проверок provider/model status.
+- Добавлен in-memory rate limiting для generation endpoints с настройкой `AI_RATE_LIMIT_PER_MINUTE`.
+- В production provider errors по умолчанию скрываются от пользователя; подробности можно включить через `DEBUG` или `AI_EXPOSE_PROVIDER_ERRORS`.
+- LaTeX validator расширен запретами на потенциально опасные команды и пути:
   - `\write18`;
   - `\input|...`;
   - `\openout`;
-  - подозрительные абсолютные пути;
-  - внешние пути в `\includegraphics`.
-- Добавить тесты на лимиты и validator-denylist.
+  - абсолютные и родительские пути в `\input`/`\include`;
+  - внешние/абсолютные пути в `\includegraphics`.
+- Добавлены API-тесты на лимиты, rate limiting, sanitizing provider errors и validator-denylist.
+
+**Что можно улучшить дополнительно:**
+
+- Заменить in-memory limiter на Redis/DB-backed limiter для multi-process deployment.
+- Делать лимиты user/project scoped после появления авторизации.
+- Добавить audit-log по заблокированным generation запросам.
+- Добавить отдельные лимиты для `/generate` и дешевых endpoint-ов (`/prompt`, `/validate`, `/providers/status`).
 
 **Критерий готовности:** generation API устойчив к слишком большим запросам, опасным LaTeX-командам и повторным частым вызовам.
 

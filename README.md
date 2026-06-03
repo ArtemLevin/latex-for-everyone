@@ -238,6 +238,12 @@ Deprecated compatibility routes are still available for compile history:
 | `CORS_ORIGINS` | `['http://localhost:3000', 'http://localhost:8080']` | Allowed CORS origins |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
 | `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds |
+| `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
+| `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint in-memory limit for AI endpoints; set `0` to disable |
+| `AI_MAX_MATERIALS_CHARS` | `20000` | Maximum size of user materials accepted by AI prompt/generate endpoints |
+| `AI_MAX_PROMPT_CHARS` | `60000` | Maximum generated prompt size before a provider call is allowed |
+| `AI_MAX_RAW_OUTPUT_CHARS` | `200000` | Maximum provider raw output / LaTeX validation payload size |
+| `AI_EXPOSE_PROVIDER_ERRORS` | `false` | Expose upstream provider error details to clients; keep `false` in production |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
 | `OLLAMA_MODEL` | `qwen2.5:14b` | Default Ollama model for LaTeX generation |
 | `AI_VENDOR_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible vendor API base URL |

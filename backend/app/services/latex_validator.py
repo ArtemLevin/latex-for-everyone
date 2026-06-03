@@ -3,6 +3,11 @@ import re
 
 FORBIDDEN_LATEX_PATTERNS = {
     r"\\uppercase\b": "Запрещена команда \\uppercase.",
+    r"\\write18\b": "Запрещена команда \\write18.",
+    r"\\openout(?:\b|\d)": "Запрещена команда \\openout.",
+    r"\\input\s*\|": "Запрещен shell-pipe ввод через \\input|... .",
+    r"\\(?:input|include)\s*\{\s*(?:/|\.\.|[A-Za-z]:)": "Запрещены абсолютные и родительские пути в \\input/\\include.",
+    r"\\includegraphics(?:\[[^\]]*\])?\s*\{\s*(?:/|\.\.|[A-Za-z]:|https?://)": "Запрещены внешние, абсолютные и родительские пути в \\includegraphics.",
 }
 
 

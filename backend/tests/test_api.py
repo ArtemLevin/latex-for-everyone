@@ -404,6 +404,40 @@ def test_generation_prompt_preview_warns_without_topic_or_materials():
     assert "Материалы не переданы" in data["prompt"]
 
 
+def test_generation_prompt_rejects_oversized_materials(monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_MAX_MATERIALS_CHARS", 5)
+
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Логарифмы"}, "materials": "too long"},
+    )
+    assert response.status_code == 413
+    assert "materials exceeds 5 characters" in response.json()["detail"]
+
+
+def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
+    generation_router.rate_limit_buckets.clear()
+
+    first_response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Логарифмы"}},
+    )
+    second_response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Логарифмы"}},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
+    generation_router.rate_limit_buckets.clear()
+
+
 def test_generation_provider_status_uses_selected_provider_and_model(monkeypatch):
     from app.routers import generation as generation_router
 
@@ -439,6 +473,42 @@ def test_generation_validate_rejects_markdown_and_missing_document_end():
     assert data["valid"] is False
     assert any("markdown" in error for error in data["errors"])
     assert any("\\end{document}" in error for error in data["errors"])
+
+
+@pytest.mark.parametrize(
+    "latex_code, expected_error",
+    [
+        (
+            r"\documentclass{article}\begin{document}\write18{rm -rf /}\end{document}",
+            r"\write18",
+        ),
+        (
+            r"\documentclass{article}\begin{document}\openout1=file.tex\end{document}",
+            r"\openout",
+        ),
+        (
+            r"\documentclass{article}\begin{document}\input|cat /etc/passwd\end{document}",
+            r"\input|",
+        ),
+        (
+            r"\documentclass{article}\begin{document}\input{/etc/passwd}\end{document}",
+            "пути",
+        ),
+        (
+            r"\documentclass{article}\usepackage{graphicx}\begin{document}\includegraphics{https://example.com/a.png}\end{document}",
+            r"\includegraphics",
+        ),
+    ],
+)
+def test_generation_validate_rejects_dangerous_latex_commands(latex_code, expected_error):
+    response = client.post(
+        "/api/generation/validate",
+        json={"latex_code": latex_code},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is False
+    assert any(expected_error in error for error in data["errors"])
 
 
 def test_generation_validate_accepts_minimal_document_with_warnings():
@@ -511,7 +581,7 @@ def test_generation_generate_provider_error_returns_bad_gateway(monkeypatch):
         },
     )
     assert response.status_code == 502
-    assert response.json()["detail"] == "Provider unavailable"
+    assert response.json()["detail"] == "AI provider request failed. Check backend logs or provider configuration."
 
 
 def test_openapi_schema():

@@ -63,7 +63,7 @@ class AIGenerationService:
     async def _get_ollama_status(self, model: str) -> dict[str, object]:
         url = f"{settings.OLLAMA_BASE_URL.rstrip('/')}/api/tags"
         try:
-            async with httpx.AsyncClient(timeout=min(settings.AI_GENERATION_TIMEOUT, 10)) as client:
+            async with httpx.AsyncClient(timeout=settings.AI_PROVIDER_STATUS_TIMEOUT) as client:
                 response = await client.get(url)
                 response.raise_for_status()
             data = response.json()
@@ -102,7 +102,7 @@ class AIGenerationService:
         url = f"{settings.AI_VENDOR_BASE_URL.rstrip('/')}/models"
         headers = {"Authorization": f"Bearer {settings.AI_VENDOR_API_KEY}"}
         try:
-            async with httpx.AsyncClient(timeout=min(settings.AI_GENERATION_TIMEOUT, 10)) as client:
+            async with httpx.AsyncClient(timeout=settings.AI_PROVIDER_STATUS_TIMEOUT) as client:
                 response = await client.get(url, headers=headers)
                 response.raise_for_status()
             data = response.json()
