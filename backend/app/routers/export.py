@@ -11,6 +11,8 @@ from pathlib import Path, PurePosixPath
 
 logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 pdf_generator = PDFGenerator()
