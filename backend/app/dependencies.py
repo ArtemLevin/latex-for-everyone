@@ -2,15 +2,10 @@ from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.models import Project
-from typing import Generator
 import uuid
 
 
-def get_db_session() -> Generator:
-    yield from get_db()
-
-
-def get_project(project_id: str, db: Session = Depends(get_db_session)) -> Project:
+def get_project(project_id: str, db: Session = Depends(get_db)) -> Project:
     try:
         uuid.UUID(project_id)
     except ValueError:
@@ -28,6 +23,6 @@ def get_project(project_id: str, db: Session = Depends(get_db_session)) -> Proje
     return project
 
 
-def get_project_files(project_id: str, db: Session = Depends(get_db_session)) -> list:
+def get_project_files(project_id: str, db: Session = Depends(get_db)) -> list:
     from app.models import File
     return db.query(File).filter(File.project_id == project_id).all()
