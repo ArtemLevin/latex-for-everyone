@@ -290,6 +290,12 @@ Use this checklist to verify the complete generation path manually after the bac
 - Start the frontend in another terminal with `make frontend`.
 - Open http://localhost:8080/main.html.
 - For server-side PDF compilation, ensure `pdflatex` is installed and available on `PATH`.
+- For Russian generated PDFs (`\usepackage[russian]{babel}` and T2A), install Cyrillic TeX Live support. On Ubuntu/Debian:
+
+  ```bash
+  sudo apt install texlive-latex-base texlive-latex-extra texlive-lang-cyrillic
+  make latex-check
+  ```
 
 ### Option A: local Ollama
 
@@ -406,6 +412,7 @@ node --check /tmp/frontend-main.js
 - `frontend/main.html` is still a monolithic HTML/CSS/JS file. A future cleanup should split API, state, file operations, compile/export, and UI helpers into separate modules.
 - Local preview is an approximate HTML/KaTeX rendering path; authoritative PDF output comes from the backend LaTeX compiler.
 - Server-side compile/export requires a working LaTeX installation. Without `pdflatex`, compile endpoints return errors while the frontend can still use local preview fallback.
+- Generated Russian documents require `russian.ldf`/T2A support from `texlive-lang-cyrillic`; otherwise `babel` may fail with `Unknown option 'russian'`.
 
 ## License
 

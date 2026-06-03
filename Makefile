@@ -18,6 +18,7 @@ BACKEND_URL := http://localhost:$(BACKEND_PORT)
 FRONTEND_URL := http://localhost:$(FRONTEND_PORT)/main.html
 AI_PROVIDER ?= ollama
 AI_MODEL ?= qwen2.5:14b
+LATEX_COMPILER ?= pdflatex
 
 .DEFAULT_GOAL := help
 
@@ -72,6 +73,14 @@ ai-provider-status: ## Check configured AI provider/model: make ai-provider-stat
 ai-validate-smoke: ## Validate a minimal LaTeX document through the generation validator endpoint.
 	curl -fsS -X POST "$(BACKEND_URL)/api/generation/validate" -H "Content-Type: application/json" --data '{"latex_code":"\\documentclass{article}\\begin{document}Smoke\\end{document}"}'
 	@echo
+
+.PHONY: latex-check
+latex-check: ## Check pdflatex and Russian babel/T2A support needed for generated Russian PDFs.
+	@command -v $(LATEX_COMPILER) >/dev/null || (echo "$(LATEX_COMPILER) not found. Install TeX Live, e.g. sudo apt install texlive-latex-base" && exit 1)
+	@command -v kpsewhich >/dev/null || (echo "kpsewhich not found. Install TeX Live binaries, e.g. sudo apt install texlive-base" && exit 1)
+	@kpsewhich russian.ldf >/dev/null || (echo "russian.ldf not found. Install Russian babel support: sudo apt install texlive-lang-cyrillic" && exit 1)
+	@kpsewhich t2aenc.def >/dev/null || (echo "t2aenc.def not found. Install T2A/Cyrillic support: sudo apt install texlive-lang-cyrillic" && exit 1)
+	@echo "LaTeX Russian support is available."
 
 # ---- Tests and checks ------------------------------------------------------
 .PHONY: test

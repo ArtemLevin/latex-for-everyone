@@ -7,13 +7,27 @@ from app.schemas import ExportRequest, ExportResponse
 from app.services.pdf_generator import PDFGenerator
 from sqlalchemy.orm import Session
 from app.database import get_db
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+
+logger = logging.getLogger(__name__)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 pdf_generator = PDFGenerator()
+
+
+def validate_export_entry_name(name: str) -> str:
+    """Validate a ZIP entry name to prevent zip-slip/path traversal entries."""
+    if not name or name.startswith(("/", "\\")) or "\\" in name:
+        raise HTTPException(status_code=400, detail=f"Invalid export filename: {name}")
+
+    path = PurePosixPath(name)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise HTTPException(status_code=400, detail=f"Invalid export filename: {name}")
+
+    return path.as_posix()
 
 
 @router.post("/pdf", response_model=ExportResponse)
@@ -126,7 +140,7 @@ async def export_tex(
 
     with ZipFile(filepath, "w") as zf:
         for name, content in files.items():
-            zf.writestr(name, content)
+            zf.writestr(validate_export_entry_name(name), content)
 
     size = filepath.stat().st_size
     logger.info("export tex completed project_id=%s filename=%s files=%s size=%s", request.project_id, filename, len(files), size)

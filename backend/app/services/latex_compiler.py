@@ -149,6 +149,8 @@ class LatexCompiler:
                     error_msg += "\n" + lines[i + 1]
                 errors.append(error_msg)
 
+        self._append_environment_hints(log_text, errors)
+
         if errors:
             return "\n".join(errors[:10])  # Return first 10 errors
 
@@ -160,6 +162,26 @@ class LatexCompiler:
             errors.append("Warning: Rerun needed for cross-references")
 
         return "\n".join(errors)
+
+    def _append_environment_hints(self, log_text: str, errors: list[str]) -> None:
+        """Append actionable hints for common missing TeX Live packages."""
+        lower_log = log_text.lower()
+        if (
+            "unknown option 'russian'" in lower_log
+            or "unknown option `russian'" in lower_log
+            or "russian.ldf" in lower_log
+        ):
+            errors.append(
+                "LaTeX environment hint: package babel cannot load Russian language support. "
+                "Install TeX Live Cyrillic language files (Ubuntu/Debian: "
+                "sudo apt install texlive-lang-cyrillic) and restart the backend."
+            )
+
+        if "t2a" in lower_log and ("fontenc" in lower_log or "encoding file" in lower_log):
+            errors.append(
+                "LaTeX environment hint: T2A Cyrillic font encoding files are missing. "
+                "Install TeX Live Cyrillic support (Ubuntu/Debian: sudo apt install texlive-lang-cyrillic)."
+            )
 
 
 # WebSocket support for live compilation

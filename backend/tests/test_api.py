@@ -143,6 +143,19 @@ def test_list_templates():
     assert len(data) > 0
 
 
+def test_latex_compiler_adds_russian_babel_environment_hint():
+    from app.services.latex_compiler import LatexCompiler
+
+    log_text = """
+! Package babel Error: Unknown option 'russian'. Either you misspelled it
+(babel)                or the language definition file russian.ldf was not found.
+"""
+    errors = LatexCompiler()._extract_errors(log_text)
+
+    assert "Unknown option 'russian'" in errors
+    assert "texlive-lang-cyrillic" in errors
+
+
 def test_compile_raw(monkeypatch):
     from app.routers import compile as compile_router
 
@@ -372,6 +385,30 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
     with ZipFile(exported) as archive:
         assert archive.read("main.tex").decode("utf-8") == frontend_content
         assert archive.read("notes.tex").decode("utf-8") == "Notes"
+
+
+def test_export_tex_rejects_path_traversal_filename(tmp_path, monkeypatch):
+    from app.config import settings
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Unsafe TEX Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+
+    response = client.post(
+        "/api/export/tex",
+        json={
+            "project_id": project_id,
+            "format": "tex",
+            "content": {"../evil.tex": "Bad"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Invalid export filename" in response.json()["detail"]
 
 
 def test_generation_presets():

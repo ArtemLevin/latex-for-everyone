@@ -1,10 +1,12 @@
 import os
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing import Optional
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+
     APP_NAME: str = "Latexed API"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
@@ -64,10 +66,6 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     COMPILE_RATE_LIMIT_PER_HOUR: int = 100
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
 
 
 settings = Settings()

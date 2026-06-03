@@ -21,13 +21,12 @@ class FileUpdate(BaseModel):
 
 
 class FileResponse(FileBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     project_id: str
     created_at: datetime
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # Project Schemas
@@ -47,18 +46,17 @@ class ProjectUpdate(BaseModel):
 
 
 class ProjectResponse(ProjectBase):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     owner_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
-    settings: dict[str, Any] = {}
-
-    class Config:
-        from_attributes = True
+    settings: dict[str, Any] = Field(default_factory=dict)
 
 
 class ProjectDetailResponse(ProjectResponse):
-    files: list[FileResponse] = []
+    files: list[FileResponse] = Field(default_factory=list)
 
 
 # Compile Schemas
@@ -83,6 +81,8 @@ class CompileResponse(BaseModel):
 
 
 class CompileHistoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     project_id: str
     status: str
@@ -90,9 +90,6 @@ class CompileHistoryResponse(BaseModel):
     error: Optional[str] = None
     compile_time: Optional[str] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # Export Schemas
@@ -191,13 +188,12 @@ class SnapshotCreate(BaseModel):
 
 
 class SnapshotResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
     id: str
     project_id: str
     name: str
     created_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 # Generic
@@ -213,4 +209,4 @@ class PaginationResponse(BaseModel):
     total: int
     page: int
     per_page: int
-    items: list[Any] = []
+    items: list[Any] = Field(default_factory=list)
