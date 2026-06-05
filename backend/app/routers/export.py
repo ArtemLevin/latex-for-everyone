@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
+from app.config import settings
 from app.models import Project
 from app.schemas import ExportRequest, ExportResponse
 from app.services.pdf_generator import PDFGenerator
@@ -11,11 +12,15 @@ from pathlib import Path, PurePosixPath
 
 logger = logging.getLogger(__name__)
 
-logger = logging.getLogger(__name__)
-
 router = APIRouter()
 
 pdf_generator = PDFGenerator()
+
+EXPORT_MEDIA_TYPES = {
+    ".pdf": "application/pdf",
+    ".html": "text/html",
+    ".zip": "application/zip",
+}
 
 
 def validate_export_entry_name(name: str) -> str:
@@ -92,7 +97,6 @@ async def export_html(
 
     html_content = pdf_generator.generate_html(main_content)
 
-    from app.config import settings
     output_dir = Path(settings.UPLOAD_DIR) / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -129,7 +133,6 @@ async def export_tex(
     if request.content:
         files.update(request.content)
 
-    from app.config import settings
     from zipfile import ZipFile
 
     output_dir = Path(settings.UPLOAD_DIR) / "exports"
@@ -152,24 +155,35 @@ async def export_tex(
     )
 
 
+def resolve_export_download_path(filename: str) -> tuple[Path, str]:
+    """Return a safe export artifact path and media type for a download filename."""
+    if Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Invalid export filename")
+
+    suffix = Path(filename).suffix.lower()
+    media_type = EXPORT_MEDIA_TYPES.get(suffix)
+    if media_type is None:
+        raise HTTPException(status_code=400, detail="Unsupported export file type")
+
+    export_dir = (Path(settings.UPLOAD_DIR) / "exports").resolve()
+    filepath = (export_dir / filename).resolve()
+
+    # Resolve both paths before the prefix check so symlinks or crafted filenames
+    # cannot escape the export directory configured for downloadable artifacts.
+    if export_dir not in filepath.parents:
+        raise HTTPException(status_code=400, detail="Invalid export filename")
+
+    return filepath, media_type
+
+
 @router.get("/download/{filename}")
 async def download_export(filename: str):
-    from app.config import settings
-
     logger.info("export download requested filename=%s", filename)
-    filepath = Path(settings.UPLOAD_DIR) / "exports" / filename
+    filepath, media_type = resolve_export_download_path(filename)
 
-    if not filepath.exists():
+    if not filepath.is_file():
         logger.warning("export download missing filename=%s path=%s", filename, filepath)
         raise HTTPException(status_code=404, detail="File not found")
-
-    media_type = "application/octet-stream"
-    if filename.endswith(".pdf"):
-        media_type = "application/pdf"
-    elif filename.endswith(".html"):
-        media_type = "text/html"
-    elif filename.endswith(".zip"):
-        media_type = "application/zip"
 
     logger.info("export download served filename=%s media_type=%s size=%s", filename, media_type, filepath.stat().st_size)
     return FileResponse(

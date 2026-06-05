@@ -182,9 +182,9 @@ class GenerationPresetResponse(BaseModel):
 
 # Snapshot Schemas
 class SnapshotCreate(BaseModel):
-    project_id: str
-    name: Optional[str] = "Автосохранение"
-    data: dict[str, Any]
+    project_id: Optional[str] = None
+    name: str = "Автосохранение"
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class SnapshotResponse(BaseModel):
