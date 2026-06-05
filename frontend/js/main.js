@@ -416,17 +416,11 @@ $$E = mc^2$$
             await loadTemplates();
             openInitialFile();
             renderFileTree();
-            showToast('Соединение с backend установлено', 'success');
-            try {
-                await compileLatex();
-            } catch (compileError) {
-                showCompileError(compileError.message);
-            }
+            showToast('Соединение с backend установлено. Нажмите «Компиляция», чтобы собрать PDF.', 'success');
         } catch (error) {
             setBackendAvailability(false);
             renderFileTree();
-            compileLatexLocal();
-            showToast(`Backend недоступен: ${error.message}. Работаем локально.`, 'error');
+            showToast(`Backend недоступен: ${error.message}. Документ открыт без автокомпиляции.`, 'error');
         }
     }
 
@@ -492,15 +486,43 @@ $$E = mc^2$$
         document.getElementById('statusText').textContent = 'Ошибка';
     }
 
+    function setPreviewPdfMode(isPdf) {
+        const previewContainer = document.getElementById('previewContainer');
+        const previewContent = document.getElementById('previewContent');
+        previewContainer?.classList.toggle('pdf-preview-container', isPdf);
+        previewContent?.classList.toggle('pdf-preview-content', isPdf);
+    }
+
+    function activateRenderedPreviewTab() {
+        const previewPane = document.getElementById('previewPane');
+        if (!previewPane) return;
+        const tabs = previewPane.querySelectorAll('.pane-tab');
+        tabs.forEach(tab => tab.classList.remove('active'));
+        tabs[0]?.classList.add('active');
+    }
+
+    function ensureAdjacentPreviewVisible() {
+        const previewPane = document.getElementById('previewPane');
+        if (!previewPane) return;
+        if (getComputedStyle(previewPane).display === 'none' && typeof setViewMode === 'function') {
+            setViewMode('split');
+        }
+    }
+
     function showHtmlPreviewFallback() {
+        setPreviewPdfMode(false);
+        activateRenderedPreviewTab();
         const rendered = renderLatex(editor.getValue());
         document.getElementById('previewContent').innerHTML = rendered;
     }
 
     function showPdfPreview(pdfUrl) {
+        ensureAdjacentPreviewVisible();
+        activateRenderedPreviewTab();
+        setPreviewPdfMode(true);
         const url = resolveApiUrl(pdfUrl);
         document.getElementById('previewContent').innerHTML = `
-            <iframe src="${url}" title="PDF preview" style="width:100%;height:100%;min-height:70vh;border:0;background:white;border-radius:8px;"></iframe>
+            <iframe class="pdf-preview-frame" src="${url}#toolbar=0&navpanes=0&view=FitH&zoom=page-width" title="PDF preview"></iframe>
         `;
     }
 
@@ -873,9 +895,7 @@ $$E = mc^2$$
 
     function compileLatexLocal() {
         try {
-            const content = editor.getValue();
-            const rendered = renderLatex(content);
-            document.getElementById('previewContent').innerHTML = rendered;
+            showHtmlPreviewFallback();
             document.getElementById('errorPanel').classList.remove('active');
             document.getElementById('statusDot').className = 'status-dot';
             document.getElementById('statusText').textContent = 'Локальный preview';
@@ -1183,6 +1203,8 @@ $$E = mc^2$$
         el.parentElement.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
         el.classList.add('active');
 
+        setPreviewPdfMode(false);
+
         if (tab === 'source') {
             document.getElementById('previewContent').textContent = editor.getValue();
             document.getElementById('previewContent').style.fontFamily = "'JetBrains Mono', monospace";
@@ -1340,11 +1362,11 @@ $$E = mc^2$$
         const provider = getGenerationFieldValue('generationProvider');
         const modelInput = document.getElementById('generationModel');
         if (!modelInput) return;
-        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'qwen2.5:14b')) {
+        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'gemma4')) {
             modelInput.value = 'gpt-4o-mini';
         }
         if (provider === 'ollama' && (!modelInput.value || modelInput.value === 'gpt-4o-mini')) {
-            modelInput.value = 'qwen2.5:14b';
+            modelInput.value = 'gemma4';
         }
     }
 
@@ -1370,6 +1392,8 @@ $$E = mc^2$$
         if (!preset || !preset.defaults) return;
         const mapping = {
             level: 'generationLevel',
+            language: 'generationLanguage',
+            content_source_mode: 'generationContentSourceMode',
             alpha_code: 'generationAlpha',
             beta_code: 'generationBeta',
             gamma_code: 'generationGamma',
@@ -1393,6 +1417,8 @@ $$E = mc^2$$
             project_id: currentProject?.id || null,
             fields: {
                 level: getGenerationFieldValue('generationLevel') || 'ЕГЭ',
+                language: getGenerationFieldValue('generationLanguage') || 'русский',
+                content_source_mode: getGenerationFieldValue('generationContentSourceMode') || 'materials_only',
                 alpha_code: parseInt(getGenerationFieldValue('generationAlpha') || '1', 10),
                 beta_code: parseInt(getGenerationFieldValue('generationBeta') || '1', 10),
                 gamma_code: parseInt(getGenerationFieldValue('generationGamma') || '4', 10),
