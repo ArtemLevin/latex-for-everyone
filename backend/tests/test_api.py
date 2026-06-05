@@ -304,9 +304,18 @@ def test_frontend_bootstrap_contract_creates_template_project_and_updates_main_f
 
 
 def test_frontend_generation_ui_contract():
-    frontend_html = Path(__file__).resolve().parents[2] / "frontend" / "main.html"
-    content = frontend_html.read_text(encoding="utf-8")
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+    frontend_html = frontend_dir / "main.html"
+    frontend_js = frontend_dir / "js" / "main.js"
+    content = "\n".join(
+        [
+            frontend_html.read_text(encoding="utf-8"),
+            frontend_js.read_text(encoding="utf-8"),
+        ]
+    )
 
+    assert 'href="css/app.css"' in content
+    assert 'src="js/main.js"' in content
     assert 'id="generationModal"' in content
     assert 'id="generationTopic"' in content
     assert 'id="generationMaterials"' in content

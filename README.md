@@ -16,7 +16,9 @@
 
 ```text
 backend/            FastAPI application, tests, Docker/Nginx config
-frontend/main.html  Browser editor UI and backend API client
+frontend/main.html  Browser editor UI markup
+frontend/css/       Frontend styles
+frontend/js/        Frontend API client, editor state, compile/export, AI UI logic
 ```
 
 ## Quick start
@@ -106,7 +108,7 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-provider-status` | Check configured AI provider/model availability. |
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
-| `make frontend-check` | Extract inline frontend JavaScript and run `node --check`. |
+| `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
@@ -134,7 +136,7 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 
 ## Frontend/backend integration
 
-`frontend/main.html` contains a small API client. On startup it:
+`frontend/main.html` loads `frontend/css/app.css` and `frontend/js/main.js`; the frontend API client in `frontend/js/main.js` starts by:
 
 1. calls `GET /api/health`;
 2. loads a saved project from `localStorage` or creates a new one with the `article` template;
@@ -400,19 +402,12 @@ uv run pytest backend/tests/ -q
 Frontend syntax smoke check without Make:
 
 ```bash
-python3 - <<'PY'
-from pathlib import Path
-text = Path('frontend/main.html').read_text()
-start = text.rfind('<script>') + len('<script>')
-end = text.rfind('</script>')
-Path('/tmp/frontend-main.js').write_text(text[start:end])
-PY
-node --check /tmp/frontend-main.js
+node --check frontend/js/*.js
 ```
 
 ## Known limitations
 
-- `frontend/main.html` is still a monolithic HTML/CSS/JS file. A future cleanup should split API, state, file operations, compile/export, and UI helpers into separate modules.
+- Frontend CSS and JavaScript are split out of `frontend/main.html`, but `frontend/js/main.js` is still a single application script. A future cleanup should split API, state, file operations, compile/export, and UI helpers into smaller modules.
 - Local preview is an approximate HTML/KaTeX rendering path; authoritative PDF output comes from the backend LaTeX compiler.
 - Server-side compile/export requires a working LaTeX installation. Without `pdflatex`, compile endpoints return errors while the frontend can still use local preview fallback.
 - Generated Russian documents require `russian.ldf`/T2A support from `texlive-lang-cyrillic`; otherwise `babel` may fail with `Unknown option 'russian'`.
