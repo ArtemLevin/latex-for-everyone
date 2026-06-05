@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, Any
+from typing import Optional, Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -62,6 +62,7 @@ class ProjectDetailResponse(ProjectResponse):
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str
+    main_file_name: Optional[str] = None
     main_file_content: Optional[str] = None
     all_files: Optional[dict[str, str]] = None
 
@@ -69,6 +70,16 @@ class CompileRequest(BaseModel):
 class RawCompileRequest(BaseModel):
     content: str
     files: dict[str, str] = Field(default_factory=dict)
+
+
+class LatexCompileResult(BaseModel):
+    """Typed boundary between compiler services and API routers."""
+
+    status: Literal["success", "error"]
+    output: Optional[str] = None
+    error: Optional[str] = None
+    compile_time: Optional[str] = None
+    pdf_url: Optional[str] = None
 
 
 class CompileResponse(BaseModel):
@@ -97,6 +108,15 @@ class ExportRequest(BaseModel):
     project_id: str
     format: str  # pdf, html, tex
     content: Optional[dict[str, str]] = None
+
+
+class PDFGenerationResult(BaseModel):
+    """Typed boundary between PDF export services and API routers."""
+
+    success: bool
+    filename: Optional[str] = None
+    size: Optional[int] = None
+    error: Optional[str] = None
 
 
 class ExportResponse(BaseModel):
@@ -182,9 +202,9 @@ class GenerationPresetResponse(BaseModel):
 
 # Snapshot Schemas
 class SnapshotCreate(BaseModel):
-    project_id: str
-    name: Optional[str] = "Автосохранение"
-    data: dict[str, Any]
+    project_id: Optional[str] = None
+    name: str = "Автосохранение"
+    data: dict[str, Any] = Field(default_factory=dict)
 
 
 class SnapshotResponse(BaseModel):

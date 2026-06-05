@@ -1,5 +1,4 @@
 import subprocess
-import tempfile
 import os
 import time
 import shutil
@@ -7,6 +6,8 @@ import logging
 from pathlib import Path
 from typing import Optional
 from app.config import settings
+from app.schemas import LatexCompileResult
+from app.services.latex_sanitizer import sanitize_latex_files, sanitize_latex_source
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +22,9 @@ class LatexCompiler:
         self,
         main_content: str,
         files: Optional[dict[str, str]] = None,
-    ) -> dict:
-        """
-        Compile LaTeX document.
-        Returns dict with status, output, error, compile_time, pdf_url
-        """
+        main_filename: str = "main.tex",
+    ) -> LatexCompileResult:
+        """Compile a LaTeX document into a typed service result."""
         start_time = time.time()
         compile_id = f"compile_{int(time.time())}_{os.getpid()}"
         work_dir = self.work_dir / compile_id
@@ -33,22 +32,24 @@ class LatexCompiler:
         try:
             work_dir.mkdir(parents=True, exist_ok=True)
 
-            # Write all files
-            if files:
-                for filename, content in files.items():
-                    # Sanitize filename
-                    safe_name = Path(filename).name
-                    filepath = work_dir / safe_name
-                    filepath.write_text(content, encoding="utf-8")
+            sanitized_files = sanitize_latex_files(files or {})
+            sanitized_main_content = sanitize_latex_source(main_content)
+            safe_main_name = Path(main_filename).name or "main.tex"
 
-            # Write main file
-            main_file = work_dir / "main.tex"
-            if not main_file.exists():
-                main_file.write_text(main_content, encoding="utf-8")
+            # Write all files
+            for filename, content in sanitized_files.items():
+                # Sanitize filename
+                safe_name = Path(filename).name
+                filepath = work_dir / safe_name
+                filepath.write_text(content, encoding="utf-8")
+
+            # Always write the selected compile entrypoint last so request overrides
+            # cannot be shadowed by a same-named project file already in all_files.
+            main_file = work_dir / safe_main_name
+            main_file.write_text(sanitized_main_content, encoding="utf-8")
 
             # Compile with pdflatex (run twice for references)
-            log_output = []
-            error_output = []
+            log_output: list[str] = []
 
             for run in range(2):
                 try:
@@ -58,7 +59,7 @@ class LatexCompiler:
                             "-interaction=nonstopmode",
                             "-halt-on-error",
                             "-output-directory", str(work_dir),
-                            "main.tex",
+                            safe_main_name,
                         ],
                         cwd=str(work_dir),
                         capture_output=True,
@@ -66,41 +67,40 @@ class LatexCompiler:
                         timeout=self.timeout,
                     )
                     log_output.append(result.stdout)
-                    error_output.append(result.stderr)
 
                     if result.returncode != 0:
                         # Check for errors in log
-                        log_file = work_dir / "main.log"
+                        log_file = work_dir / f"{Path(safe_main_name).stem}.log"
                         if log_file.exists():
                             log_text = log_file.read_text()
                             errors = self._extract_errors(log_text)
                             if errors:
                                 compile_time = f"{time.time() - start_time:.2f}s"
-                                return {
-                                    "status": "error",
-                                    "error": errors,
-                                    "output": log_text[-2000:],
-                                    "compile_time": compile_time,
-                                }
+                                return LatexCompileResult(
+                                    status="error",
+                                    error=errors,
+                                    output=log_text[-2000:],
+                                    compile_time=compile_time,
+                                )
 
                         compile_time = f"{time.time() - start_time:.2f}s"
-                        return {
-                            "status": "error",
-                            "error": f"Compilation failed on run {run + 1}",
-                            "output": result.stdout[-2000:],
-                            "compile_time": compile_time,
-                        }
+                        return LatexCompileResult(
+                            status="error",
+                            error=f"Compilation failed on run {run + 1}",
+                            output=result.stdout[-2000:],
+                            compile_time=compile_time,
+                        )
 
                 except subprocess.TimeoutExpired:
                     compile_time = f"{time.time() - start_time:.2f}s"
-                    return {
-                        "status": "error",
-                        "error": f"Compilation timed out after {self.timeout}s",
-                        "compile_time": compile_time,
-                    }
+                    return LatexCompileResult(
+                        status="error",
+                        error=f"Compilation timed out after {self.timeout}s",
+                        compile_time=compile_time,
+                    )
 
             # Check if PDF was generated
-            pdf_file = work_dir / "main.pdf"
+            pdf_file = work_dir / f"{Path(safe_main_name).stem}.pdf"
             pdf_url = None
 
             if pdf_file.exists():
@@ -115,21 +115,21 @@ class LatexCompiler:
 
             compile_time = f"{time.time() - start_time:.2f}s"
 
-            return {
-                "status": "success",
-                "output": log_output[-1] if log_output else "",
-                "compile_time": compile_time,
-                "pdf_url": pdf_url,
-            }
+            return LatexCompileResult(
+                status="success",
+                output=log_output[-1] if log_output else "",
+                compile_time=compile_time,
+                pdf_url=pdf_url,
+            )
 
         except Exception as e:
             logger.error(f"Compilation error: {e}", exc_info=True)
             compile_time = f"{time.time() - start_time:.2f}s"
-            return {
-                "status": "error",
-                "error": str(e),
-                "compile_time": compile_time,
-            }
+            return LatexCompileResult(
+                status="error",
+                error=str(e),
+                compile_time=compile_time,
+            )
 
         finally:
             # Cleanup work directory
@@ -138,7 +138,7 @@ class LatexCompiler:
 
     def _extract_errors(self, log_text: str) -> str:
         """Extract error messages from LaTeX log."""
-        errors = []
+        errors: list[str] = []
         lines = log_text.split("\n")
 
         for i, line in enumerate(lines):
@@ -166,6 +166,12 @@ class LatexCompiler:
     def _append_environment_hints(self, log_text: str, errors: list[str]) -> None:
         """Append actionable hints for common missing TeX Live packages."""
         lower_log = log_text.lower()
+        if "unknown option `list=true'" in lower_log and "enumitem" in lower_log:
+            errors.append(
+                "LaTeX source hint: enumitem does not support package option list=true. "
+                "Use \\usepackage{enumitem} without list=true; configure lists with \\setlist{...} instead."
+            )
+
         if (
             "unknown option 'russian'" in lower_log
             or "unknown option `russian'" in lower_log
@@ -191,8 +197,8 @@ class LiveCompiler:
     def __init__(self):
         self.active_compilations = {}
 
-    async def compile_stream(self, content: str, callback):
+    async def compile_stream(self, content: str, callback) -> None:
         """Stream compilation results via callback"""
         compiler = LatexCompiler()
         result = compiler.compile(content, {})
-        await callback(result)
+        await callback(result.model_dump())

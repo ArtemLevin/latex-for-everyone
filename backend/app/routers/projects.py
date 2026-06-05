@@ -6,7 +6,7 @@ from app.database import get_db
 from app.models import Project, File, ProjectSnapshot
 from app.schemas import (
     ProjectCreate, ProjectUpdate, ProjectResponse,
-    ProjectDetailResponse, MessageResponse
+    ProjectDetailResponse, MessageResponse, SnapshotCreate, SnapshotResponse
 )
 from app.dependencies import get_project
 router = APIRouter()
@@ -95,24 +95,28 @@ async def delete_project(
     return {"message": f"Project '{project.name}' deleted"}
 
 
-@router.post("/{project_id}/snapshot", status_code=status.HTTP_201_CREATED)
+@router.post("/{project_id}/snapshot", response_model=SnapshotResponse, status_code=status.HTTP_201_CREATED)
 async def create_snapshot(
-    snapshot_data: dict,
+    snapshot_data: SnapshotCreate,
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
+    if snapshot_data.project_id and snapshot_data.project_id != project.id:
+        raise HTTPException(status_code=400, detail="Snapshot project_id does not match path project_id")
+
     snapshot = ProjectSnapshot(
         project_id=project.id,
-        name=snapshot_data.get("name", "Автосохранение"),
-        data=snapshot_data.get("data", {}),
+        name=snapshot_data.name,
+        data=snapshot_data.data,
     )
     db.add(snapshot)
     db.commit()
+    db.refresh(snapshot)
 
-    return {"id": snapshot.id, "created_at": snapshot.created_at}
+    return snapshot
 
 
-@router.get("/{project_id}/snapshots")
+@router.get("/{project_id}/snapshots", response_model=list[SnapshotResponse])
 async def get_snapshots(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
