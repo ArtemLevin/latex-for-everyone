@@ -161,6 +161,12 @@ class LatexCompiler:
     def _append_environment_hints(self, log_text: str, errors: list[str]) -> None:
         """Append actionable hints for common missing TeX Live packages."""
         lower_log = log_text.lower()
+        if "unknown option `list=true'" in lower_log and "enumitem" in lower_log:
+            errors.append(
+                "LaTeX source hint: enumitem does not support package option list=true. "
+                "Use \\usepackage{enumitem} without list=true; configure lists with \\setlist{...} instead."
+            )
+
         if (
             "unknown option 'russian'" in lower_log
             or "unknown option `russian'" in lower_log

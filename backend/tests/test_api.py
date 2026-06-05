@@ -156,6 +156,20 @@ def test_latex_compiler_adds_russian_babel_environment_hint():
     assert "texlive-lang-cyrillic" in errors
 
 
+def test_latex_compiler_adds_enumitem_list_true_source_hint():
+    from app.services.latex_compiler import LatexCompiler
+
+    log_text = """
+! LaTeX Error: Unknown option `list=true' for package `enumitem'.
+!  ==> Fatal error occurred, no output PDF file produced!
+"""
+    errors = LatexCompiler()._extract_errors(log_text)
+
+    assert "Unknown option `list=true'" in errors
+    assert "enumitem does not support package option list=true" in errors
+    assert "\\usepackage{enumitem}" in errors
+
+
 def test_latex_compiler_returns_typed_result_for_compiler_error(monkeypatch):
     from app.services.latex_compiler import LatexCompiler
     from app.schemas import LatexCompileResult
@@ -570,6 +584,18 @@ def test_generation_prompt_logs_safe_summary(caplog, monkeypatch):
     assert "prompt_sha=" in messages
 
 
+def test_generation_prompt_warns_against_invalid_enumitem_list_true_option():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Списки"}, "materials": "Сделать памятку."},
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert r"\usepackage[list=true]{enumitem}" in prompt
+    assert "невалидная опция enumitem" in prompt
+
+
 def test_generation_prompt_preview_includes_fields_and_materials():
     response = client.post(
         "/api/generation/prompt",
@@ -679,6 +705,20 @@ def test_generation_validate_rejects_markdown_and_missing_document_end():
     assert data["valid"] is False
     assert any("markdown" in error for error in data["errors"])
     assert any("\\end{document}" in error for error in data["errors"])
+
+
+def test_generation_validate_rejects_enumitem_list_true_option():
+    response = client.post(
+        "/api/generation/validate",
+        json={
+            "latex_code": r"\documentclass{article}\usepackage[list=true]{enumitem}\begin{document}Text\end{document}"
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["valid"] is False
+    assert any("list=true" in error and "enumitem" in error for error in data["errors"])
 
 
 @pytest.mark.parametrize(
