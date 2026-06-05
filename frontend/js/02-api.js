@@ -56,17 +56,11 @@
             await loadTemplates();
             openInitialFile();
             renderFileTree();
-            showToast('Соединение с backend установлено', 'success');
-            try {
-                await compileLatex();
-            } catch (compileError) {
-                showCompileError(compileError.message);
-            }
+            showToast('Соединение с backend установлено. Нажмите «Компиляция», чтобы собрать PDF.', 'success');
         } catch (error) {
             setBackendAvailability(false);
             renderFileTree();
-            compileLatexLocal();
-            showToast(`Backend недоступен: ${error.message}. Работаем локально.`, 'error');
+            showToast(`Backend недоступен: ${error.message}. Документ открыт без автокомпиляции.`, 'error');
         }
     }
 
