@@ -18,7 +18,7 @@
 backend/            FastAPI application, tests, Docker/Nginx config
 frontend/main.html  Browser editor UI markup
 frontend/css/       Frontend styles
-frontend/js/        Frontend API client, editor state, compile/export, AI UI logic
+frontend/js/        Frontend state, API, editor, compile/export, AI UI scripts
 ```
 
 ## Quick start
@@ -136,7 +136,7 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 
 ## Frontend/backend integration
 
-`frontend/main.html` loads `frontend/css/app.css` and `frontend/js/main.js`; the frontend API client in `frontend/js/main.js` starts by:
+`frontend/main.html` loads `frontend/css/app.css` and ordered scripts from `frontend/js/`; the frontend startup flow:
 
 1. calls `GET /api/health`;
 2. loads a saved project from `localStorage` or creates a new one with the `article` template;
@@ -407,7 +407,7 @@ node --check frontend/js/*.js
 
 ## Known limitations
 
-- Frontend CSS and JavaScript are split out of `frontend/main.html`, but `frontend/js/main.js` is still a single application script. A future cleanup should split API, state, file operations, compile/export, and UI helpers into smaller modules.
+- Frontend CSS and JavaScript are split out of `frontend/main.html`, and application JavaScript is grouped into ordered scripts under `frontend/js/`. A future cleanup can migrate these classic scripts to ES modules or TypeScript once a build step is introduced.
 - Local preview is an approximate HTML/KaTeX rendering path; authoritative PDF output comes from the backend LaTeX compiler.
 - Server-side compile/export requires a working LaTeX installation. Without `pdflatex`, compile endpoints return errors while the frontend can still use local preview fallback.
 - Generated Russian documents require `russian.ldf`/T2A support from `texlive-lang-cyrillic`; otherwise `babel` may fail with `Unknown option 'russian'`.
