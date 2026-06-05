@@ -25,16 +25,16 @@ celery_app.conf.update(
 
 
 @celery_app.task(bind=True, max_retries=3)
-def compile_task(self, main_content: str, files: dict, project_id: str) -> dict:
+def compile_task(self, main_content: str, files: dict[str, str], project_id: str) -> dict[str, str | None]:
     """Async compilation task."""
     compiler = LatexCompiler()
     try:
         result = compiler.compile(main_content, files)
         return {
             "project_id": project_id,
-            "status": result["status"],
-            "compile_time": result.get("compile_time"),
-            "error": result.get("error"),
+            "status": result.status,
+            "compile_time": result.compile_time,
+            "error": result.error,
         }
     except Exception as exc:
         raise self.retry(exc=exc, countdown=2 ** self.request.retries)
