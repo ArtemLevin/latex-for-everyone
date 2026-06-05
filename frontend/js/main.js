@@ -416,17 +416,11 @@ $$E = mc^2$$
             await loadTemplates();
             openInitialFile();
             renderFileTree();
-            showToast('Соединение с backend установлено', 'success');
-            try {
-                await compileLatex();
-            } catch (compileError) {
-                showCompileError(compileError.message);
-            }
+            showToast('Соединение с backend установлено. Нажмите «Компиляция», чтобы собрать PDF.', 'success');
         } catch (error) {
             setBackendAvailability(false);
             renderFileTree();
-            compileLatexLocal();
-            showToast(`Backend недоступен: ${error.message}. Работаем локально.`, 'error');
+            showToast(`Backend недоступен: ${error.message}. Документ открыт без автокомпиляции.`, 'error');
         }
     }
 
@@ -1340,11 +1334,11 @@ $$E = mc^2$$
         const provider = getGenerationFieldValue('generationProvider');
         const modelInput = document.getElementById('generationModel');
         if (!modelInput) return;
-        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'qwen2.5:14b')) {
+        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'gemma4')) {
             modelInput.value = 'gpt-4o-mini';
         }
         if (provider === 'ollama' && (!modelInput.value || modelInput.value === 'gpt-4o-mini')) {
-            modelInput.value = 'qwen2.5:14b';
+            modelInput.value = 'gemma4';
         }
     }
 
@@ -1370,6 +1364,8 @@ $$E = mc^2$$
         if (!preset || !preset.defaults) return;
         const mapping = {
             level: 'generationLevel',
+            language: 'generationLanguage',
+            content_source_mode: 'generationContentSourceMode',
             alpha_code: 'generationAlpha',
             beta_code: 'generationBeta',
             gamma_code: 'generationGamma',
@@ -1393,6 +1389,8 @@ $$E = mc^2$$
             project_id: currentProject?.id || null,
             fields: {
                 level: getGenerationFieldValue('generationLevel') || 'ЕГЭ',
+                language: getGenerationFieldValue('generationLanguage') || 'русский',
+                content_source_mode: getGenerationFieldValue('generationContentSourceMode') || 'materials_only',
                 alpha_code: parseInt(getGenerationFieldValue('generationAlpha') || '1', 10),
                 beta_code: parseInt(getGenerationFieldValue('generationBeta') || '1', 10),
                 gamma_code: parseInt(getGenerationFieldValue('generationGamma') || '4', 10),
