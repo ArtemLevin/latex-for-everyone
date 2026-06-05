@@ -156,6 +156,40 @@ def test_latex_compiler_adds_russian_babel_environment_hint():
     assert "texlive-lang-cyrillic" in errors
 
 
+def test_latex_compiler_returns_typed_result_for_compiler_error(monkeypatch):
+    from app.services.latex_compiler import LatexCompiler
+    from app.schemas import LatexCompileResult
+
+    compiler = LatexCompiler()
+    monkeypatch.setattr(compiler, "compiler", "definitely-missing-pdflatex")
+
+    result = compiler.compile(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+    assert isinstance(result, LatexCompileResult)
+    assert result.status == "error"
+    assert result.error
+
+
+def test_pdf_generator_returns_typed_result_for_missing_pdf(monkeypatch, tmp_path):
+    import subprocess
+    from app.services.pdf_generator import PDFGenerator
+    from app.schemas import PDFGenerationResult
+
+    generator = PDFGenerator()
+    monkeypatch.setattr(generator, "output_dir", tmp_path)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = generator.generate_pdf(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+    assert isinstance(result, PDFGenerationResult)
+    assert result.success is False
+    assert result.error == "PDF was not generated"
+
+
 def test_compile_raw(monkeypatch):
     from app.routers import compile as compile_router
 
@@ -270,9 +304,19 @@ def test_frontend_bootstrap_contract_creates_template_project_and_updates_main_f
 
 
 def test_frontend_generation_ui_contract():
-    frontend_html = Path(__file__).resolve().parents[2] / "frontend" / "main.html"
-    content = frontend_html.read_text(encoding="utf-8")
+    frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
+    frontend_html = frontend_dir / "main.html"
+    frontend_js_files = sorted((frontend_dir / "js").glob("*.js"))
+    content = "\n".join(
+        [
+            frontend_html.read_text(encoding="utf-8"),
+            *(path.read_text(encoding="utf-8") for path in frontend_js_files),
+        ]
+    )
 
+    assert 'href="css/app.css"' in content
+    assert 'src="js/01-state.js"' in content
+    assert 'src="js/09-ui-settings.js"' in content
     assert 'id="generationModal"' in content
     assert 'id="generationTopic"' in content
     assert 'id="generationMaterials"' in content
@@ -409,6 +453,90 @@ def test_export_tex_rejects_path_traversal_filename(tmp_path, monkeypatch):
 
     assert response.status_code == 400
     assert "Invalid export filename" in response.json()["detail"]
+
+
+def test_export_download_serves_existing_export_file(tmp_path, monkeypatch):
+    from app.config import settings
+
+    export_dir = tmp_path / "exports"
+    export_dir.mkdir()
+    export_file = export_dir / "document.html"
+    export_file.write_text("<html>ok</html>", encoding="utf-8")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+
+    response = client.get("/api/export/download/document.html")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert response.text == "<html>ok</html>"
+
+
+def test_export_download_rejects_unsupported_file_type(tmp_path, monkeypatch):
+    from app.config import settings
+
+    export_dir = tmp_path / "exports"
+    export_dir.mkdir()
+    (export_dir / "payload.txt").write_text("not an export", encoding="utf-8")
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+
+    response = client.get("/api/export/download/payload.txt")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Unsupported export file type"
+
+
+def test_export_download_rejects_path_traversal_filename():
+    from fastapi import HTTPException
+    from app.routers.export import resolve_export_download_path
+
+    with pytest.raises(HTTPException) as exc_info:
+        resolve_export_download_path("../evil.zip")
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Invalid export filename"
+
+
+def test_snapshot_endpoints_use_typed_contracts():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Snapshot Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    create_response = client.post(
+        f"/api/projects/{project_id}/snapshot",
+        json={"name": "Manual snapshot", "data": {"files": []}},
+    )
+
+    assert create_response.status_code == 201
+    snapshot = create_response.json()
+    assert snapshot["project_id"] == project_id
+    assert snapshot["name"] == "Manual snapshot"
+    assert "id" in snapshot
+    assert "created_at" in snapshot
+
+    list_response = client.get(f"/api/projects/{project_id}/snapshots")
+    assert list_response.status_code == 200
+    snapshots = list_response.json()
+    assert len(snapshots) == 1
+    assert snapshots[0]["id"] == snapshot["id"]
+    assert snapshots[0]["project_id"] == project_id
+
+
+def test_snapshot_rejects_mismatched_body_project_id():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Snapshot Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/projects/{project_id}/snapshot",
+        json={"project_id": "00000000-0000-0000-0000-000000000000", "data": {}},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Snapshot project_id does not match path project_id"
 
 
 def test_generation_presets():

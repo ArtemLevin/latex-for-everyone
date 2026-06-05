@@ -4,7 +4,7 @@ SHELL := /bin/bash
 ROOT_DIR := $(CURDIR)
 BACKEND_DIR := $(ROOT_DIR)/backend
 FRONTEND_DIR := $(ROOT_DIR)/frontend
-FRONTEND_JS := /tmp/frontend-main.js
+FRONTEND_JS_FILES := $(sort $(wildcard $(FRONTEND_DIR)/js/*.js))
 
 # ---- Runtime configuration ------------------------------------------------
 HOST ?= 0.0.0.0
@@ -96,9 +96,9 @@ compileall: ## Compile backend Python files to catch syntax errors.
 	$(UV) run $(UV_PROJECT) $(PYTHON) -m compileall $(BACKEND_DIR)/app
 
 .PHONY: frontend-check
-frontend-check: ## Extract inline JavaScript from frontend/main.html and run node --check.
-	$(PYTHON) -c "from pathlib import Path; text = Path('frontend/main.html').read_text(); start = text.rfind('<script>') + len('<script>'); end = text.rfind('</script>'); Path('$(FRONTEND_JS)').write_text(text[start:end])"
-	node --check $(FRONTEND_JS)
+frontend-check: ## Run node --check for frontend JavaScript files.
+	@test -n "$(FRONTEND_JS_FILES)" || (echo "No frontend JavaScript files found" && exit 1)
+	node --check $(FRONTEND_JS_FILES)
 
 .PHONY: check
 check: compileall frontend-check test ## Run all local checks.
@@ -128,8 +128,8 @@ docker-logs: ## Follow docker compose logs.
 
 # ---- Cleanup ---------------------------------------------------------------
 .PHONY: clean
-clean: ## Remove local test databases, caches, and generated frontend JS check file.
-	rm -f $(BACKEND_DIR)/latexed.db $(BACKEND_DIR)/test_latexed.db $(ROOT_DIR)/latexed.db $(ROOT_DIR)/test_latexed.db $(FRONTEND_JS)
+clean: ## Remove local test databases and Python/test caches.
+	rm -f $(BACKEND_DIR)/latexed.db $(BACKEND_DIR)/test_latexed.db $(ROOT_DIR)/latexed.db $(ROOT_DIR)/test_latexed.db
 	find $(ROOT_DIR) -type d \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +
 
 .PHONY: clean-venv
