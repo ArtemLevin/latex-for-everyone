@@ -8,6 +8,7 @@ FORBIDDEN_LATEX_PATTERNS = {
     r"\\input\s*\|": "Запрещен shell-pipe ввод через \\input|... .",
     r"\\(?:input|include)\s*\{\s*(?:/|\.\.|[A-Za-z]:)": "Запрещены абсолютные и родительские пути в \\input/\\include.",
     r"\\includegraphics(?:\[[^\]]*\])?\s*\{\s*(?:/|\.\.|[A-Za-z]:|https?://)": "Запрещены внешние, абсолютные и родительские пути в \\includegraphics.",
+    r"\\usepackage\s*\[[^\]]*\blist\s*=\s*true\b[^\]]*\]\s*\{\s*enumitem\s*\}": "Опция list=true недопустима для enumitem; используйте \\usepackage{enumitem} без этой опции.",
 }
 
 

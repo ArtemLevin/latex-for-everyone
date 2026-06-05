@@ -1,12 +1,13 @@
 import subprocess
 import tempfile
-import os
-import time
+import uuid
 import shutil
 import logging
 from pathlib import Path
 from typing import Optional
 from app.config import settings
+from app.schemas import PDFGenerationResult
+from app.services.latex_sanitizer import sanitize_latex_files, sanitize_latex_source
 
 logger = logging.getLogger(__name__)
 
@@ -22,25 +23,24 @@ class PDFGenerator:
         self,
         main_content: str,
         files: Optional[dict[str, str]] = None,
-    ) -> dict:
+    ) -> PDFGenerationResult:
         """Generate PDF and save to output directory."""
-        import tempfile
-        import uuid
-
         compile_id = str(uuid.uuid4())
 
         with tempfile.TemporaryDirectory() as tmpdir:
             work_dir = Path(tmpdir)
 
+            sanitized_files = sanitize_latex_files(files or {})
+            sanitized_main_content = sanitize_latex_source(main_content)
+
             # Write all files
-            if files:
-                for filename, content in files.items():
-                    safe_name = Path(filename).name
-                    (work_dir / safe_name).write_text(content, encoding="utf-8")
+            for filename, content in sanitized_files.items():
+                safe_name = Path(filename).name
+                (work_dir / safe_name).write_text(content, encoding="utf-8")
 
             main_file = work_dir / "main.tex"
             if not main_file.exists():
-                main_file.write_text(main_content, encoding="utf-8")
+                main_file.write_text(sanitized_main_content, encoding="utf-8")
 
             # Compile
             for run in range(2):
@@ -64,16 +64,16 @@ class PDFGenerator:
                         error_text = ""
                         if log_file.exists():
                             error_text = log_file.read_text()[-2000:]
-                        return {
-                            "success": False,
-                            "error": f"Compilation failed:\n{error_text}",
-                        }
+                        return PDFGenerationResult(
+                            success=False,
+                            error=f"Compilation failed:\n{error_text}",
+                        )
 
                 except subprocess.TimeoutExpired:
-                    return {
-                        "success": False,
-                        "error": f"Compilation timed out after {self.timeout}s",
-                    }
+                    return PDFGenerationResult(
+                        success=False,
+                        error=f"Compilation timed out after {self.timeout}s",
+                    )
 
             # Save PDF
             pdf_file = work_dir / "main.pdf"
@@ -82,16 +82,16 @@ class PDFGenerator:
                 pdf_dest = self.output_dir / pdf_filename
                 shutil.copy2(pdf_file, pdf_dest)
 
-                return {
-                    "success": True,
-                    "filename": pdf_filename,
-                    "size": pdf_dest.stat().st_size,
-                }
+                return PDFGenerationResult(
+                    success=True,
+                    filename=pdf_filename,
+                    size=pdf_dest.stat().st_size,
+                )
 
-            return {
-                "success": False,
-                "error": "PDF was not generated",
-            }
+            return PDFGenerationResult(
+                success=False,
+                error="PDF was not generated",
+            )
 
     def generate_html(self, latex_content: str) -> str:
         """Convert LaTeX to HTML (basic conversion)."""
