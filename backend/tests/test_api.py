@@ -385,6 +385,60 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
 
 
+def test_compile_raw_rejects_too_many_files(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILES", 1)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Main\end{document}",
+            "files": {"notes.tex": "Notes"},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "Too many LaTeX files" in response.json()["detail"]
+
+
+def test_compile_raw_rejects_oversized_entrypoint(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILE_CHARS", 10)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Too large\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "__entrypoint__.tex" in response.json()["detail"]
+    assert "too large" in response.json()["detail"]
+
+
+def test_export_tex_rejects_payload_over_total_limit(monkeypatch):
+    from app.config import settings
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Oversized Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    monkeypatch.setattr(settings, "MAX_LATEX_TOTAL_CHARS", 10)
+
+    response = client.post(
+        "/api/export/tex",
+        json={"project_id": project_id, "format": "tex", "content": {"main.tex": "x" * 20}},
+    )
+
+    assert response.status_code == 413
+    assert "LaTeX payload is too large" in response.json()["detail"]
+
+
 def test_compile_history_project_and_item_routes(monkeypatch):
     from app.routers import compile as compile_router
 
@@ -748,6 +802,28 @@ def test_generation_prompt_warns_against_invalid_enumitem_list_true_option():
     assert r"\usepackage[list=true]{enumitem}" not in prompt
     assert r"\usepackage[expansion=false]{microtype}" in prompt
     assert "невалидная опция enumitem" in prompt
+
+
+def test_generation_prompt_includes_style_reference_latex():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Квадратные уравнения"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert "РЕФЕРЕНС СТИЛЯ И ОФОРМЛЕНИЯ" in prompt
+    assert "<STYLE_REFERENCE_LATEX>" in prompt
+    assert r"\documentclass[a4paper,11pt]{article}" in prompt
+    assert r"\usepackage{helvet}" in prompt
+    assert r"\geometry{" in prompt
+    assert "margin=2.3cm" in prompt
+    assert r"\onehalfspacing" in prompt
+    assert r"\newenvironment{infoblock}" in prompt
+    assert r"\newenvironment{taskblock}" in prompt
+    assert r"\newcommand{\answer}" in prompt
+    assert "Обучающее пособие для углублённого изучения" in prompt
+    assert "сохранить технический минимум из OUTPUT_CONTRACT" in prompt
 
 
 def test_generation_prompt_preview_includes_fields_and_materials():
