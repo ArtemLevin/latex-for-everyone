@@ -127,6 +127,8 @@ Update AI generation behavior while preserving:
 - rate and text limits;
 - provider error sanitization;
 - structural LaTeX validation;
+- backend wrapping of model output with the fixed Latexed preamble;
+- prompt instructions that tell the model to return only document body content, not `\documentclass`, `\usepackage`, `\begin{document}`, or `\end{document}`;
 - safe logging with hashes/lengths instead of full prompts.
 Update frontend insertion/status UI if response shape changes.
 ```

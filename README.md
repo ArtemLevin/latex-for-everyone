@@ -365,7 +365,7 @@ Use this checklist to verify the complete generation path manually after the bac
 6. Click **Проверить провайдера** and confirm the selected provider/model is available.
 7. Choose where to place the result: create a new `generated.tex`, replace the active file, or append to the active file.
 8. Click **Сгенерировать и вставить**.
-9. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`.
+9. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`; the backend now wraps the model's body-only answer with the fixed Latexed preamble (Russian/T2A, math, tables, TikZ/pgfplots, typography, blocks, and hyperref/tcolorbox packages).
 10. Click **Проверить .tex** if you want to validate the current editor content again.
 11. Compile with **Компиляция** or `Ctrl+Enter`.
 12. Confirm the PDF preview loads when `pdflatex` is available, or review the compile error panel if LaTeX needs correction.

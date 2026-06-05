@@ -833,7 +833,8 @@ def test_generation_prompt_includes_style_reference_latex():
     assert r"\newenvironment{taskblock}" in prompt
     assert r"\newcommand{\answer}" in prompt
     assert "Обучающее пособие для углублённого изучения" in prompt
-    assert "сохранить технический минимум из OUTPUT_CONTRACT" in prompt
+    assert "Не выводите преамбулу из референса" in prompt
+    assert "backend добавит фиксированный технический минимум" in prompt
 
 
 def test_generation_prompt_preview_includes_fields_and_materials():
@@ -867,6 +868,30 @@ def test_generation_prompt_preview_includes_fields_and_materials():
     assert "строго только по материалам пользователя" in data["prompt"]
     assert "Решить неравенство 2^x > 8." in data["prompt"]
     assert "```latex```" in data["prompt"]
+    assert "верните только тело LaTeX-документа" in data["prompt"]
+    assert "Строго НЕ пишите преамбулу" in data["prompt"]
+
+
+def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {
+                "topic": "Квадратные уравнения",
+                "language": "английский",
+                "content_source_mode": "ai_creative",
+            },
+            "materials": "",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["warnings"] == []
+    assert "Язык пособия: английский" in data["prompt"]
+    assert "Режим источника содержания: ai_creative" in data["prompt"]
+    assert "разрешено генерировать содержание от себя" in data["prompt"]
+    assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
 
 
 def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
@@ -1047,7 +1072,7 @@ def test_generation_validate_accepts_minimal_document_with_warnings():
     assert data["warnings"]
 
 
-def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
+def test_generation_generate_wraps_provider_body_with_fixed_preamble(monkeypatch):
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
@@ -1057,7 +1082,7 @@ def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
         assert model == "qwen2.5:14b"
         return (
             "```latex\n"
-            r"\documentclass{article}\begin{document}Generated\end{document}"
+            r"\section{Сгенерировано}Generated"
             "\n```",
             "ollama",
             "qwen2.5:14b",
@@ -1082,10 +1107,42 @@ def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
     assert data["status"] == "success"
     assert data["provider"] == "ollama"
     assert data["model"] == "qwen2.5:14b"
-    assert data["latex_code"] == r"\documentclass{article}\begin{document}Generated\end{document}"
+    assert data["latex_code"].startswith(r"\documentclass[a4paper,11pt]{article}")
+    assert r"\usepackage{hyperref}" in data["latex_code"]
+    assert r"\usepackage[most]{tcolorbox}" in data["latex_code"]
+    assert r"\begin{document}" in data["latex_code"]
+    assert r"\section{Сгенерировано}Generated" in data["latex_code"]
+    assert data["latex_code"].endswith(r"\end{document}")
     assert data["raw_output"].startswith("```latex")
     assert data["validation"]["valid"] is True
-    assert data["validation"]["warnings"]
+    assert data["validation"]["warnings"] == []
+
+
+def test_generation_generate_strips_accidental_model_preamble(monkeypatch):
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\documentclass{article}\usepackage{graphicx}\begin{document}Generated full doc\end{document}"
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Преамбула"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["latex_code"].count(r"\documentclass") == 1
+    assert r"\usepackage{graphicx}" not in data["latex_code"]
+    assert "Generated full doc" in data["latex_code"]
+    assert data["validation"]["valid"] is True
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
