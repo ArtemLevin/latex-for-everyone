@@ -134,6 +134,17 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 - Backend commands run from `backend/` so `app.main:app` imports resolve the same way they do with plain `uvicorn`.
 - `requirements.txt` remains available for Docker and pip-based workflows.
 
+
+## Runtime artifacts and cleanup
+
+Latexed creates local runtime files during development and tests. These files are intentionally ignored by git:
+
+- SQLite databases such as `latexed.db`, `test_latexed.db`, `*.sqlite`, and `*.sqlite3`;
+- Python/test caches such as `__pycache__/` and `.pytest_cache/`;
+- generated compile/export/upload artifacts under the configured runtime directories, for example `/tmp/latexed_compiles` and `/tmp/latexed_uploads`.
+
+Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Generated files under `/tmp` can be removed with normal OS cleanup commands when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
+
 ## Frontend/backend integration
 
 `frontend/main.html` loads `frontend/css/app.css` and ordered scripts from `frontend/js/`; the frontend startup flow:
