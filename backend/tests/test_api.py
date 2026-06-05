@@ -531,6 +531,7 @@ def test_frontend_generation_ui_contract():
     content = "\n".join(
         [
             frontend_html.read_text(encoding="utf-8"),
+            (frontend_dir / "css/app.css").read_text(encoding="utf-8"),
             *(path.read_text(encoding="utf-8") for path in frontend_js_files),
         ]
     )
@@ -566,6 +567,8 @@ def test_frontend_generation_ui_contract():
     assert "ensureAdjacentPreviewVisible" in content
     assert "pdf-preview-frame" in content
     assert "pdf-preview-container" in content
+    assert "overflow: hidden" in content
+    assert "zoom=page-width" in content
     preview_content = "\n".join(
         (frontend_dir / path).read_text(encoding="utf-8")
         for path in ["js/02-api.js", "js/05-compile-preview.js", "js/06-toolbar-view.js"]

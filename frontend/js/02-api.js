@@ -162,7 +162,7 @@
         setPreviewPdfMode(true);
         const url = resolveApiUrl(pdfUrl);
         document.getElementById('previewContent').innerHTML = `
-            <iframe class="pdf-preview-frame" src="${url}#toolbar=0&navpanes=0" title="PDF preview"></iframe>
+            <iframe class="pdf-preview-frame" src="${url}#toolbar=0&navpanes=0&view=FitH&zoom=page-width" title="PDF preview"></iframe>
         `;
     }
 
