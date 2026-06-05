@@ -385,6 +385,60 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
 
 
+def test_compile_raw_rejects_too_many_files(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILES", 1)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Main\end{document}",
+            "files": {"notes.tex": "Notes"},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "Too many LaTeX files" in response.json()["detail"]
+
+
+def test_compile_raw_rejects_oversized_entrypoint(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILE_CHARS", 10)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Too large\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "__entrypoint__.tex" in response.json()["detail"]
+    assert "too large" in response.json()["detail"]
+
+
+def test_export_tex_rejects_payload_over_total_limit(monkeypatch):
+    from app.config import settings
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Oversized Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    monkeypatch.setattr(settings, "MAX_LATEX_TOTAL_CHARS", 10)
+
+    response = client.post(
+        "/api/export/tex",
+        json={"project_id": project_id, "format": "tex", "content": {"main.tex": "x" * 20}},
+    )
+
+    assert response.status_code == 413
+    assert "LaTeX payload is too large" in response.json()["detail"]
+
+
 def test_compile_history_project_and_item_routes(monkeypatch):
     from app.routers import compile as compile_router
 
