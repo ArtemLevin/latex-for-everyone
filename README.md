@@ -187,6 +187,8 @@ For production, the simplest shape is:
 
 If the API lives on a different host, configure `window.LATEXED_API_BASE_URL` or the `latexed-api-base-url` meta tag.
 
+When `DEBUG=false`, FastAPI also applies Trusted Host validation from `ALLOWED_HOSTS`. The development default is permissive so local tools and `TestClient` continue to work, but production deployments should set this list to the exact public hostnames served by the reverse proxy.
+
 If the browser shows a failed `OPTIONS /api/health` preflight, check that the frontend origin is allowed by `CORS_ORIGINS` or `CORS_ORIGIN_REGEX`. Local development defaults allow `localhost`, `127.0.0.1`, and `0.0.0.0` on any port.
 
 ## API endpoints
@@ -233,6 +235,7 @@ Deprecated compatibility routes are still available for compile history:
 | `DATABASE_URL` | `sqlite:///./latexed.db` | Database connection string |
 | `DEBUG` | `false` | Debug mode |
 | `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
+| `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; override with exact public/reverse-proxy hostnames in production |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
 | `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
