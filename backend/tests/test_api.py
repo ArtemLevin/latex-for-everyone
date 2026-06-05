@@ -170,13 +170,30 @@ def test_latex_compiler_adds_enumitem_list_true_source_hint():
     assert "\\usepackage{enumitem}" in errors
 
 
-def test_latex_sanitizer_removes_only_enumitem_list_true_option():
+def test_latex_compiler_adds_microtype_font_expansion_hint():
+    from app.services.latex_compiler import LatexCompiler
+
+    log_text = """
+! pdfTeX error (font expansion): auto expansion is only possible with scalable fonts.
+!  ==> Fatal error occurred, no output PDF file produced!
+"""
+    errors = LatexCompiler()._extract_errors(log_text)
+
+    assert "font expansion" in errors
+    assert "\\usepackage[expansion=false]{microtype}" in errors
+
+
+def test_latex_sanitizer_normalizes_known_package_options():
     from app.services.latex_sanitizer import sanitize_latex_source
 
     content = r"\usepackage[list=true,shortlabels]{enumitem}"
 
     assert sanitize_latex_source(content) == r"\usepackage[shortlabels]{enumitem}"
     assert sanitize_latex_source(r"\usepackage[list=true]{enumitem}") == r"\usepackage{enumitem}"
+    assert sanitize_latex_source(r"\usepackage{microtype}") == r"\usepackage[expansion=false]{microtype}"
+    assert sanitize_latex_source(r"\usepackage[protrusion=true,expansion=true]{microtype}") == (
+        r"\usepackage[protrusion=true,expansion=false]{microtype}"
+    )
 
 
 def test_latex_compiler_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch, tmp_path):
@@ -192,13 +209,15 @@ def test_latex_compiler_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch
         main_tex = (work_dir / "main.tex").read_text(encoding="utf-8")
         assert r"\usepackage[list=true]{enumitem}" not in main_tex
         assert r"\usepackage{enumitem}" in main_tex
+        assert r"\usepackage{microtype}" not in main_tex
+        assert r"\usepackage[expansion=false]{microtype}" in main_tex
         (work_dir / "main.pdf").write_bytes(b"%PDF-1.4 sanitized")
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = compiler.compile(
-        r"\documentclass{article}\usepackage[list=true]{enumitem}\begin{document}Text\end{document}"
+        r"\documentclass{article}\usepackage[list=true]{enumitem}\usepackage{microtype}\begin{document}Text\end{document}"
     )
 
     assert result.status == "success"
@@ -279,13 +298,15 @@ def test_pdf_generator_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch,
         main_tex = (work_dir / "main.tex").read_text(encoding="utf-8")
         assert r"\usepackage[list=true]{enumitem}" not in main_tex
         assert r"\usepackage{enumitem}" in main_tex
+        assert r"\usepackage{microtype}" not in main_tex
+        assert r"\usepackage[expansion=false]{microtype}" in main_tex
         (work_dir / "main.pdf").write_bytes(b"%PDF-1.4 sanitized")
         return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
 
     result = generator.generate_pdf(
-        r"\documentclass{article}\usepackage[list=true]{enumitem}\begin{document}Text\end{document}"
+        r"\documentclass{article}\usepackage[list=true]{enumitem}\usepackage{microtype}\begin{document}Text\end{document}"
     )
 
     assert result.success is True
@@ -725,6 +746,7 @@ def test_generation_prompt_warns_against_invalid_enumitem_list_true_option():
     assert response.status_code == 200
     prompt = response.json()["prompt"]
     assert r"\usepackage[list=true]{enumitem}" not in prompt
+    assert r"\usepackage[expansion=false]{microtype}" in prompt
     assert "невалидная опция enumitem" in prompt
 
 

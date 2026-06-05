@@ -9,6 +9,7 @@ GENERATION_ROLE = (
 OUTPUT_CONTRACT = r"""OUTPUT (ЖЁСТКО): верните только один компилируемый LaTeX-файл (pdfLaTeX) в одном блоке ```latex```, от \documentclass до \end{document}. Без текста до/после.
 Технический минимум: \documentclass[a4paper,11pt]{article}; T2A, utf8, russian babel; helvet; amsmath, amssymb, mathtools, amsthm; booktabs, longtable, array, tabularx, colortbl; geometry; titlesec; setspace; enumitem; tcolorbox[most]; tikz с библиотеками calc, intersections, through; pgfplots; xcolor; hyperref; microtype.
 Для enumitem подключайте только как \usepackage{enumitem}; не передавайте package option list=true, потому что это невалидная опция enumitem в pdfLaTeX.
+Для microtype используйте \usepackage[expansion=false]{microtype}; font expansion часто падает с T2A/кириллическими bitmap-шрифтами в pdfLaTeX.
 Строго не используйте \uppercase. Не пишите слова "Cheat Sheet" в документе; используйте "Итоговая сводка".
 """
 

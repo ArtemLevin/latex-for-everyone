@@ -172,6 +172,13 @@ class LatexCompiler:
                 "Use \\usepackage{enumitem} without list=true; configure lists with \\setlist{...} instead."
             )
 
+        if "font expansion" in lower_log and "only possible with scalable" in lower_log:
+            errors.append(
+                "LaTeX source hint: pdfTeX font expansion requires scalable fonts. "
+                "Use \\usepackage[expansion=false]{microtype} or disable microtype expansion "
+                "when compiling T2A/Cyrillic documents."
+            )
+
         if (
             "unknown option 'russian'" in lower_log
             or "unknown option `russian'" in lower_log
