@@ -8,12 +8,14 @@
             if (backendAvailable && currentProject) {
                 await saveCurrentFile();
                 const allFiles = collectFilesByName();
-                const mainFile = Object.values(files).find(file => file.is_main) || files[currentFileId];
+                const selectedFile = files[currentFileId] || Object.values(files).find(file => file.is_main);
+                const selectedContent = selectedFile?.content || editor.getValue();
                 const result = await apiRequest('/compile/', {
                     method: 'POST',
                     body: JSON.stringify({
                         project_id: currentProject.id,
-                        main_file_content: mainFile?.content || editor.getValue(),
+                        main_file_name: selectedFile?.name || 'main.tex',
+                        main_file_content: selectedContent,
                         all_files: allFiles
                     })
                 });

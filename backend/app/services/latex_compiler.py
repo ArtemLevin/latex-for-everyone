@@ -22,6 +22,7 @@ class LatexCompiler:
         self,
         main_content: str,
         files: Optional[dict[str, str]] = None,
+        main_filename: str = "main.tex",
     ) -> LatexCompileResult:
         """Compile a LaTeX document into a typed service result."""
         start_time = time.time()
@@ -33,6 +34,7 @@ class LatexCompiler:
 
             sanitized_files = sanitize_latex_files(files or {})
             sanitized_main_content = sanitize_latex_source(main_content)
+            safe_main_name = Path(main_filename).name or "main.tex"
 
             # Write all files
             for filename, content in sanitized_files.items():
@@ -41,10 +43,10 @@ class LatexCompiler:
                 filepath = work_dir / safe_name
                 filepath.write_text(content, encoding="utf-8")
 
-            # Write main file
-            main_file = work_dir / "main.tex"
-            if not main_file.exists():
-                main_file.write_text(sanitized_main_content, encoding="utf-8")
+            # Always write the selected compile entrypoint last so request overrides
+            # cannot be shadowed by a same-named project file already in all_files.
+            main_file = work_dir / safe_main_name
+            main_file.write_text(sanitized_main_content, encoding="utf-8")
 
             # Compile with pdflatex (run twice for references)
             log_output: list[str] = []
@@ -57,7 +59,7 @@ class LatexCompiler:
                             "-interaction=nonstopmode",
                             "-halt-on-error",
                             "-output-directory", str(work_dir),
-                            "main.tex",
+                            safe_main_name,
                         ],
                         cwd=str(work_dir),
                         capture_output=True,
@@ -68,7 +70,7 @@ class LatexCompiler:
 
                     if result.returncode != 0:
                         # Check for errors in log
-                        log_file = work_dir / "main.log"
+                        log_file = work_dir / f"{Path(safe_main_name).stem}.log"
                         if log_file.exists():
                             log_text = log_file.read_text()
                             errors = self._extract_errors(log_text)
@@ -98,7 +100,7 @@ class LatexCompiler:
                     )
 
             # Check if PDF was generated
-            pdf_file = work_dir / "main.pdf"
+            pdf_file = work_dir / f"{Path(safe_main_name).stem}.pdf"
             pdf_url = None
 
             if pdf_file.exists():

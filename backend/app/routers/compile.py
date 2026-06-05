@@ -23,8 +23,9 @@ async def compile_project(
     db: Session = Depends(get_db),
 ):
     logger.info(
-        "compile project requested project_id=%s has_main_content=%s override_files=%s",
+        "compile project requested project_id=%s main_file_name=%s has_main_content=%s override_files=%s",
         request.project_id,
+        request.main_file_name or "default",
         bool(request.main_file_content),
         len(request.all_files or {}),
     )
@@ -42,20 +43,33 @@ async def compile_project(
     if request.all_files:
         files.update(request.all_files)
 
-    # Find main file
-    main_content = None
-    if request.main_file_content:
-        main_content = request.main_file_content
-    else:
+    # Find the compile entrypoint. The frontend passes the currently selected file
+    # as main_file_name; otherwise we keep the historical is_main/main.tex fallback.
+    main_file_name = Path(request.main_file_name).name if request.main_file_name else None
+    main_content = request.main_file_content
+
+    if main_file_name and main_content is None:
+        main_content = files.get(main_file_name)
+
+    if not main_file_name:
         main_file = next((f for f in project.files if f.is_main), None)
         if main_file:
-            main_content = main_file.content
+            main_file_name = main_file.name
+            main_content = main_content if main_content is not None else main_file.content
         else:
-            # Try main.tex
-            main_content = files.get("main.tex", "")
+            main_file_name = "main.tex"
+            main_content = main_content if main_content is not None else files.get(main_file_name, "")
+
+    if main_content is None:
+        main_content = files.get(main_file_name, "")
 
     if not main_content:
-        logger.warning("compile project missing main file project_id=%s files=%s", request.project_id, len(files))
+        logger.warning(
+            "compile project missing main file project_id=%s main_file_name=%s files=%s",
+            request.project_id,
+            main_file_name,
+            len(files),
+        )
         raise HTTPException(status_code=400, detail="No main LaTeX file found")
 
     # Create history record
@@ -65,10 +79,10 @@ async def compile_project(
     )
     db.add(history)
     db.flush()
-    logger.info("compile history created project_id=%s history_id=%s files=%s", request.project_id, history.id, len(files))
+    logger.info("compile history created project_id=%s history_id=%s main_file_name=%s files=%s", request.project_id, history.id, main_file_name, len(files))
 
     # Compile
-    result = LatexCompileResult.model_validate(compiler.compile(main_content, files))
+    result = LatexCompileResult.model_validate(compiler.compile(main_content, files, main_filename=main_file_name))
 
     # Update history
     history.status = result.status
@@ -77,9 +91,10 @@ async def compile_project(
     history.compile_time = result.compile_time
     db.commit()
     logger.info(
-        "compile project completed project_id=%s history_id=%s status=%s compile_time=%s pdf_url=%s",
+        "compile project completed project_id=%s history_id=%s main_file_name=%s status=%s compile_time=%s pdf_url=%s",
         request.project_id,
         history.id,
+        main_file_name,
         result.status,
         result.compile_time,
         result.pdf_url,

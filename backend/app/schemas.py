@@ -62,6 +62,7 @@ class ProjectDetailResponse(ProjectResponse):
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str
+    main_file_name: Optional[str] = None
     main_file_content: Optional[str] = None
     all_files: Optional[dict[str, str]] = None
 

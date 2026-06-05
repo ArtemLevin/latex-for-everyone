@@ -204,6 +204,34 @@ def test_latex_compiler_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch
     assert result.status == "success"
 
 
+def test_latex_compiler_uses_selected_main_filename(monkeypatch, tmp_path):
+    import subprocess
+    from pathlib import Path
+    from app.services.latex_compiler import LatexCompiler
+
+    compiler = LatexCompiler()
+    monkeypatch.setattr(compiler, "work_dir", tmp_path)
+
+    def fake_run(args, **kwargs):
+        work_dir = Path(kwargs["cwd"])
+        assert args[-1] == "chapter.tex"
+        assert (work_dir / "chapter.tex").read_text(encoding="utf-8") == "selected content"
+        assert (work_dir / "main.tex").read_text(encoding="utf-8") == "old main"
+        (work_dir / "chapter.pdf").write_bytes(b"%PDF-1.4 selected")
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = compiler.compile(
+        "selected content",
+        {"main.tex": "old main", "chapter.tex": "old chapter"},
+        main_filename="chapter.tex",
+    )
+
+    assert result.status == "success"
+    assert result.pdf_url
+
+
 def test_latex_compiler_returns_typed_result_for_compiler_error(monkeypatch):
     from app.services.latex_compiler import LatexCompiler
     from app.schemas import LatexCompileResult
@@ -294,10 +322,53 @@ Hello World!
     assert data["pdf_url"] == "/api/compile/download/test.pdf"
 
 
+def test_compile_project_uses_requested_main_file_name(monkeypatch):
+    from app.routers import compile as compile_router
+
+    selected_content = r"\documentclass{article}\begin{document}Selected\end{document}"
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        assert main_filename == "chapter.tex"
+        assert main_content == selected_content
+        assert files["main.tex"] != selected_content
+        assert files["chapter.tex"] == selected_content
+        return {
+            "status": "success",
+            "output": "Compiled selected",
+            "compile_time": "0.01s",
+            "pdf_url": "/api/compile/download/selected.pdf",
+        }
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Selected Compile Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/compile/",
+        json={
+            "project_id": project_id,
+            "main_file_name": "chapter.tex",
+            "main_file_content": selected_content,
+            "all_files": {
+                "main.tex": r"\documentclass{article}\begin{document}Main\end{document}",
+                "chapter.tex": selected_content,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
+
+
 def test_compile_history_project_and_item_routes(monkeypatch):
     from app.routers import compile as compile_router
 
-    def fake_compile(main_content, files):
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        assert main_filename == "main.tex"
         return {
             "status": "success",
             "output": "Compiled",
@@ -396,6 +467,7 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationMaterials"' in content
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
+    assert "main_file_name" in content
     assert "validateCurrentLatex" in content
     assert "checkGenerationProvider" in content
     assert 'id="generationInsertMode"' in content
