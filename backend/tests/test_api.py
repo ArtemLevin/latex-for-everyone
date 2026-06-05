@@ -385,6 +385,60 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
 
 
+def test_compile_raw_rejects_too_many_files(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILES", 1)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Main\end{document}",
+            "files": {"notes.tex": "Notes"},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "Too many LaTeX files" in response.json()["detail"]
+
+
+def test_compile_raw_rejects_oversized_entrypoint(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILE_CHARS", 10)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Too large\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "__entrypoint__.tex" in response.json()["detail"]
+    assert "too large" in response.json()["detail"]
+
+
+def test_export_tex_rejects_payload_over_total_limit(monkeypatch):
+    from app.config import settings
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Oversized Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    monkeypatch.setattr(settings, "MAX_LATEX_TOTAL_CHARS", 10)
+
+    response = client.post(
+        "/api/export/tex",
+        json={"project_id": project_id, "format": "tex", "content": {"main.tex": "x" * 20}},
+    )
+
+    assert response.status_code == 413
+    assert "LaTeX payload is too large" in response.json()["detail"]
+
+
 def test_compile_history_project_and_item_routes(monkeypatch):
     from app.routers import compile as compile_router
 
@@ -486,12 +540,17 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationModal"' in content
     assert 'id="generationTopic"' in content
     assert 'id="generationMaterials"' in content
+    assert 'id="generationLanguage"' in content
+    assert 'id="generationContentSourceMode"' in content
+    assert 'value="gemma4"' in content
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
     assert "main_file_name" in content
     assert "validateCurrentLatex" in content
     assert "checkGenerationProvider" in content
     assert 'id="generationInsertMode"' in content
+    assert "language: getGenerationFieldValue('generationLanguage')" in content
+    assert "content_source_mode: getGenerationFieldValue('generationContentSourceMode')" in content
     assert 'id="generationFilename"' in content
     assert "copyGenerationPrompt" in content
     assert "copyGenerationRawOutput" in content
@@ -713,6 +772,8 @@ def test_generation_presets():
     assert len(presets) >= 1
     assert presets[0]["id"] == "ege_math_11_hard"
     assert presets[0]["defaults"]["gamma_code"] == 4
+    assert presets[0]["defaults"]["language"] == "русский"
+    assert presets[0]["defaults"]["content_source_mode"] == "materials_only"
 
 
 def test_generation_prompt_logs_safe_summary(caplog, monkeypatch):
@@ -750,6 +811,28 @@ def test_generation_prompt_warns_against_invalid_enumitem_list_true_option():
     assert "невалидная опция enumitem" in prompt
 
 
+def test_generation_prompt_includes_style_reference_latex():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Квадратные уравнения"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert "РЕФЕРЕНС СТИЛЯ И ОФОРМЛЕНИЯ" in prompt
+    assert "<STYLE_REFERENCE_LATEX>" in prompt
+    assert r"\documentclass[a4paper,11pt]{article}" in prompt
+    assert r"\usepackage{helvet}" in prompt
+    assert r"\geometry{" in prompt
+    assert "margin=2.3cm" in prompt
+    assert r"\onehalfspacing" in prompt
+    assert r"\newenvironment{infoblock}" in prompt
+    assert r"\newenvironment{taskblock}" in prompt
+    assert r"\newcommand{\answer}" in prompt
+    assert "Обучающее пособие для углублённого изучения" in prompt
+    assert "сохранить технический минимум из OUTPUT_CONTRACT" in prompt
+
+
 def test_generation_prompt_preview_includes_fields_and_materials():
     response = client.post(
         "/api/generation/prompt",
@@ -775,8 +858,34 @@ def test_generation_prompt_preview_includes_fields_and_materials():
     assert data["warnings"] == []
     assert "Показательные неравенства" in data["prompt"]
     assert "Михаил Романов" in data["prompt"]
+    assert "Язык пособия: русский" in data["prompt"]
+    assert "ЯЗЫК ДОКУМЕНТА" in data["prompt"]
+    assert "Режим источника содержания: materials_only" in data["prompt"]
+    assert "строго только по материалам пользователя" in data["prompt"]
     assert "Решить неравенство 2^x > 8." in data["prompt"]
     assert "```latex```" in data["prompt"]
+
+
+def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {
+                "topic": "Квадратные уравнения",
+                "language": "английский",
+                "content_source_mode": "ai_creative",
+            },
+            "materials": "",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["warnings"] == []
+    assert "Язык пособия: английский" in data["prompt"]
+    assert "Режим источника содержания: ai_creative" in data["prompt"]
+    assert "разрешено генерировать содержание от себя" in data["prompt"]
+    assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
 
 
 def test_generation_prompt_preview_warns_without_topic_or_materials():
@@ -822,6 +931,19 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
     assert second_response.status_code == 429
     assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
     generation_router.rate_limit_buckets.clear()
+
+
+def test_ai_generation_service_defaults_to_gemma4_for_ollama(monkeypatch):
+    from app.config import settings
+    from app.services.ai_generation import AIGenerationService
+
+    monkeypatch.setattr(settings, "AI_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "OLLAMA_MODEL", "gemma4")
+
+    provider, model = AIGenerationService().resolve_provider_model()
+
+    assert provider == "ollama"
+    assert model == "gemma4"
 
 
 def test_generation_provider_status_uses_selected_provider_and_model(monkeypatch):
