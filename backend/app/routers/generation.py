@@ -33,6 +33,8 @@ PRESETS: list[GenerationPresetResponse] = [
         description="Базовый сценарий для обучающего пособия ЕГЭ по математике с одной сложной тренировочной задачей.",
         defaults={
             "level": "ЕГЭ",
+            "language": "русский",
+            "content_source_mode": "materials_only",
             "alpha_code": 1,
             "beta_code": 1,
             "gamma_code": 4,
@@ -107,8 +109,11 @@ def build_generation_prompt_response(request: GenerationRequest) -> GenerationPr
     enforce_text_limit("prompt", prompt, settings.AI_MAX_PROMPT_CHARS)
     warnings = []
     if not request.fields.topic:
-        warnings.append("Тема не указана: prompt потребует определить тему по материалам без домыслов.")
-    if not request.materials.strip():
+        if request.fields.content_source_mode == "materials_only":
+            warnings.append("Тема не указана: prompt потребует определить тему по материалам без домыслов.")
+        else:
+            warnings.append("Тема не указана: нейросеть будет выбирать тему самостоятельно, что может снизить точность пособия.")
+    if not request.materials.strip() and request.fields.content_source_mode == "materials_only":
         warnings.append("Материалы не переданы: prompt запрещает домысливать исходные задания.")
 
     logger.info(
