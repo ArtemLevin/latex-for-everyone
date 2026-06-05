@@ -804,6 +804,28 @@ def test_generation_prompt_warns_against_invalid_enumitem_list_true_option():
     assert "невалидная опция enumitem" in prompt
 
 
+def test_generation_prompt_includes_style_reference_latex():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Квадратные уравнения"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert "РЕФЕРЕНС СТИЛЯ И ОФОРМЛЕНИЯ" in prompt
+    assert "<STYLE_REFERENCE_LATEX>" in prompt
+    assert r"\documentclass[a4paper,11pt]{article}" in prompt
+    assert r"\usepackage{helvet}" in prompt
+    assert r"\geometry{" in prompt
+    assert "margin=2.3cm" in prompt
+    assert r"\onehalfspacing" in prompt
+    assert r"\newenvironment{infoblock}" in prompt
+    assert r"\newenvironment{taskblock}" in prompt
+    assert r"\newcommand{\answer}" in prompt
+    assert "Обучающее пособие для углублённого изучения" in prompt
+    assert "сохранить технический минимум из OUTPUT_CONTRACT" in prompt
+
+
 def test_generation_prompt_preview_includes_fields_and_materials():
     response = client.post(
         "/api/generation/prompt",
