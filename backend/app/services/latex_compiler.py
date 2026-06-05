@@ -1,5 +1,4 @@
 import subprocess
-import tempfile
 import os
 import time
 import shutil
@@ -7,6 +6,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 from app.config import settings
+from app.schemas import LatexCompileResult
 
 logger = logging.getLogger(__name__)
 
@@ -21,11 +21,8 @@ class LatexCompiler:
         self,
         main_content: str,
         files: Optional[dict[str, str]] = None,
-    ) -> dict:
-        """
-        Compile LaTeX document.
-        Returns dict with status, output, error, compile_time, pdf_url
-        """
+    ) -> LatexCompileResult:
+        """Compile a LaTeX document into a typed service result."""
         start_time = time.time()
         compile_id = f"compile_{int(time.time())}_{os.getpid()}"
         work_dir = self.work_dir / compile_id
@@ -47,8 +44,7 @@ class LatexCompiler:
                 main_file.write_text(main_content, encoding="utf-8")
 
             # Compile with pdflatex (run twice for references)
-            log_output = []
-            error_output = []
+            log_output: list[str] = []
 
             for run in range(2):
                 try:
@@ -66,7 +62,6 @@ class LatexCompiler:
                         timeout=self.timeout,
                     )
                     log_output.append(result.stdout)
-                    error_output.append(result.stderr)
 
                     if result.returncode != 0:
                         # Check for errors in log
@@ -76,28 +71,28 @@ class LatexCompiler:
                             errors = self._extract_errors(log_text)
                             if errors:
                                 compile_time = f"{time.time() - start_time:.2f}s"
-                                return {
-                                    "status": "error",
-                                    "error": errors,
-                                    "output": log_text[-2000:],
-                                    "compile_time": compile_time,
-                                }
+                                return LatexCompileResult(
+                                    status="error",
+                                    error=errors,
+                                    output=log_text[-2000:],
+                                    compile_time=compile_time,
+                                )
 
                         compile_time = f"{time.time() - start_time:.2f}s"
-                        return {
-                            "status": "error",
-                            "error": f"Compilation failed on run {run + 1}",
-                            "output": result.stdout[-2000:],
-                            "compile_time": compile_time,
-                        }
+                        return LatexCompileResult(
+                            status="error",
+                            error=f"Compilation failed on run {run + 1}",
+                            output=result.stdout[-2000:],
+                            compile_time=compile_time,
+                        )
 
                 except subprocess.TimeoutExpired:
                     compile_time = f"{time.time() - start_time:.2f}s"
-                    return {
-                        "status": "error",
-                        "error": f"Compilation timed out after {self.timeout}s",
-                        "compile_time": compile_time,
-                    }
+                    return LatexCompileResult(
+                        status="error",
+                        error=f"Compilation timed out after {self.timeout}s",
+                        compile_time=compile_time,
+                    )
 
             # Check if PDF was generated
             pdf_file = work_dir / "main.pdf"
@@ -115,21 +110,21 @@ class LatexCompiler:
 
             compile_time = f"{time.time() - start_time:.2f}s"
 
-            return {
-                "status": "success",
-                "output": log_output[-1] if log_output else "",
-                "compile_time": compile_time,
-                "pdf_url": pdf_url,
-            }
+            return LatexCompileResult(
+                status="success",
+                output=log_output[-1] if log_output else "",
+                compile_time=compile_time,
+                pdf_url=pdf_url,
+            )
 
         except Exception as e:
             logger.error(f"Compilation error: {e}", exc_info=True)
             compile_time = f"{time.time() - start_time:.2f}s"
-            return {
-                "status": "error",
-                "error": str(e),
-                "compile_time": compile_time,
-            }
+            return LatexCompileResult(
+                status="error",
+                error=str(e),
+                compile_time=compile_time,
+            )
 
         finally:
             # Cleanup work directory
@@ -138,7 +133,7 @@ class LatexCompiler:
 
     def _extract_errors(self, log_text: str) -> str:
         """Extract error messages from LaTeX log."""
-        errors = []
+        errors: list[str] = []
         lines = log_text.split("\n")
 
         for i, line in enumerate(lines):
@@ -191,8 +186,8 @@ class LiveCompiler:
     def __init__(self):
         self.active_compilations = {}
 
-    async def compile_stream(self, content: str, callback):
+    async def compile_stream(self, content: str, callback) -> None:
         """Stream compilation results via callback"""
         compiler = LatexCompiler()
         result = compiler.compile(content, {})
-        await callback(result)
+        await callback(result.model_dump())

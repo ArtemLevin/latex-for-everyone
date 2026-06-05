@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     SECRET_KEY: str = "change-me-in-production-please"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    # Keep local defaults permissive for development/TestClient; production deployments
+    # should override this with the exact reverse-proxy and public hostnames.
+    ALLOWED_HOSTS: list[str] = ["*"]
 
     # CORS
     CORS_ORIGINS: list[str] = [

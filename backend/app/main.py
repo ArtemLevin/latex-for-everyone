@@ -38,7 +38,7 @@ app.add_middleware(
 
 # Trusted hosts (production)
 if not settings.DEBUG:
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=settings.ALLOWED_HOSTS)
 
 
 # Request correlation, timing and access logging middleware

@@ -2,7 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
-from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, RawCompileRequest
+from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, LatexCompileResult, RawCompileRequest
 from app.services.latex_compiler import LatexCompiler
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -68,29 +68,29 @@ async def compile_project(
     logger.info("compile history created project_id=%s history_id=%s files=%s", request.project_id, history.id, len(files))
 
     # Compile
-    result = compiler.compile(main_content, files)
+    result = LatexCompileResult.model_validate(compiler.compile(main_content, files))
 
     # Update history
-    history.status = result["status"]
-    history.output = result.get("output")
-    history.error = result.get("error")
-    history.compile_time = result.get("compile_time")
+    history.status = result.status
+    history.output = result.output
+    history.error = result.error
+    history.compile_time = result.compile_time
     db.commit()
     logger.info(
         "compile project completed project_id=%s history_id=%s status=%s compile_time=%s pdf_url=%s",
         request.project_id,
         history.id,
-        result["status"],
-        result.get("compile_time"),
-        result.get("pdf_url"),
+        result.status,
+        result.compile_time,
+        result.pdf_url,
     )
 
     return CompileResponse(
-        status=result["status"],
-        output=result.get("output"),
-        error=result.get("error"),
-        compile_time=result.get("compile_time"),
-        pdf_url=result.get("pdf_url"),
+        status=result.status,
+        output=result.output,
+        error=result.error,
+        compile_time=result.compile_time,
+        pdf_url=result.pdf_url,
         history_id=history.id,
     )
 
@@ -98,20 +98,20 @@ async def compile_project(
 @router.post("/raw", response_model=CompileResponse)
 async def compile_raw_latex(request: RawCompileRequest):
     logger.info("compile raw requested content_chars=%s files=%s", len(request.content), len(request.files))
-    result = compiler.compile(request.content, request.files)
+    result = LatexCompileResult.model_validate(compiler.compile(request.content, request.files))
     logger.info(
         "compile raw completed status=%s compile_time=%s pdf_url=%s",
-        result["status"],
-        result.get("compile_time"),
-        result.get("pdf_url"),
+        result.status,
+        result.compile_time,
+        result.pdf_url,
     )
 
     return CompileResponse(
-        status=result["status"],
-        output=result.get("output"),
-        error=result.get("error"),
-        compile_time=result.get("compile_time"),
-        pdf_url=result.get("pdf_url"),
+        status=result.status,
+        output=result.output,
+        error=result.error,
+        compile_time=result.compile_time,
+        pdf_url=result.pdf_url,
     )
 
 
