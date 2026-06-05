@@ -565,10 +565,19 @@ def test_frontend_generation_ui_contract():
     assert "Соединение с backend установлено. Нажмите «Компиляция»" in content
     assert "Документ открыт без автокомпиляции" in content
     assert "ensureAdjacentPreviewVisible" in content
+    assert "pdf.min.js" in content
+    assert "pdf.worker.min.js" in content
+    assert "pdfPreviewDocument" in content
+    assert "loadPdfPreview" in content
+    assert "pdfjsLib.getDocument" in content
     assert "pdf-preview-frame" in content
     assert "pdf-preview-container" in content
+    assert "pdf-preview-shell" in content
+    assert "pdf-preview-toolbar" in content
+    assert "pdf-preview-canvas" in content
+    assert "changePdfPreviewZoom" in content
+    assert "setPdfPreviewFit('width')" in content
     assert "overflow: hidden" in content
-    assert "zoom=page-width" in content
     preview_content = "\n".join(
         (frontend_dir / path).read_text(encoding="utf-8")
         for path in ["js/02-api.js", "js/05-compile-preview.js", "js/06-toolbar-view.js"]

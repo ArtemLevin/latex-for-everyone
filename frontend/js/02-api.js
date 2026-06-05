@@ -152,6 +152,8 @@
     function showHtmlPreviewFallback() {
         setPreviewPdfMode(false);
         activateRenderedPreviewTab();
+        pdfPreviewDocument = null;
+        pdfPreviewUrl = '';
         const rendered = renderLatex(editor.getValue());
         document.getElementById('previewContent').innerHTML = rendered;
     }
@@ -161,10 +163,134 @@
         activateRenderedPreviewTab();
         setPreviewPdfMode(true);
         const url = resolveApiUrl(pdfUrl);
-        document.getElementById('previewContent').innerHTML = `
-            <iframe class="pdf-preview-frame" src="${url}#toolbar=0&navpanes=0&view=FitH&zoom=page-width" title="PDF preview"></iframe>
+        pdfPreviewUrl = url;
+        pdfPreviewDocument = null;
+        pdfPreviewPage = 1;
+        pdfPreviewFitMode = 'width';
+        pdfPreviewScale = 1;
+        document.getElementById('previewContent').innerHTML = buildPdfPreviewShell('Загрузка PDF...');
+
+        loadPdfPreview(url).catch(error => {
+            console.error('PDF preview failed', error);
+            document.getElementById('previewContent').innerHTML = buildPdfPreviewShell(`Не удалось открыть PDF: ${escapeHtml(error.message || String(error))}`);
+        });
+    }
+
+    function buildPdfPreviewShell(message = '') {
+        return `
+            <div class="pdf-preview-shell">
+                <div class="pdf-preview-toolbar">
+                    <button class="pdf-preview-btn" type="button" onclick="changePdfPreviewPage(-1)" aria-label="Предыдущая страница">‹</button>
+                    <span class="pdf-preview-page-info" id="pdfPreviewPageInfo">${message || 'Страница —'}</span>
+                    <button class="pdf-preview-btn" type="button" onclick="changePdfPreviewPage(1)" aria-label="Следующая страница">›</button>
+                    <span class="pdf-preview-spacer"></span>
+                    <button class="pdf-preview-btn" type="button" onclick="setPdfPreviewFit('page')">Вся страница</button>
+                    <button class="pdf-preview-btn active" type="button" onclick="setPdfPreviewFit('width')">По ширине</button>
+                    <button class="pdf-preview-btn" type="button" onclick="changePdfPreviewZoom(-0.1)">−</button>
+                    <span class="pdf-preview-zoom" id="pdfPreviewZoom">100%</span>
+                    <button class="pdf-preview-btn" type="button" onclick="changePdfPreviewZoom(0.1)">+</button>
+                </div>
+                <div class="pdf-preview-stage" id="pdfPreviewStage">
+                    <canvas class="pdf-preview-canvas" id="pdfPreviewCanvas"></canvas>
+                </div>
+            </div>
         `;
     }
+
+    function getPdfJsLib() {
+        if (!window.pdfjsLib) {
+            throw new Error('PDF.js не загружен');
+        }
+        return window.pdfjsLib;
+    }
+
+    async function loadPdfPreview(url) {
+        const pdfjsLib = getPdfJsLib();
+        const loadingTask = pdfjsLib.getDocument(url);
+        pdfPreviewDocument = await loadingTask.promise;
+        await renderPdfPreviewPage();
+    }
+
+    async function renderPdfPreviewPage() {
+        if (!pdfPreviewDocument) return;
+        const page = await pdfPreviewDocument.getPage(pdfPreviewPage);
+        const stage = document.getElementById('pdfPreviewStage');
+        const canvas = document.getElementById('pdfPreviewCanvas');
+        if (!stage || !canvas) return;
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const availableWidth = Math.max(stage.clientWidth - 32, 320);
+        const availableHeight = Math.max(stage.clientHeight - 32, 320);
+        let scale = pdfPreviewScale;
+        if (pdfPreviewFitMode === 'width') {
+            scale = availableWidth / baseViewport.width;
+        } else if (pdfPreviewFitMode === 'page') {
+            scale = Math.min(availableWidth / baseViewport.width, availableHeight / baseViewport.height);
+        }
+        scale = Math.min(Math.max(scale, 0.25), 4);
+
+        const viewport = page.getViewport({ scale });
+        const ratio = window.devicePixelRatio || 1;
+        const context = canvas.getContext('2d');
+        canvas.width = Math.floor(viewport.width * ratio);
+        canvas.height = Math.floor(viewport.height * ratio);
+        canvas.style.width = `${Math.floor(viewport.width)}px`;
+        canvas.style.height = `${Math.floor(viewport.height)}px`;
+        context.setTransform(ratio, 0, 0, ratio, 0, 0);
+        if (pdfPreviewRenderTask) {
+            pdfPreviewRenderTask.cancel();
+            pdfPreviewRenderTask = null;
+        }
+        const renderTask = page.render({ canvasContext: context, viewport });
+        pdfPreviewRenderTask = renderTask;
+        try {
+            await renderTask.promise;
+        } catch (error) {
+            if (error?.name === 'RenderingCancelledException') return;
+            throw error;
+        } finally {
+            if (pdfPreviewRenderTask === renderTask) {
+                pdfPreviewRenderTask = null;
+            }
+        }
+        updatePdfPreviewControls(scale);
+    }
+
+    function updatePdfPreviewControls(scale) {
+        const pageInfo = document.getElementById('pdfPreviewPageInfo');
+        const zoomInfo = document.getElementById('pdfPreviewZoom');
+        if (pageInfo && pdfPreviewDocument) {
+            pageInfo.textContent = `Страница ${pdfPreviewPage} из ${pdfPreviewDocument.numPages}`;
+        }
+        if (zoomInfo) {
+            zoomInfo.textContent = `${Math.round(scale * 100)}%`;
+        }
+        document.querySelectorAll('.pdf-preview-btn').forEach(button => button.classList.remove('active'));
+        document.querySelector(`.pdf-preview-btn[onclick="setPdfPreviewFit('${pdfPreviewFitMode}')"]`)?.classList.add('active');
+    }
+
+    function changePdfPreviewPage(delta) {
+        if (!pdfPreviewDocument) return;
+        pdfPreviewPage = Math.min(Math.max(pdfPreviewPage + delta, 1), pdfPreviewDocument.numPages);
+        renderPdfPreviewPage();
+    }
+
+    function setPdfPreviewFit(mode) {
+        pdfPreviewFitMode = mode;
+        renderPdfPreviewPage();
+    }
+
+    function changePdfPreviewZoom(delta) {
+        pdfPreviewFitMode = 'custom';
+        pdfPreviewScale = Math.min(Math.max(pdfPreviewScale + delta, 0.25), 4);
+        renderPdfPreviewPage();
+    }
+
+    window.addEventListener('resize', () => {
+        if (!pdfPreviewDocument || !document.getElementById('previewContent')?.classList.contains('pdf-preview-content')) return;
+        clearTimeout(pdfPreviewResizeTimer);
+        pdfPreviewResizeTimer = setTimeout(renderPdfPreviewPage, 120);
+    });
 
     async function saveCurrentFile() {
         clearTimeout(saveTimeout);
