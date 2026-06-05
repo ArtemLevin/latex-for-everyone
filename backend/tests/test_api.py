@@ -894,6 +894,28 @@ def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warn
     assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
 
 
+def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {
+                "topic": "Квадратные уравнения",
+                "language": "английский",
+                "content_source_mode": "ai_creative",
+            },
+            "materials": "",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["warnings"] == []
+    assert "Язык пособия: английский" in data["prompt"]
+    assert "Режим источника содержания: ai_creative" in data["prompt"]
+    assert "разрешено генерировать содержание от себя" in data["prompt"]
+    assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
+
+
 def test_generation_prompt_preview_warns_without_topic_or_materials():
     response = client.post(
         "/api/generation/prompt",
