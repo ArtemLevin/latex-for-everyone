@@ -126,15 +126,43 @@
         document.getElementById('statusText').textContent = 'Ошибка';
     }
 
+    function setPreviewPdfMode(isPdf) {
+        const previewContainer = document.getElementById('previewContainer');
+        const previewContent = document.getElementById('previewContent');
+        previewContainer?.classList.toggle('pdf-preview-container', isPdf);
+        previewContent?.classList.toggle('pdf-preview-content', isPdf);
+    }
+
+    function activateRenderedPreviewTab() {
+        const previewPane = document.getElementById('previewPane');
+        if (!previewPane) return;
+        const tabs = previewPane.querySelectorAll('.pane-tab');
+        tabs.forEach(tab => tab.classList.remove('active'));
+        tabs[0]?.classList.add('active');
+    }
+
+    function ensureAdjacentPreviewVisible() {
+        const previewPane = document.getElementById('previewPane');
+        if (!previewPane) return;
+        if (getComputedStyle(previewPane).display === 'none' && typeof setViewMode === 'function') {
+            setViewMode('split');
+        }
+    }
+
     function showHtmlPreviewFallback() {
+        setPreviewPdfMode(false);
+        activateRenderedPreviewTab();
         const rendered = renderLatex(editor.getValue());
         document.getElementById('previewContent').innerHTML = rendered;
     }
 
     function showPdfPreview(pdfUrl) {
+        ensureAdjacentPreviewVisible();
+        activateRenderedPreviewTab();
+        setPreviewPdfMode(true);
         const url = resolveApiUrl(pdfUrl);
         document.getElementById('previewContent').innerHTML = `
-            <iframe src="${url}" title="PDF preview" style="width:100%;height:100%;min-height:70vh;border:0;background:white;border-radius:8px;"></iframe>
+            <iframe class="pdf-preview-frame" src="${url}#toolbar=0&navpanes=0" title="PDF preview"></iframe>
         `;
     }
 

@@ -194,4 +194,5 @@ async def download_compiled_pdf(filename: str):
         path=str(filepath),
         filename=filename,
         media_type="application/pdf",
+        content_disposition_type="inline",
     )

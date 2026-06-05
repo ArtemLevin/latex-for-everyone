@@ -489,6 +489,7 @@ def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
     response = client.get("/api/compile/download/compiled.pdf")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"].startswith('inline; filename="compiled.pdf"')
     assert response.content == b"%PDF-1.4 test pdf"
 
 
@@ -562,6 +563,14 @@ def test_frontend_generation_ui_contract():
     assert "await compileLatex();" not in content
     assert "Соединение с backend установлено. Нажмите «Компиляция»" in content
     assert "Документ открыт без автокомпиляции" in content
+    assert "ensureAdjacentPreviewVisible" in content
+    assert "pdf-preview-frame" in content
+    assert "pdf-preview-container" in content
+    preview_content = "\n".join(
+        (frontend_dir / path).read_text(encoding="utf-8")
+        for path in ["js/02-api.js", "js/05-compile-preview.js", "js/06-toolbar-view.js"]
+    )
+    assert "window.open" not in preview_content
 
 
 def test_export_pdf_receives_frontend_content_payload(monkeypatch):
@@ -870,28 +879,6 @@ def test_generation_prompt_preview_includes_fields_and_materials():
     assert "```latex```" in data["prompt"]
     assert "верните только тело LaTeX-документа" in data["prompt"]
     assert "Строго НЕ пишите преамбулу" in data["prompt"]
-
-
-def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
-    response = client.post(
-        "/api/generation/prompt",
-        json={
-            "fields": {
-                "topic": "Квадратные уравнения",
-                "language": "английский",
-                "content_source_mode": "ai_creative",
-            },
-            "materials": "",
-        },
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["warnings"] == []
-    assert "Язык пособия: английский" in data["prompt"]
-    assert "Режим источника содержания: ai_creative" in data["prompt"]
-    assert "разрешено генерировать содержание от себя" in data["prompt"]
-    assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
 
 
 def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
