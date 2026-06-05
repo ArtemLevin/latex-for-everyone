@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from app.config import settings
 from app.models import Project
-from app.schemas import ExportRequest, ExportResponse
+from app.schemas import ExportRequest, ExportResponse, PDFGenerationResult
 from app.services.pdf_generator import PDFGenerator
 from sqlalchemy.orm import Session
 from app.database import get_db
@@ -58,18 +58,21 @@ async def export_pdf(
     if not main_content:
         main_content = next(iter(files.values()), "")
 
-    result = pdf_generator.generate_pdf(main_content, files)
+    result = PDFGenerationResult.model_validate(pdf_generator.generate_pdf(main_content, files))
 
-    if not result["success"]:
-        logger.warning("export pdf failed project_id=%s error=%s", request.project_id, result.get("error"))
-        raise HTTPException(status_code=500, detail=result["error"])
+    if not result.success:
+        logger.warning("export pdf failed project_id=%s error=%s", request.project_id, result.error)
+        raise HTTPException(status_code=500, detail=result.error or "PDF export failed")
+    if not result.filename:
+        logger.error("export pdf succeeded without filename project_id=%s", request.project_id)
+        raise HTTPException(status_code=500, detail="PDF export did not return a filename")
 
-    logger.info("export pdf completed project_id=%s filename=%s size=%s", request.project_id, result["filename"], result.get("size"))
+    logger.info("export pdf completed project_id=%s filename=%s size=%s", request.project_id, result.filename, result.size)
     return ExportResponse(
-        url=f"/api/export/download/{result['filename']}",
-        filename=result["filename"],
+        url=f"/api/export/download/{result.filename}",
+        filename=result.filename,
         format="pdf",
-        size=result.get("size"),
+        size=result.size,
     )
 
 

@@ -156,6 +156,40 @@ def test_latex_compiler_adds_russian_babel_environment_hint():
     assert "texlive-lang-cyrillic" in errors
 
 
+def test_latex_compiler_returns_typed_result_for_compiler_error(monkeypatch):
+    from app.services.latex_compiler import LatexCompiler
+    from app.schemas import LatexCompileResult
+
+    compiler = LatexCompiler()
+    monkeypatch.setattr(compiler, "compiler", "definitely-missing-pdflatex")
+
+    result = compiler.compile(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+    assert isinstance(result, LatexCompileResult)
+    assert result.status == "error"
+    assert result.error
+
+
+def test_pdf_generator_returns_typed_result_for_missing_pdf(monkeypatch, tmp_path):
+    import subprocess
+    from app.services.pdf_generator import PDFGenerator
+    from app.schemas import PDFGenerationResult
+
+    generator = PDFGenerator()
+    monkeypatch.setattr(generator, "output_dir", tmp_path)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=0, stdout="ok", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = generator.generate_pdf(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+    assert isinstance(result, PDFGenerationResult)
+    assert result.success is False
+    assert result.error == "PDF was not generated"
+
+
 def test_compile_raw(monkeypatch):
     from app.routers import compile as compile_router
 
