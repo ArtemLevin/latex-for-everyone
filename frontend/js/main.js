@@ -19,6 +19,7 @@
     let pdfPreviewFitMode = 'width';
     let pdfPreviewResizeTimer = null;
     let pdfPreviewRenderTask = null;
+    window.pdfPreviewRenderTask = null;
 
     const LOCAL_PROJECT_KEY = 'latexed_project_id';
     const API_BASE_URL = getApiBaseUrl();
@@ -604,20 +605,20 @@ $$E = mc^2$$
         canvas.style.width = `${Math.floor(viewport.width)}px`;
         canvas.style.height = `${Math.floor(viewport.height)}px`;
         context.setTransform(ratio, 0, 0, ratio, 0, 0);
-        if (pdfPreviewRenderTask) {
-            pdfPreviewRenderTask.cancel();
-            pdfPreviewRenderTask = null;
+        if (window.pdfPreviewRenderTask) {
+            window.pdfPreviewRenderTask.cancel();
+            window.pdfPreviewRenderTask = null;
         }
         const renderTask = page.render({ canvasContext: context, viewport });
-        pdfPreviewRenderTask = renderTask;
+        window.pdfPreviewRenderTask = renderTask;
         try {
             await renderTask.promise;
         } catch (error) {
             if (error?.name === 'RenderingCancelledException') return;
             throw error;
         } finally {
-            if (pdfPreviewRenderTask === renderTask) {
-                pdfPreviewRenderTask = null;
+            if (window.pdfPreviewRenderTask === renderTask) {
+                window.pdfPreviewRenderTask = null;
             }
         }
         updatePdfPreviewControls(scale);

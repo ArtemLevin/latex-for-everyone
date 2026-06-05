@@ -19,6 +19,7 @@
     let pdfPreviewFitMode = 'width';
     let pdfPreviewResizeTimer = null;
     let pdfPreviewRenderTask = null;
+    window.pdfPreviewRenderTask = null;
 
     const LOCAL_PROJECT_KEY = 'latexed_project_id';
     const API_BASE_URL = getApiBaseUrl();

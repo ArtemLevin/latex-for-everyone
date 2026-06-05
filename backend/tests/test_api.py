@@ -568,6 +568,7 @@ def test_frontend_generation_ui_contract():
     assert "pdf.min.js" in content
     assert "pdf.worker.min.js" in content
     assert "pdfPreviewDocument" in content
+    assert "window.pdfPreviewRenderTask" in content
     assert "loadPdfPreview" in content
     assert "pdfjsLib.getDocument" in content
     assert "pdf-preview-frame" in content
