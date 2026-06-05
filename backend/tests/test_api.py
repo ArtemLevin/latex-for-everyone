@@ -559,6 +559,9 @@ def test_frontend_generation_ui_contract():
     assert "'/generation/validate'" in content
     assert "generation/providers/status" in content
     assert "'/generation/generate'" in content
+    assert "await compileLatex();" not in content
+    assert "Соединение с backend установлено. Нажмите «Компиляция»" in content
+    assert "Документ открыт без автокомпиляции" in content
 
 
 def test_export_pdf_receives_frontend_content_payload(monkeypatch):

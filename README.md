@@ -154,7 +154,7 @@ Use `make clean` to remove local SQLite databases and Python/test caches from th
 3. loads project files from `GET /api/files/project/{project_id}`;
 4. loads templates from `GET /api/templates/`;
 5. autosaves the current file with `PUT /api/files/{file_id}`;
-6. compiles with `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
+6. waits for an explicit user action before compiling; the **Компиляция** button or `Ctrl+Enter` calls `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
 8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, validates returned `latex_code`, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
 
