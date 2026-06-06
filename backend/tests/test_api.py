@@ -196,6 +196,64 @@ def test_latex_sanitizer_normalizes_known_package_options():
     )
 
 
+def test_latex_file_policy_rejects_path_traversal_and_unsupported_extensions():
+    from app.services.latex_file_policy import LatexFilePolicyError, validate_latex_filename
+
+    assert validate_latex_filename("sections/topic.tex") == "sections/topic.tex"
+
+    for filename in ["../secret.tex", "/tmp/secret.tex", "bad\\name.tex", "image.png"]:
+        try:
+            validate_latex_filename(filename)
+        except LatexFilePolicyError as exc:
+            assert filename in str(exc)
+        else:
+            raise AssertionError(f"{filename} should be rejected")
+
+
+def test_artifact_cleanup_removes_only_old_allowed_files(tmp_path):
+    import os
+    import time
+    from app.services.artifact_cleanup import cleanup_old_files
+
+    old_pdf = tmp_path / "old.pdf"
+    new_pdf = tmp_path / "new.pdf"
+    old_txt = tmp_path / "old.txt"
+    old_pdf.write_bytes(b"old")
+    new_pdf.write_bytes(b"new")
+    old_txt.write_text("old")
+
+    old_time = time.time() - 3600
+    os.utime(old_pdf, (old_time, old_time))
+    os.utime(old_txt, (old_time, old_time))
+
+    removed = cleanup_old_files(tmp_path, max_age_seconds=60, suffixes={".pdf"})
+
+    assert removed == 1
+    assert not old_pdf.exists()
+    assert new_pdf.exists()
+    assert old_txt.exists()
+
+
+def test_latex_compiler_truncates_compiler_output(monkeypatch, tmp_path):
+    import subprocess
+    from app.config import settings
+    from app.services.latex_compiler import LatexCompiler
+
+    compiler = LatexCompiler()
+    monkeypatch.setattr(compiler, "work_dir", tmp_path)
+    monkeypatch.setattr(settings, "MAX_COMPILER_OUTPUT_CHARS", 12)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout="0123456789abcdef", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = compiler.compile(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+    assert result.status == "error"
+    assert result.output == "456789abcdef"
+
+
 def test_latex_compiler_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch, tmp_path):
     import subprocess
     from pathlib import Path
@@ -418,6 +476,55 @@ def test_compile_raw_rejects_oversized_entrypoint(monkeypatch):
     assert response.status_code == 413
     assert "__entrypoint__.tex" in response.json()["detail"]
     assert "too large" in response.json()["detail"]
+
+
+def test_compile_raw_rejects_unsupported_payload_extension():
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Main\end{document}",
+            "files": {"image.png": "not binary"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported LaTeX file extension" in response.json()["detail"]
+
+
+def test_compile_project_rejects_traversal_main_filename():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Traversal Compile Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/compile/",
+        json={
+            "project_id": project_id,
+            "main_file_name": "../main.tex",
+            "main_file_content": r"\documentclass{article}\begin{document}Main\end{document}",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Invalid LaTeX filename" in response.json()["detail"]
+
+
+def test_export_tex_rejects_unsupported_filename_extension():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Unsupported Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/export/tex",
+        json={"project_id": project_id, "format": "tex", "content": {"notes.exe": "bad"}},
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported LaTeX file extension" in response.json()["detail"]
 
 
 def test_export_tex_rejects_payload_over_total_limit(monkeypatch):

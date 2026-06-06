@@ -255,6 +255,9 @@ Deprecated compatibility routes are still available for compile history:
 | `MAX_LATEX_FILES` | `100` | Maximum number of LaTeX project files accepted by compile/export payloads; set `0` to disable |
 | `MAX_LATEX_FILE_CHARS` | `500000` | Maximum characters allowed in a single LaTeX file for compile/export payloads; set `0` to disable |
 | `MAX_LATEX_TOTAL_CHARS` | `2000000` | Maximum total characters allowed across a compile/export payload; set `0` to disable |
+| `MAX_COMPILER_OUTPUT_CHARS` | `20000` | Maximum compiler output/log characters returned through API responses/history; set `0` to disable truncation |
+| `LATEX_ALLOWED_EXTENSIONS` | `.tex,.bib,.cls,.sty` | Comma-separated allowlist for user-provided LaTeX project files accepted by compile/export payloads |
+| `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for generated compile/export artifacts; set `0` to disable automatic cleanup |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
 | `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
@@ -379,6 +382,7 @@ These commands are useful when debugging without the browser:
 make health
 make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
 make ai-validate-smoke
+make clean-artifacts   # optional: remove local generated PDFs/exports in default /tmp artifact dirs
 curl -fsS -X POST http://localhost:8000/api/generation/prompt \
   -H 'Content-Type: application/json' \
   --data '{"provider":"ollama","model":"gemma4","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only"},"materials":"Решить уравнение 2^x = 8."}'

@@ -132,6 +132,10 @@ clean: ## Remove local test databases and Python/test caches.
 	rm -f $(BACKEND_DIR)/latexed.db $(BACKEND_DIR)/test_latexed.db $(ROOT_DIR)/latexed.db $(ROOT_DIR)/test_latexed.db
 	find $(ROOT_DIR) -type d \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +
 
+.PHONY: clean-artifacts
+clean-artifacts: ## Remove local compile/export artifacts from the default /tmp Latexed directories.
+	rm -rf /tmp/latexed_compiles /tmp/latexed_uploads
+
 .PHONY: clean-venv
 clean-venv: ## Remove the uv virtual environment.
 	rm -rf $(ROOT_DIR)/.venv
