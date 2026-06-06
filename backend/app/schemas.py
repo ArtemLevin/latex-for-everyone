@@ -139,6 +139,8 @@ class TemplateResponse(BaseModel):
 # Generation Schemas
 class GenerationFields(BaseModel):
     level: str = "ЕГЭ"
+    language: str = "русский"
+    content_source_mode: Literal["materials_only", "ai_creative"] = "materials_only"
     alpha_code: int = Field(1, ge=0, le=2)
     beta_code: int = Field(1, ge=0, le=50)
     gamma_code: int = Field(4, ge=1, le=5)
