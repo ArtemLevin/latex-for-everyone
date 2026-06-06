@@ -19,7 +19,7 @@ Latexed уже имеет рабочий вертикальный срез он�
 
 - Роутеры всё ещё часто напрямую используют SQLAlchemy `Session`; это допустимо как legacy/current style, но усложняет тестирование и повторное использование бизнес-логики.
 - Нет выделенных сервисов для проектов/файлов/снапшотов/export orchestration; compile и AI уже лучше отделены.
-- `Base.metadata.create_all(bind=engine)` выполняется на старте приложения, что удобно для локального SQLite, но размывает роль Alembic в production.
+- Автосоздание таблиц теперь должно быть локальной/dev-опцией (`AUTO_CREATE_TABLES`), а production-развёртывания должны опираться на Alembic migrations.
 
 ### 2.2 Данные и артефакты
 
@@ -83,16 +83,15 @@ Latexed уже имеет рабочий вертикальный срез он�
 ### Этап 2 — Persistence и миграции
 
 **Приоритет:** P0
+**Статус:** реализован базовый вариант: добавлена initial Alembic revision и настройка `AUTO_CREATE_TABLES` для разделения local/dev startup и production migrations.
 
 **Цель:** разделить локальное автосоздание таблиц и production migrations.
 
 **Работы:**
 
-- Принять решение по `Base.metadata.create_all(bind=engine)`:
-  - оставить только для local/dev/test режима;
-  - или убрать из app startup и полагаться на Alembic.
-- Добавить первую Alembic revision для текущей схемы, если миграций ещё нет.
-- Документировать migration workflow: `make migration`, review, `make migrate`.
+- Принято решение: оставить автосоздание таблиц только как local/dev fallback под `AUTO_CREATE_TABLES=true`; для production — `AUTO_CREATE_TABLES=false` и явный `make migrate`.
+- Добавлена первая Alembic revision для текущей схемы.
+- Документирован migration workflow: `make migration`, review, `make migrate`.
 - Проверить PostgreSQL compatibility для JSON/timestamps/string UUID fields.
 
 **Критерий готовности:** схема БД воспроизводится миграциями, а startup behavior не конфликтует с production deployment.

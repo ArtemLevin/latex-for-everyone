@@ -112,6 +112,7 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
+| `make clean-artifacts` | Remove generated compile/export artifacts from default `/tmp` runtime dirs. |
 | `make docker-up` | Build and start Docker Compose services. |
 | `make docker-down` | Stop Docker Compose services. |
 | `make clean` | Remove local DB files and Python/test caches. |
@@ -143,7 +144,22 @@ Latexed creates local runtime files during development and tests. These files ar
 - Python/test caches such as `__pycache__/` and `.pytest_cache/`;
 - generated compile/export/upload artifacts under the configured runtime directories, for example `/tmp/latexed_compiles` and `/tmp/latexed_uploads`.
 
-Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Generated files under `/tmp` can be removed with normal OS cleanup commands when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
+Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
+
+## Database migrations
+
+Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, but production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+
+Recommended workflow:
+
+```bash
+make migrate
+make migration MSG="describe schema change"
+# review backend/alembic/versions/*.py
+make migrate
+```
+
+When changing `backend/app/models.py`, create or update an Alembic revision in the same PR and verify it against a disposable database. If you have an old local SQLite database that was created before Alembic tracking existed, either remove it with `make clean` before `make migrate` or stamp it manually only after confirming its schema matches the baseline.
 
 ## Frontend/backend integration
 
@@ -246,6 +262,7 @@ Deprecated compatibility routes are still available for compile history:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:///./latexed.db` | Database connection string |
+| `AUTO_CREATE_TABLES` | `true` | Create SQLAlchemy tables on app startup for local/dev convenience; set `false` in production and use Alembic migrations |
 | `DEBUG` | `false` | Debug mode |
 | `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
 | `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; override with exact public/reverse-proxy hostnames in production |

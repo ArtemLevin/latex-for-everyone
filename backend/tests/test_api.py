@@ -37,6 +37,47 @@ def setup_db():
 client = TestClient(app)
 
 
+def test_initialize_database_respects_auto_create_flag(monkeypatch):
+    from app import main as main_module
+    from app.config import settings
+
+    called = False
+
+    def fake_create_all(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(settings, "AUTO_CREATE_TABLES", False)
+    monkeypatch.setattr(main_module.Base.metadata, "create_all", fake_create_all)
+
+    main_module.initialize_database()
+
+    assert called is False
+
+
+def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+    from app.config import settings
+
+    db_path = tmp_path / "migration_baseline.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite:///{db_path}")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config = Config(str(repo_root / "backend" / "alembic.ini"))
+    config.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    assert {"projects", "files", "compile_history", "project_snapshots", "alembic_version"}.issubset(tables)
+    assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
+    assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
+
+
 def test_health_check():
     response = client.get("/api/health")
     assert response.status_code == 200

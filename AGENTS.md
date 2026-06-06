@@ -153,8 +153,9 @@ Do **not** introduce a repository layer unless the change clearly benefits from 
 ## Database and migrations
 
 - Models live in `backend/app/models.py`.
-- The app currently calls `Base.metadata.create_all(bind=engine)` at startup; Alembic scaffolding exists under `backend/alembic/` for migration workflows.
+- `AUTO_CREATE_TABLES=true` keeps local/dev SQLite startup convenient; production should set `AUTO_CREATE_TABLES=false` and run Alembic migrations before serving traffic.
 - For schema changes, add an Alembic migration via `make migration MSG="..."` when autogeneration is viable, review it carefully, then run `make migrate` if the environment supports it.
+- Keep `backend/alembic/versions/` aligned with `backend/app/models.py`; do not rely on startup table creation as the only schema path.
 - Do not delete or rewrite local `.db` files unless the task explicitly requires cleanup.
 
 ## Documentation rules

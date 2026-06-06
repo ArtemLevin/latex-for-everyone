@@ -14,6 +14,7 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "sqlite:///./latexed.db"
     DB_POOL_SIZE: int = 5
+    AUTO_CREATE_TABLES: bool = True
 
     # LaTeX Compiler
     LATEX_COMPILER: str = "pdflatex"
