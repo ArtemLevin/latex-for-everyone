@@ -51,9 +51,7 @@
 
     function compileLatexLocal() {
         try {
-            const content = editor.getValue();
-            const rendered = renderLatex(content);
-            document.getElementById('previewContent').innerHTML = rendered;
+            showHtmlPreviewFallback();
             document.getElementById('errorPanel').classList.remove('active');
             document.getElementById('statusDot').className = 'status-dot';
             document.getElementById('statusText').textContent = 'Локальный preview';

@@ -139,6 +139,8 @@ class TemplateResponse(BaseModel):
 # Generation Schemas
 class GenerationFields(BaseModel):
     level: str = "ЕГЭ"
+    language: str = "русский"
+    content_source_mode: Literal["materials_only", "ai_creative"] = "materials_only"
     alpha_code: int = Field(1, ge=0, le=2)
     beta_code: int = Field(1, ge=0, le=50)
     gamma_code: int = Field(4, ge=1, le=5)
@@ -187,10 +189,20 @@ class GenerationProviderStatusResponse(BaseModel):
     model_available: Optional[bool] = None
 
 
+class GenerationCompileCheckResponse(BaseModel):
+    attempted: bool = False
+    success: bool = False
+    attempts: int = 0
+    repaired: bool = False
+    skipped_reason: Optional[str] = None
+    error: Optional[str] = None
+
+
 class GenerationResultResponse(GenerationPromptResponse):
     latex_code: str
     raw_output: str
     validation: GenerationValidationResponse
+    compile_check: GenerationCompileCheckResponse = Field(default_factory=GenerationCompileCheckResponse)
 
 
 class GenerationPresetResponse(BaseModel):
