@@ -99,14 +99,15 @@ Latexed уже имеет рабочий вертикальный срез он�
 ### Этап 3 — Backend service layer для проектов и файлов
 
 **Приоритет:** P1
+**Статус:** начат: CRUD/snapshot/duplicate логика проектов и CRUD/upload логика файлов вынесены в `ProjectService` и `FileService`, роутеры оставлены HTTP-адаптерами.
 
 **Цель:** уменьшить direct business logic в routers и упростить тестирование.
 
 **Работы:**
 
-- Выделить `ProjectService` для create/update/delete/duplicate/snapshot/restore flows.
-- Выделить `FileService` для create/update/delete/upload-all и main-file invariants.
-- Сохранить публичные endpoints и response schemas без breaking changes.
+- Выделен `ProjectService` для create/update/delete/duplicate/snapshot/restore flows.
+- Выделен `FileService` для create/update/delete/upload-all и main-file invariants.
+- Публичные endpoints и response schemas сохранены без breaking changes.
 - Добавить service-level unit tests там, где логика станет не завязана на HTTP.
 - Оставить SQLAlchemy session wiring в dependency layer/router, не вводя большой repository layer без необходимости.
 

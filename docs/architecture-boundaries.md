@@ -57,7 +57,7 @@ For new or substantially refactored backend behavior, use:
 Router → Service → Database/session/model or external boundary
 ```
 
-Routers may still perform simple persistence operations in legacy areas, but new complex behavior should move orchestration into services.
+Routers may still perform simple persistence operations in legacy areas, but new complex behavior should move orchestration into services. Project and file routers now delegate CRUD, snapshot, duplicate, upload and main-file invariants to `ProjectService` and `FileService`; keep extending those services instead of adding new database business logic directly to the routers.
 
 ### Router responsibilities
 

@@ -184,6 +184,37 @@ def test_list_templates():
     assert len(data) > 0
 
 
+def test_create_file_rejects_unsafe_name():
+    project_response = client.post("/api/projects/", json={"name": "Unsafe File Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}",
+        json={"name": "../secret.tex", "content": ""},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid LaTeX filename" in response.json()["detail"]
+
+
+def test_file_service_keeps_single_main_file_invariant():
+    project_response = client.post("/api/projects/", json={"name": "Main File Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}",
+        json={"name": "sections/lesson.tex", "content": "Lesson", "is_main": True},
+    )
+
+    assert response.status_code == 201
+    files_response = client.get(f"/api/files/project/{project_id}")
+    files = files_response.json()
+    main_flags = {file["name"]: file["is_main"] for file in files}
+
+    assert main_flags["sections/lesson.tex"] is True
+    assert main_flags["main.tex"] is False
+
+
 def test_latex_compiler_adds_russian_babel_environment_hint():
     from app.services.latex_compiler import LatexCompiler
 
