@@ -172,7 +172,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 5. autosaves the current file with `PUT /api/files/{file_id}`;
 6. waits for an explicit user action before compiling; the **Компиляция** button or `Ctrl+Enter` calls `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
-8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, validates returned `latex_code`, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
+8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, receives backend-wrapped `latex_code` plus a best-effort `compile_check` result, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
 
 ### Configuring the API base URL
 
@@ -286,6 +286,8 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_MAX_PROMPT_CHARS` | `60000` | Maximum generated prompt size before a provider call is allowed |
 | `AI_MAX_RAW_OUTPUT_CHARS` | `200000` | Maximum provider raw output / LaTeX validation payload size |
 | `AI_EXPOSE_PROVIDER_ERRORS` | `false` | Expose upstream provider error details to clients; keep `false` in production |
+| `AI_COMPILE_CHECK_ENABLED` | `true` | Run a best-effort backend compile check after AI generation when `pdflatex` is available |
+| `AI_REPAIR_ATTEMPTS` | `1` | Maximum automatic AI repair attempts after a generated LaTeX document fails the compile check |
 | `LOG_LEVEL` | `INFO` | Backend log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `LOG_FORMAT` | timestamped text format | Python logging format; includes `request_id` by default |
 | `LOG_SLOW_REQUEST_MS` | `1000` | Requests at or above this duration are logged as warnings |
@@ -388,7 +390,7 @@ Use this checklist to verify the complete generation path manually after the bac
 9. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`; the backend now wraps the model's body-only answer with the fixed Latexed preamble (Russian/T2A, math, tables, TikZ/pgfplots, typography, blocks, and hyperref/tcolorbox packages).
 10. Click **Проверить .tex** if you want to validate the current editor content again.
 11. Compile with **Компиляция** or `Ctrl+Enter`.
-12. Confirm the PDF preview loads when `pdflatex` is available, or review the compile error panel if LaTeX needs correction.
+12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
 13. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands

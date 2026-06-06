@@ -57,9 +57,11 @@ class Settings(BaseSettings):
     AI_PROVIDER_STATUS_TIMEOUT: int = 10
     AI_RATE_LIMIT_PER_MINUTE: int = 20
     AI_MAX_MATERIALS_CHARS: int = 20_000
-    AI_MAX_PROMPT_CHARS: int = 60_000_000
-    AI_MAX_RAW_OUTPUT_CHARS: int = 200_000_000
+    AI_MAX_PROMPT_CHARS: int = 60_000
+    AI_MAX_RAW_OUTPUT_CHARS: int = 200_000
     AI_EXPOSE_PROVIDER_ERRORS: bool = False
+    AI_COMPILE_CHECK_ENABLED: bool = True
+    AI_REPAIR_ATTEMPTS: int = 1
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "gemma4"
     AI_VENDOR_BASE_URL: str = "https://api.openai.com/v1"

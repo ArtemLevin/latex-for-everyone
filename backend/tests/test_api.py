@@ -1324,6 +1324,71 @@ def test_generation_generate_strips_accidental_model_preamble(monkeypatch):
     assert data["validation"]["valid"] is True
 
 
+
+
+def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.config import settings
+    from app.schemas import LatexCompileResult
+
+    prompts = []
+    compile_inputs = []
+
+    async def fake_generate(prompt, provider, model):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return (
+                "```latex\n"
+                r"\section{Broken}\begin{infoblock}{Важно}Нет закрытия"
+                "\n```",
+                "ollama",
+                "gemma4",
+            )
+        return (
+            "```latex\n"
+            r"\section{Fixed}\begin{infoblock}{Важно}Закрыто\end{infoblock}"
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        compile_inputs.append(main_content)
+        if len(compile_inputs) == 1:
+            return LatexCompileResult(status="error", error=r"! LaTeX Error: \begin{infoblock} ended by \end{document}.")
+        return LatexCompileResult(status="success", output="OK", compile_time="0.01s", pdf_url="/api/compile/download/test.pdf")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
+    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Компилируемость"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(prompts) == 2
+    assert "исправляешь LaTeX BODY" in prompts[1]
+    assert "ended by" in prompts[1]
+    assert len(compile_inputs) == 2
+    assert "Broken" in compile_inputs[0]
+    assert "Fixed" in compile_inputs[1]
+    assert "Закрыто" in data["latex_code"]
+    assert data["raw_output"].startswith("```latex")
+    assert data["compile_check"] == {
+        "attempted": True,
+        "success": True,
+        "attempts": 2,
+        "repaired": True,
+        "skipped_reason": None,
+        "error": None,
+    }
+
+
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
     from app.routers import generation as generation_router
     from app.services.ai_generation import AIGenerationError

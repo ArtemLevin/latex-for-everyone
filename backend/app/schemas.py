@@ -189,10 +189,20 @@ class GenerationProviderStatusResponse(BaseModel):
     model_available: Optional[bool] = None
 
 
+class GenerationCompileCheckResponse(BaseModel):
+    attempted: bool = False
+    success: bool = False
+    attempts: int = 0
+    repaired: bool = False
+    skipped_reason: Optional[str] = None
+    error: Optional[str] = None
+
+
 class GenerationResultResponse(GenerationPromptResponse):
     latex_code: str
     raw_output: str
     validation: GenerationValidationResponse
+    compile_check: GenerationCompileCheckResponse = Field(default_factory=GenerationCompileCheckResponse)
 
 
 class GenerationPresetResponse(BaseModel):

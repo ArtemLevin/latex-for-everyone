@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 import hashlib
 import logging
+import shutil
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -10,6 +11,7 @@ from app.schemas import (
     GenerationPromptResponse,
     GenerationProviderStatusResponse,
     GenerationRequest,
+    GenerationCompileCheckResponse,
     GenerationResultResponse,
     GenerationValidationRequest,
     GenerationValidationResponse,
@@ -17,14 +19,16 @@ from app.schemas import (
 from app.config import settings
 from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
 from app.services.latex_document_builder import build_latex_document
+from app.services.latex_compiler import LatexCompiler
 from app.services.latex_validator import validate_latex_document
-from app.services.prompt_builder import build_latex_generation_prompt
+from app.services.prompt_builder import build_latex_generation_prompt, build_latex_repair_prompt
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 ai_generator = AIGenerationService()
+generation_compiler = LatexCompiler()
 rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
 
 PRESETS: list[GenerationPresetResponse] = [
@@ -102,6 +106,75 @@ def text_preview(value: str) -> str:
     if len(compact) <= max_chars:
         return compact
     return f"{compact[:max_chars]}..."
+
+
+
+async def compile_check_and_repair(
+    *,
+    latex_body: str,
+    raw_output: str,
+    provider: str,
+    model: str,
+) -> tuple[str, str, str, dict[str, object], GenerationCompileCheckResponse]:
+    """Compile-check generated LaTeX and ask the provider for one bounded repair when needed."""
+    latex_code = build_latex_document(latex_body)
+    enforce_text_limit("latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
+    validation = validate_latex_document(latex_code)
+
+    compile_check = GenerationCompileCheckResponse()
+    if not settings.AI_COMPILE_CHECK_ENABLED:
+        compile_check.skipped_reason = "AI compile check is disabled."
+        return latex_body, raw_output, latex_code, validation, compile_check
+
+    if shutil.which(settings.LATEX_COMPILER) is None:
+        compile_check.skipped_reason = f"LaTeX compiler '{settings.LATEX_COMPILER}' is not available."
+        return latex_body, raw_output, latex_code, validation, compile_check
+
+    max_attempts = max(settings.AI_REPAIR_ATTEMPTS, 0)
+    compile_check.attempted = True
+
+    for attempt in range(max_attempts + 1):
+        compile_check.attempts = attempt + 1
+        compile_result = generation_compiler.compile(latex_code, {}, "main.tex")
+        if compile_result.status == "success":
+            compile_check.success = True
+            compile_check.error = None
+            return latex_body, raw_output, latex_code, validation, compile_check
+
+        compile_error = compile_result.error or compile_result.output or "Compilation failed without details."
+        compile_check.error = compile_error
+        if attempt >= max_attempts:
+            return latex_body, raw_output, latex_code, validation, compile_check
+
+        repair_prompt = build_latex_repair_prompt(
+            body=latex_body,
+            compiler_error=compile_error,
+            validation_errors=list(validation.get("errors") or []),
+        )
+        enforce_text_limit("repair_prompt", repair_prompt, settings.AI_MAX_PROMPT_CHARS)
+        logger.info(
+            "ai generation repair requested provider=%s model=%s attempt=%s latex_sha=%s error_preview=%s",
+            provider,
+            model,
+            attempt + 1,
+            text_digest(latex_code),
+            text_preview(compile_error),
+        )
+        repair_raw_output, _, _ = await ai_generator.generate(
+            prompt=repair_prompt,
+            provider=provider,
+            model=model,
+        )
+        enforce_text_limit("repair_raw_output", repair_raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
+        raw_output = repair_raw_output
+        latex_body = extract_latex_code(repair_raw_output)
+        enforce_text_limit("repair_latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
+        latex_code = build_latex_document(latex_body)
+        enforce_text_limit("repair_latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
+        validation = validate_latex_document(latex_code)
+        compile_check.repaired = True
+
+    return latex_body, raw_output, latex_code, validation, compile_check
 
 
 def build_generation_prompt_response(request: GenerationRequest) -> GenerationPromptResponse:
@@ -236,11 +309,28 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
     enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
     latex_body = extract_latex_code(raw_output)
     enforce_text_limit("latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
-    latex_code = build_latex_document(latex_body)
-    enforce_text_limit("latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
-    validation = validate_latex_document(latex_code)
+
+    try:
+        latex_body, raw_output, latex_code, validation, compile_check = await compile_check_and_repair(
+            latex_body=latex_body,
+            raw_output=raw_output,
+            provider=provider,
+            model=model,
+        )
+    except AIGenerationError as exc:
+        logger.warning(
+            "ai generation repair failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f error=%s",
+            provider,
+            model,
+            exc.status_code,
+            text_digest(prompt_response.prompt),
+            (time.perf_counter() - started_at) * 1000,
+            exc,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
+
     logger.info(
-        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s",
+        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s compile_attempted=%s compile_success=%s compile_repaired=%s",
         provider,
         model,
         (time.perf_counter() - started_at) * 1000,
@@ -252,6 +342,9 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         validation["valid"],
         len(validation["errors"]),
         len(validation["warnings"]),
+        compile_check.attempted,
+        compile_check.success,
+        compile_check.repaired,
     )
 
     return GenerationResultResponse(
@@ -263,4 +356,5 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         latex_code=latex_code,
         raw_output=raw_output,
         validation=GenerationValidationResponse(**validation),
+        compile_check=compile_check,
     )

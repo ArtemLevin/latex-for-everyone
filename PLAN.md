@@ -138,6 +138,7 @@ Latexed уже имеет рабочий вертикальный срез он�
 ### Этап 5 — AI generation v2
 
 **Приоритет:** P1
+**Статус:** начат: generation уже использует body-only contract, фиксированную преамбулу, language/source-mode поля и первую итерацию compile-check/auto-repair перед возвратом результата.
 
 **Цель:** сделать AI generation воспроизводимой, управляемой и удобной.
 
@@ -152,7 +153,7 @@ Latexed уже имеет рабочий вертикальный срез он�
 - Добавить `generate-to-project` endpoint для атомарной записи generated LaTeX в файл проекта на backend.
 - Вынести provider/model presets в backend endpoint/config, чтобы frontend не был source of truth.
 - Вынести prompt templates в конфигурационные файлы или отдельный модуль с тестируемыми template parts.
-- Добавить AI repair flow: пользователь отправляет compile/validation errors и получает исправленную версию `.tex`.
+- Продолжить AI repair flow: первая автоматическая compile-check/repair итерация добавлена; дальше нужен UI для ошибок, повторов и ручного repair по compile/validation errors.
 
 **Критерий готовности:** AI generation можно воспроизвести, открыть из истории, восстановить в проект и конфигурировать без правки frontend hardcode.
 

@@ -277,3 +277,40 @@ def build_latex_generation_prompt(fields: GenerationFields, materials: str = "")
             "EXECUTION: обработайте материалы и верните только тело LaTeX-документа в одном fenced-блоке ```latex```; не пишите преамбулу и границы document.",
         ]
     )
+
+
+
+def build_latex_repair_prompt(*, body: str, compiler_error: str, validation_errors: list[str] | None = None) -> str:
+    """Build a compact prompt that asks the provider to repair body-only LaTeX."""
+    validation_text = "\n".join(validation_errors or []) or "Структурная валидация не выявила дополнительных ошибок."
+    return rf"""Ты исправляешь LaTeX BODY для уже существующей фиксированной преамбулы Latexed.
+
+ЗАДАЧА: вернуть исправленное тело документа, которое компилируется pdfLaTeX.
+
+СТРОГИЕ ЗАПРЕТЫ:
+- не пиши \documentclass;
+- не пиши \usepackage;
+- не пиши \begin{{document}} или \end{{document}};
+- не добавляй новые \newcommand, \newenvironment, \definecolor;
+- не добавляй markdown, комментарии вне fenced-блока или объяснения;
+- не меняй смысл задач и решений без необходимости.
+
+РАЗРЕШЕНО:
+- закрыть незакрытые окружения;
+- заменить неизвестные окружения на infoblock/taskblock или обычный текст;
+- упростить проблемные таблицы/TikZ до компилируемого текста;
+- исправить math delimiters, braces, alignment, списки и ответы.
+
+ОШИБКИ ВАЛИДАЦИИ:
+{validation_text}
+
+ОШИБКА КОМПИЛЯТОРА:
+{compiler_error or 'Компилятор вернул ошибку без подробного сообщения.'}
+
+ТЕКУЩЕЕ BODY:
+```latex
+{body}
+```
+
+Верни только исправленное BODY в одном блоке ```latex```.
+"""
