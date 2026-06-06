@@ -16,8 +16,9 @@ from app.schemas import (
 )
 from app.config import settings
 from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
-from app.services.prompt_builder import build_latex_generation_prompt
+from app.services.latex_document_builder import build_latex_document
 from app.services.latex_validator import validate_latex_document
+from app.services.prompt_builder import build_latex_generation_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ PRESETS: list[GenerationPresetResponse] = [
         description="Базовый сценарий для обучающего пособия ЕГЭ по математике с одной сложной тренировочной задачей.",
         defaults={
             "level": "ЕГЭ",
+            "language": "русский",
+            "content_source_mode": "materials_only",
             "alpha_code": 1,
             "beta_code": 1,
             "gamma_code": 4,
@@ -107,8 +110,11 @@ def build_generation_prompt_response(request: GenerationRequest) -> GenerationPr
     enforce_text_limit("prompt", prompt, settings.AI_MAX_PROMPT_CHARS)
     warnings = []
     if not request.fields.topic:
-        warnings.append("Тема не указана: prompt потребует определить тему по материалам без домыслов.")
-    if not request.materials.strip():
+        if request.fields.content_source_mode == "materials_only":
+            warnings.append("Тема не указана: prompt потребует определить тему по материалам без домыслов.")
+        else:
+            warnings.append("Тема не указана: нейросеть будет выбирать тему самостоятельно, что может снизить точность пособия.")
+    if not request.materials.strip() and request.fields.content_source_mode == "materials_only":
         warnings.append("Материалы не переданы: prompt запрещает домысливать исходные задания.")
 
     logger.info(
@@ -228,16 +234,19 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
 
     enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
-    latex_code = extract_latex_code(raw_output)
+    latex_body = extract_latex_code(raw_output)
+    enforce_text_limit("latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
+    latex_code = build_latex_document(latex_body)
     enforce_text_limit("latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
     validation = validate_latex_document(latex_code)
     logger.info(
-        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s",
+        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s",
         provider,
         model,
         (time.perf_counter() - started_at) * 1000,
         text_digest(prompt_response.prompt),
         len(raw_output),
+        len(latex_body),
         len(latex_code),
         text_digest(latex_code),
         validation["valid"],

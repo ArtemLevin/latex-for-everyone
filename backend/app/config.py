@@ -20,6 +20,12 @@ class Settings(BaseSettings):
     COMPILE_TIMEOUT: int = 30
     MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
     COMPILE_WORK_DIR: str = "/tmp/latexed_compiles"
+    MAX_LATEX_FILES: int = 100
+    MAX_LATEX_FILE_CHARS: int = 500_000
+    MAX_LATEX_TOTAL_CHARS: int = 2_000_000
+    MAX_COMPILER_OUTPUT_CHARS: int = 20_000
+    LATEX_ALLOWED_EXTENSIONS: str = ".tex,.bib,.cls,.sty"
+    ARTIFACT_TTL_SECONDS: int = 24 * 60 * 60
 
     # Security
     SECRET_KEY: str = "change-me-in-production-please"

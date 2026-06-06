@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 from app.config import settings
 from app.schemas import PDFGenerationResult
+from app.services.artifact_cleanup import cleanup_old_files
+from app.services.latex_file_policy import enforce_latex_file_policy, parse_allowed_extensions
 from app.services.latex_sanitizer import sanitize_latex_files, sanitize_latex_source
 
 logger = logging.getLogger(__name__)
@@ -30,13 +32,16 @@ class PDFGenerator:
         with tempfile.TemporaryDirectory() as tmpdir:
             work_dir = Path(tmpdir)
 
-            sanitized_files = sanitize_latex_files(files or {})
+            allowed_extensions = parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS)
+            safe_files = enforce_latex_file_policy(files or {}, allowed_extensions=allowed_extensions)
+            sanitized_files = sanitize_latex_files(safe_files)
             sanitized_main_content = sanitize_latex_source(main_content)
 
             # Write all files
-            for filename, content in sanitized_files.items():
-                safe_name = Path(filename).name
-                (work_dir / safe_name).write_text(content, encoding="utf-8")
+            for safe_name, content in sanitized_files.items():
+                filepath = work_dir / safe_name
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                filepath.write_text(content, encoding="utf-8")
 
             main_file = work_dir / "main.tex"
             if not main_file.exists():
@@ -63,7 +68,7 @@ class PDFGenerator:
                         log_file = work_dir / "main.log"
                         error_text = ""
                         if log_file.exists():
-                            error_text = log_file.read_text()[-2000:]
+                            error_text = self._truncate_output(log_file.read_text())
                         return PDFGenerationResult(
                             success=False,
                             error=f"Compilation failed:\n{error_text}",
@@ -78,6 +83,7 @@ class PDFGenerator:
             # Save PDF
             pdf_file = work_dir / "main.pdf"
             if pdf_file.exists():
+                cleanup_old_files(self.output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf", ".html", ".zip"})
                 pdf_filename = f"{compile_id}.pdf"
                 pdf_dest = self.output_dir / pdf_filename
                 shutil.copy2(pdf_file, pdf_dest)
@@ -92,6 +98,13 @@ class PDFGenerator:
                 success=False,
                 error="PDF was not generated",
             )
+
+    def _truncate_output(self, text: str) -> str:
+        """Bound compiler output exposed through export errors."""
+        limit = settings.MAX_COMPILER_OUTPUT_CHARS
+        if limit <= 0 or len(text) <= limit:
+            return text
+        return text[-limit:]
 
     def generate_html(self, latex_content: str) -> str:
         """Convert LaTeX to HTML (basic conversion)."""
