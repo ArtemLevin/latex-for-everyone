@@ -20,6 +20,7 @@ from app.config import settings
 from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
 from app.services.latex_document_builder import build_latex_document
 from app.services.latex_compiler import LatexCompiler
+from app.services.latex_sanitizer import sanitize_generated_latex_body
 from app.services.latex_validator import validate_latex_document
 from app.services.prompt_builder import build_latex_generation_prompt, build_latex_repair_prompt
 
@@ -117,6 +118,7 @@ async def compile_check_and_repair(
     model: str,
 ) -> tuple[str, str, str, dict[str, object], GenerationCompileCheckResponse]:
     """Compile-check generated LaTeX and ask the provider for one bounded repair when needed."""
+    latex_body = sanitize_generated_latex_body(latex_body)
     latex_code = build_latex_document(latex_body)
     enforce_text_limit("latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
     validation = validate_latex_document(latex_code)
@@ -167,7 +169,7 @@ async def compile_check_and_repair(
         )
         enforce_text_limit("repair_raw_output", repair_raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
         raw_output = repair_raw_output
-        latex_body = extract_latex_code(repair_raw_output)
+        latex_body = sanitize_generated_latex_body(extract_latex_code(repair_raw_output))
         enforce_text_limit("repair_latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
         latex_code = build_latex_document(latex_body)
         enforce_text_limit("repair_latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
@@ -307,7 +309,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
 
     enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
-    latex_body = extract_latex_code(raw_output)
+    latex_body = sanitize_generated_latex_body(extract_latex_code(raw_output))
     enforce_text_limit("latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
 
     try:

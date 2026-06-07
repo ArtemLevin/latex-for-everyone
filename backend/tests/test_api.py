@@ -268,6 +268,44 @@ def test_latex_sanitizer_normalizes_known_package_options():
     )
 
 
+def test_latex_sanitizer_normalizes_generated_body_artifacts():
+    from app.services.latex_sanitizer import sanitize_generated_latex_body
+
+    content = (
+        "```latex\n"
+        r"\documentclass{article}\usepackage{graphicx}\begin{document}"
+        r"\begin{solution}x ≤ 2…\end{solution}"
+        r"\begin{example}2 × 2 = 4\end{example}"
+        r"\end{document}"
+        "\n```"
+    )
+
+    sanitized = sanitize_generated_latex_body(content)
+
+    assert r"\documentclass" not in sanitized
+    assert r"\usepackage" not in sanitized
+    assert r"\begin{document}" not in sanitized
+    assert r"\begin{solution}" not in sanitized
+    assert r"\textbf{Решение.}" in sanitized
+    assert r"\begin{infoblock}{Пример}" in sanitized
+    assert r"\le" in sanitized
+    assert r"\times" in sanitized
+    assert r"\ldots" in sanitized
+
+
+def test_latex_validator_rejects_unbalanced_generated_environments_and_body_preamble():
+    from app.services.latex_document_builder import build_latex_document
+    from app.services.latex_validator import validate_latex_document
+
+    document = build_latex_document(r"\usepackage{graphicx}\begin{infoblock}{Важно}Текст $x+1")
+    validation = validate_latex_document(document)
+
+    assert validation["valid"] is False
+    assert any("Тело документа не должно содержать \\usepackage" in error for error in validation["errors"])
+    assert any("Несбалансированное окружение infoblock" in error for error in validation["errors"])
+    assert any("Несбалансированные inline math delimiters" in error for error in validation["errors"])
+
+
 def test_latex_file_policy_rejects_path_traversal_and_unsupported_extensions():
     from app.services.latex_file_policy import LatexFilePolicyError, validate_latex_filename
 
