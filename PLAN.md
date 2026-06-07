@@ -1,191 +1,260 @@
-# План дальнейшей реализации AI-generation функционала
+# План дальнейшей разработки Latexed
 
-Текущий статус: базовая связка frontend ↔ backend уже реализована. Backend умеет строить prompt, проверять provider/model, вызывать Ollama или OpenAI-compatible vendor, извлекать LaTeX, выполнять структурную валидацию и отдавать результат. Frontend умеет открыть AI-форму, проверить provider, preview prompt, проверить `.tex`, сгенерировать документ, разместить код в выбранном target-файле, сохранить и запустить компиляцию.
+## 1. Краткий анализ текущего состояния
 
-## Этап 7 — UX и безопасная вставка результата
+Latexed уже имеет рабочий вертикальный срез онлайн LaTeX-редактора:
 
-**Статус:** реализован в текущей итерации.
+- **Backend:** FastAPI-приложение в `backend/app/` с роутерами проектов, файлов, компиляции, экспорта, шаблонов и AI-генерации.
+- **Frontend:** single-page UI в `frontend/main.html` и модульные browser scripts в `frontend/js/`, где реализованы редактор, file tree, preview, export, AI-модалка и настройки.
+- **Persistence:** SQLAlchemy-модели `Project`, `File`, `CompileHistory`, `ProjectSnapshot`; SQLite используется по умолчанию, Alembic scaffold присутствует.
+- **LaTeX pipeline:** серверная компиляция через `pdflatex`, sanitizer известных AI/LaTeX ошибок, download endpoints для PDF/export artifacts.
+- **AI pipeline:** prompt builder, provider/model status, Ollama/OpenAI-compatible вызовы, extraction LaTeX-кода, структурная validation, frontend insertion modes.
+- **Quality baseline:** есть `pytest` API/service tests, `make compileall`, `make frontend-check`, `make check`, Docker backend path и документация для агентской работы.
 
-**Цель:** снизить риск случайной потери текущего `.tex` и сделать генерацию понятнее пользователю.
+Главный вывод: проект уже пригоден для локальной разработки и демонстрации, но до устойчивого production-ready редактора нужны системные улучшения в архитектуре, тестовой матрице, управлении артефактами, frontend надежности, безопасности и операционной документации.
 
-**Реализовано:**
+## 2. Основные пробелы и риски
 
-- Добавлены режимы размещения результата: создать новый файл, заменить текущий файл, вставить в конец текущего файла.
-- Добавлено подтверждение перед заменой активного файла.
-- Добавлены loading states для кнопок prompt/provider/validation/generate.
-- Добавлены кнопки копирования prompt и raw output.
-- Validation errors/warnings выводятся списком.
+### 2.1 Архитектура backend
 
-**Что можно улучшить дополнительно:**
+- Роутеры всё ещё часто напрямую используют SQLAlchemy `Session`; это допустимо как legacy/current style, но усложняет тестирование и повторное использование бизнес-логики.
+- Нет выделенных сервисов для проектов/файлов/снапшотов/export orchestration; compile и AI уже лучше отделены.
+- Автосоздание таблиц теперь должно быть локальной/dev-опцией (`AUTO_CREATE_TABLES`), а production-развёртывания должны опираться на Alembic migrations.
 
-- Показать отдельный provider/model status badge в AI-модалке.
-- Добавить сохранение выбранного режима вставки в `localStorage`.
-- Добавить визуальный preview generated LaTeX до вставки в файл.
+### 2.2 Данные и артефакты
 
-**Критерий готовности:** пользователь явно выбирает, что делать с generated LaTeX, и не может случайно перезаписать активный файл без подтверждения.
+- Локальные runtime SQLite файлы (`latexed.db`, `test_latexed.db`, `*.sqlite`) не должны попадать в git; это нужно регулярно контролировать через `.gitignore` и `git ls-files`.
+- Generated PDF/export artifacts живут в локальных runtime директориях; нужна явная политика TTL, cleanup и storage abstraction для production.
+- История AI-генераций отсутствует как persisted entity, поэтому воспроизводимость генераций ограничена.
 
-## Этап 8 — Безопасность, лимиты и hardening
+### 2.3 LaTeX/security hardening
 
-**Статус:** реализован в текущей итерации.
+- Есть sanitizer и validator, но compile/export остаются высокорисковыми границами из-за subprocess и пользовательского `.tex`.
+- Нужны более строгие ограничения на путь, размер проекта, число файлов, расширения, compile artifact TTL, stdout/stderr/log size.
+- Нужна отдельная политика sandboxing: текущий `pdflatex` не должен получать доступ к произвольной файловой системе или shell escape.
 
-**Цель:** подготовить AI endpoints к реальному использованию и защитить backend от больших/опасных payload-ов.
+### 2.4 Frontend надежность
 
-**Реализовано:**
+- Frontend построен как набор global scripts без build step; это просто, но усложняет масштабирование и автоматическое тестирование UI flows.
+- Нет browser E2E тестов для критичных сценариев: создать проект, редактировать файл, скомпилировать, экспортировать, выполнить AI generation.
+- Offline/local fallback есть, но его поведение нужно формализовать и покрыть тестами.
 
-- Добавлены конфигурируемые лимиты на размер `materials`, итогового prompt, raw output и payload для LaTeX validation.
-- Добавлен отдельный timeout `AI_PROVIDER_STATUS_TIMEOUT` для быстрых проверок provider/model status.
-- Добавлен in-memory rate limiting для generation endpoints с настройкой `AI_RATE_LIMIT_PER_MINUTE`.
-- В production provider errors по умолчанию скрываются от пользователя; подробности можно включить через `DEBUG` или `AI_EXPOSE_PROVIDER_ERRORS`.
-- LaTeX validator расширен запретами на потенциально опасные команды и пути:
-  - `\write18`;
-  - `\input|...`;
-  - `\openout`;
-  - абсолютные и родительские пути в `\input`/`\include`;
-  - внешние/абсолютные пути в `\includegraphics`.
-- Добавлены API-тесты на лимиты, rate limiting, sanitizing provider errors и validator-denylist.
+### 2.5 Observability и эксплуатация
 
-**Что можно улучшить дополнительно:**
+- Есть request logging и request IDs, но не хватает health/readiness детализации по DB, compiler, storage, AI provider.
+- Нет документированного production checklist: env vars, secrets, CORS/hosts, storage cleanup, reverse proxy, backups, migrations.
+- Celery/Redis scaffolding присутствует, но compile/export/generation пока в основном synchronous API flows.
 
-- Заменить in-memory limiter на Redis/DB-backed limiter для multi-process deployment.
-- Делать лимиты user/project scoped после появления авторизации.
-- Заменить stdout-логирование на централизованный sink (ELK/Loki/OpenTelemetry) для production.
-- Добавить audit-log по заблокированным generation запросам.
-- Добавить отдельные лимиты для `/generate` и дешевых endpoint-ов (`/prompt`, `/validate`, `/providers/status`).
+## 3. Целевое направление
 
-**Критерий готовности:** generation API устойчив к слишком большим запросам, опасным LaTeX-командам и повторным частым вызовам.
+Цель развития: превратить Latexed из локального full-stack прототипа в устойчивый сервис для создания, AI-генерации, компиляции и экспорта LaTeX-документов.
 
-## Этап 9 — AI repair compile errors
+Целевые принципы:
 
-**Цель:** дать пользователю возможность исправлять ошибки компиляции через AI.
+1. **Безопасные границы:** всё, что пересекает subprocess/provider/filesystem boundary, валидируется, лимитируется и логируется без утечки пользовательского контента.
+2. **Стабильные API contracts:** схемы и frontend payloads меняются осознанно, с тестами и документацией.
+3. **Инкрементальная архитектура:** новые сложные flows идут через services; legacy direct-DB routers рефакторятся постепенно.
+4. **Воспроизводимость:** compile/export/AI actions имеют историю, метаданные, диагностируемые ошибки и cleanup policy.
+5. **Проверяемость:** backend tests + frontend syntax checks + E2E для ключевых browser сценариев.
 
-**Работы:**
+## 4. Roadmap по этапам
 
-- Добавить endpoint `POST /api/generation/repair`.
-- Payload:
-  - `latex_code`;
-  - `compile_error`;
-  - `provider`;
-  - `model`;
-  - опционально `project_id`.
-- Prompt repair должен требовать вернуть только исправленный LaTeX от `\documentclass` до `\end{document}`.
-- Frontend-кнопка: `Исправить ошибку через AI` в error panel.
-- После repair: validate → вставить/создать файл → compile.
+### Этап 1 — Репозиторная гигиена и baseline качества
 
-**Критерий готовности:** если compile endpoint вернул ошибку, пользователь может запустить AI repair и получить исправленную версию документа.
+**Приоритет:** P0
 
-## Этап 10 — История AI-генераций
+**Статус:** начат: runtime SQLite artifacts убраны из git tracking, правила ignore и cleanup задокументированы.
 
-**Цель:** обеспечить воспроизводимость и отладку AI-генераций.
+**Цель:** убрать источники нестабильности и зафиксировать минимальный quality gate.
 
 **Работы:**
 
-- Добавить модель/таблицу `generation_history`.
-- Поля:
-  - `id`;
-  - `project_id`;
-  - `provider`;
-  - `model`;
-  - `prompt_hash`;
-  - `prompt_preview` или truncated prompt;
-  - `raw_output`;
-  - `latex_code`;
-  - `validation`;
-  - `status`;
-  - `created_at`.
+- Поддерживать отсутствие runtime DB artifacts (`latexed.db`, `test_latexed.db`, `*.sqlite`) в git и актуальные правила в `.gitignore`.
+- Проверить, что tests сами создают/удаляют test DB и не зависят от tracked `.db` файлов.
+- Добавить/уточнить README-раздел про локальные runtime artifacts и cleanup.
+- Рассмотреть Makefile targets `lint` и `typecheck` или явно оставить только существующие checks в документации.
+- В CI/локальном workflow закрепить минимум:
+  - `make compileall`;
+  - `make frontend-check`;
+  - `make test`.
+
+**Критерий готовности:** чистый checkout не содержит mutable runtime DB в tracked files; базовые проверки документированы и воспроизводимы.
+
+### Этап 2 — Persistence и миграции
+
+**Приоритет:** P0
+**Статус:** реализован базовый вариант: добавлена initial Alembic revision и настройка `AUTO_CREATE_TABLES` для разделения local/dev startup и production migrations.
+
+**Цель:** разделить локальное автосоздание таблиц и production migrations.
+
+**Работы:**
+
+- Принято решение: оставить автосоздание таблиц только как local/dev fallback под `AUTO_CREATE_TABLES=true`; для production — `AUTO_CREATE_TABLES=false` и явный `make migrate`.
+- Добавлена первая Alembic revision для текущей схемы.
+- Документирован migration workflow: `make migration`, review, `make migrate`.
+- Проверить PostgreSQL compatibility для JSON/timestamps/string UUID fields.
+
+**Критерий готовности:** схема БД воспроизводится миграциями, а startup behavior не конфликтует с production deployment.
+
+### Этап 3 — Backend service layer для проектов и файлов
+
+**Приоритет:** P1
+**Статус:** начат: CRUD/snapshot/duplicate логика проектов и CRUD/upload логика файлов вынесены в `ProjectService` и `FileService`, роутеры оставлены HTTP-адаптерами.
+
+**Цель:** уменьшить direct business logic в routers и упростить тестирование.
+
+**Работы:**
+
+- Выделен `ProjectService` для create/update/delete/duplicate/snapshot/restore flows.
+- Выделен `FileService` для create/update/delete/upload-all и main-file invariants.
+- Публичные endpoints и response schemas сохранены без breaking changes.
+- Добавить service-level unit tests там, где логика станет не завязана на HTTP.
+- Оставить SQLAlchemy session wiring в dependency layer/router, не вводя большой repository layer без необходимости.
+
+**Критерий готовности:** новые и изменённые project/file flows проходят через services; routers стали тоньше, API поведение не изменилось.
+
+### Этап 4 — Compile/export hardening
+
+**Приоритет:** P0
+
+**Статус:** начат: добавлены конфигурируемые лимиты количества файлов и размеров LaTeX payload для compile/export endpoints.
+
+**Цель:** сделать LaTeX subprocess boundary безопаснее и диагностируемее.
+
+**Работы:**
+
+- Поддерживать и расширять явные лимиты:
+  - максимальное количество файлов в compile/export request;
+  - максимальный размер одного файла и всего project payload;
+  - максимальный размер compiler log/output в API response;
+  - TTL generated artifacts.
+- Усилить filename allowlist: расширения `.tex`, `.bib`, изображения только из разрешённого списка при необходимости.
+- Проверить, что `pdflatex` запускается без shell escape и не получает произвольные пути.
+- Добавить регулярный cleanup для compile/export artifacts: Makefile target или scheduled task.
+- Расширить tests на path traversal, oversized payloads, unsupported filenames/extensions, timeout и compiler error mapping.
+
+**Критерий готовности:** compile/export flows имеют лимиты, безопасные ошибки и покрытие основных abuse cases.
+
+### Этап 5 — AI generation v2
+
+**Приоритет:** P1
+**Статус:** начат: generation уже использует body-only contract, фиксированную преамбулу, language/source-mode поля, safe/rich LaTeX mode, deterministic Safe-mode simplification, validation-gated repair, compile-check/auto-repair, pre-compile body sanitizer и validator баланса окружений/math delimiters перед возвратом результата.
+
+**Цель:** сделать AI generation воспроизводимой, управляемой и удобной.
+
+**Работы:**
+
+- Добавить persisted `generation_history`:
+  - `project_id`, provider, model, prompt hash, prompt preview, raw output/latex code policy, validation result, status, timestamps.
 - Добавить endpoints:
   - `GET /api/generation/history/project/{project_id}`;
-  - `GET /api/generation/history/item/{history_id}`.
-- Frontend: вкладка истории AI-генераций.
+  - `GET /api/generation/history/item/{history_id}`;
+  - при необходимости `POST /api/generation/history/{history_id}/restore`.
+- Добавить `generate-to-project` endpoint для атомарной записи generated LaTeX в файл проекта на backend.
+- Вынести provider/model presets в backend endpoint/config, чтобы frontend не был source of truth.
+- Вынести prompt templates в конфигурационные файлы или отдельный модуль с тестируемыми template parts.
+- Продолжить AI repair flow: первая автоматическая compile-check/repair итерация добавлена; дальше нужен UI для ошибок, повторов и ручного repair по compile/validation errors.
 
-**Критерий готовности:** прошлую генерацию можно найти, открыть, повторить или восстановить.
+**Критерий готовности:** AI generation можно воспроизвести, открыть из истории, восстановить в проект и конфигурировать без правки frontend hardcode.
 
-## Этап 11 — Generate-to-project endpoint
+### Этап 6 — Frontend UX и тестируемость
 
-**Цель:** перенести атомарную запись generated LaTeX из frontend-логики в backend.
+**Приоритет:** P1
 
-**Работы:**
-
-- Добавить endpoint `POST /api/generation/generate-to-project`.
-- Endpoint должен:
-  - принять параметры генерации и `project_id`;
-  - вызвать provider;
-  - извлечь и провалидировать LaTeX;
-  - создать новый файл или обновить существующий;
-  - вернуть `FileResponse`, validation и generation metadata.
-- Frontend должен использовать этот endpoint для режима `создать generated.tex` или `заменить текущий файл`.
-
-**Критерий готовности:** generated LaTeX сохраняется в проект атомарно на backend, а frontend только обновляет локальное состояние из ответа API.
-
-## Этап 12 — Provider/model presets
-
-**Цель:** убрать hardcode provider/model из frontend.
+**Цель:** стабилизировать пользовательские browser flows.
 
 **Работы:**
 
-- Добавить endpoint `GET /api/generation/providers`.
-- Возвращать доступные provider presets:
-  - id;
-  - name;
-  - default model;
-  - description;
-  - required env vars.
-- Frontend строит provider select из API, а не из hardcoded options.
-- Опционально подтягивать список моделей Ollama из `/api/tags`.
+- Добавить Playwright или аналогичный E2E runner.
+- Покрыть сценарии:
+  - bootstrap при доступном backend;
+  - offline/local fallback;
+  - создание/переименование/удаление файла;
+  - compile success/error UI;
+  - export PDF/HTML/TEX UI;
+  - AI prompt preview/provider status/generate/insert modes.
+- Добавить Makefile target `frontend-e2e` и документацию по запуску.
+- Зафиксировать DOM/test IDs для критичных элементов.
+- Сохранить выбранные AI/UI настройки в `localStorage`, где это улучшает UX.
 
-**Критерий готовности:** frontend не содержит жестко зашитые provider/model presets.
+**Критерий готовности:** ключевые browser сценарии проверяются автоматизированно, а frontend изменения перестают быть только ручной проверкой.
 
-## Этап 13 — Prompt-template management
+### Этап 7 — Observability и operational readiness
 
-**Цель:** сделать prompt и presets изменяемыми без правки Python-кода.
+**Приоритет:** P1
 
-**Работы:**
-
-- Вынести prompt templates в отдельный YAML/JSON/Markdown-файл или таблицу БД.
-- Разделить:
-  - role;
-  - output contract;
-  - correctness rules;
-  - style rules;
-  - subject presets;
-  - difficulty presets.
-- Добавить tests, что prompt builder корректно собирает итоговый prompt из template parts.
-- Опционально добавить endpoint preview конкретного prompt template.
-
-**Критерий готовности:** prompt можно менять как конфигурацию, не трогая backend service code.
-
-## Этап 14 — Frontend E2E tests
-
-**Цель:** автоматически проверять ключевые browser-flow сценарии.
+**Цель:** подготовить сервис к эксплуатации и диагностике.
 
 **Работы:**
 
-- Добавить Playwright или аналогичный browser-test runner.
-- Сценарии:
-  - открыть `frontend/main.html`;
-  - замокать backend health/project/files/generation endpoints;
-  - открыть AI-модалку;
-  - заполнить тему;
-  - нажать generate;
-  - проверить вставку generated LaTeX в editor;
-  - проверить validation/provider buttons.
-- Добавить Makefile target `frontend-e2e`.
+- Добавить readiness endpoint или расширенный health report для:
+  - DB connectivity;
+  - compiler availability;
+  - writable compile/export directories;
+  - AI provider optional status.
+- Стандартизировать error codes/messages для compile/export/AI.
+- Добавить structured logging для service boundaries с request_id.
+- Документировать production env vars:
+  - `DATABASE_URL`;
+  - `SECRET_KEY`;
+  - `CORS_ORIGINS`/`ALLOWED_HOSTS`;
+  - `LATEX_COMPILER`/work dirs;
+  - AI provider settings.
+- Добавить deployment checklist и troubleshooting в README/docs.
 
-**Критерий готовности:** AI frontend flow проверяется не только static contract tests, но и реальным browser scenario.
+**Критерий готовности:** оператор может понять состояние сервиса и диагностировать типовые сбои без чтения кода.
 
-## Этап 15 — Docker/compose with Ollama
+### Этап 8 — Async jobs для тяжёлых операций
 
-**Цель:** упростить локальный запуск всего AI-контура.
+**Приоритет:** P2
+
+**Цель:** убрать долгие compile/export/AI operations из request-response path там, где это нужно.
 
 **Работы:**
 
-- Добавить docker-compose profile для Ollama или отдельные инструкции запуска Ollama рядом с backend.
-- Документировать:
-  - `ollama pull qwen2.5:14b`;
-  - `OLLAMA_BASE_URL=http://ollama:11434` для backend внутри compose-сети.
-- Добавить Makefile targets для docker AI workflow, например:
-  - `docker-ai-up`;
-  - `docker-ai-down`;
-  - `docker-ai-logs`.
-- Добавить README troubleshooting для compose/network/model pull.
+- Решить, какие операции остаются sync, а какие уходят в Celery/Redis.
+- Сформировать job model/API:
+  - create job;
+  - get status;
+  - get result/artifact;
+  - cancel/retry.
+- Использовать существующий `backend/app/worker.py` как стартовую точку или заменить на более явную job architecture.
+- Обновить frontend на polling/websocket для job progress.
 
-**Критерий готовности:** разработчик может поднять backend + frontend + Ollama по документированному сценарию без ручной настройки URL-ов.
+**Критерий готовности:** долгие операции не блокируют API worker и имеют понятный progress/result lifecycle.
+
+### Этап 9 — Collaboration и project lifecycle
+
+**Приоритет:** P2
+
+**Цель:** улучшить работу с проектами без обязательного полноценного auth на первом шаге.
+
+**Работы:**
+
+- Ввести lightweight project access model: public/private links или owner token.
+- Добавить project export/import bundle.
+- Добавить versioned snapshots/diff view.
+- Рассмотреть WebSocket live compile или collaborative presence только после стабилизации базового project lifecycle.
+
+**Критерий готовности:** пользователь может безопаснее хранить, переносить и восстанавливать проекты.
+
+## 5. Рекомендуемый порядок ближайших задач
+
+1. **Repo hygiene:** убрать tracked `.db`, добавить `.gitignore`, проверить tests.
+2. **Compile/export limits:** закрыть самые рискованные subprocess/filesystem abuse cases.
+3. **Migration baseline:** создать/зафиксировать Alembic baseline и startup policy.
+4. **Project/File services:** начать инкрементальный refactor с тестами без изменения API.
+5. **AI history + generate-to-project:** сделать AI результат воспроизводимым и атомарно сохраняемым.
+6. **Frontend E2E:** покрыть основные пользовательские сценарии.
+7. **Readiness/ops docs:** подготовить production checklist и health diagnostics.
+
+## 6. Definition of Done для этапов
+
+Для каждого этапа:
+
+- [ ] Изменения ограничены заявленным scope.
+- [ ] Публичные API/schema изменения задокументированы.
+- [ ] Добавлены или обновлены tests для нового поведения.
+- [ ] Выполнены релевантные checks (`make compileall`, `make frontend-check`, `make test`, `make check`, `make latex-check` при необходимости).
+- [ ] Environment limitations явно записаны, если проверка невозможна.
+- [ ] Нет tracked runtime artifacts, secrets, generated PDFs или нерелевантного форматирования.

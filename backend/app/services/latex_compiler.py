@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Optional
 from app.config import settings
 from app.schemas import LatexCompileResult
+from app.services.artifact_cleanup import cleanup_old_files
+from app.services.latex_file_policy import enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.latex_sanitizer import sanitize_latex_files, sanitize_latex_source
 
 logger = logging.getLogger(__name__)
@@ -32,20 +34,25 @@ class LatexCompiler:
         try:
             work_dir.mkdir(parents=True, exist_ok=True)
 
-            sanitized_files = sanitize_latex_files(files or {})
+            allowed_extensions = parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS)
+            safe_files = enforce_latex_file_policy(files or {}, allowed_extensions=allowed_extensions)
+            sanitized_files = sanitize_latex_files(safe_files)
             sanitized_main_content = sanitize_latex_source(main_content)
-            safe_main_name = Path(main_filename).name or "main.tex"
+            safe_main_name = validate_latex_filename(
+                main_filename or "main.tex",
+                allowed_extensions=allowed_extensions,
+            )
 
             # Write all files
-            for filename, content in sanitized_files.items():
-                # Sanitize filename
-                safe_name = Path(filename).name
+            for safe_name, content in sanitized_files.items():
                 filepath = work_dir / safe_name
+                filepath.parent.mkdir(parents=True, exist_ok=True)
                 filepath.write_text(content, encoding="utf-8")
 
             # Always write the selected compile entrypoint last so request overrides
             # cannot be shadowed by a same-named project file already in all_files.
             main_file = work_dir / safe_main_name
+            main_file.parent.mkdir(parents=True, exist_ok=True)
             main_file.write_text(sanitized_main_content, encoding="utf-8")
 
             # Compile with pdflatex (run twice for references)
@@ -79,7 +86,7 @@ class LatexCompiler:
                                 return LatexCompileResult(
                                     status="error",
                                     error=errors,
-                                    output=log_text[-2000:],
+                                    output=self._truncate_output(log_text),
                                     compile_time=compile_time,
                                 )
 
@@ -87,7 +94,7 @@ class LatexCompiler:
                         return LatexCompileResult(
                             status="error",
                             error=f"Compilation failed on run {run + 1}",
-                            output=result.stdout[-2000:],
+                            output=self._truncate_output(result.stdout),
                             compile_time=compile_time,
                         )
 
@@ -107,6 +114,7 @@ class LatexCompiler:
                 # Save PDF for download
                 output_dir = self.work_dir / "pdfs"
                 output_dir.mkdir(parents=True, exist_ok=True)
+                cleanup_old_files(output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf"})
 
                 pdf_filename = f"{compile_id}.pdf"
                 pdf_dest = output_dir / pdf_filename
@@ -117,7 +125,7 @@ class LatexCompiler:
 
             return LatexCompileResult(
                 status="success",
-                output=log_output[-1] if log_output else "",
+                output=self._truncate_output(log_output[-1]) if log_output else "",
                 compile_time=compile_time,
                 pdf_url=pdf_url,
             )
@@ -135,6 +143,13 @@ class LatexCompiler:
             # Cleanup work directory
             if work_dir.exists():
                 shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _truncate_output(self, text: str) -> str:
+        """Bound compiler output stored in API responses and compile history."""
+        limit = settings.MAX_COMPILER_OUTPUT_CHARS
+        if limit <= 0 or len(text) <= limit:
+            return text
+        return text[-limit:]
 
     def _extract_errors(self, log_text: str) -> str:
         """Extract error messages from LaTeX log."""
