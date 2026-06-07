@@ -11,24 +11,29 @@ MICROTYPE_PACKAGE_PATTERN = re.compile(
 MICROTYPE_EXPANSION_OPTION_PATTERN = re.compile(r"^\s*expansion\s*=", re.IGNORECASE)
 LATEX_FENCE_PATTERN = re.compile(r"```(?:latex|tex)?\s*(.*?)```", re.IGNORECASE | re.DOTALL)
 DOCUMENT_BODY_PATTERN = re.compile(r"\\begin\{document\}(?P<body>.*)\\end\{document\}", re.DOTALL)
+MATH_SEGMENT_PATTERN = re.compile(
+    r"(\$\$.*?\$\$|(?<!\\)\$.*?(?<!\\)\$|\\\[.*?\\\]|\\\(.*?\\\)|"
+    r"\\begin\{(?:equation\*?|align\*?)\}.*?\\end\{(?:equation\*?|align\*?)\})",
+    re.DOTALL,
+)
 BODY_PREAMBLE_LINE_PATTERN = re.compile(
     r"^\s*\\(?:documentclass|usepackage|geometry|definecolor|newcommand|renewcommand|newenvironment|usetikzlibrary|pgfplotsset)\b.*$",
     re.MULTILINE,
 )
 BODY_BOUNDARY_PATTERN = re.compile(r"\\(?:begin|end)\{document\}")
 UNICODE_LATEX_REPLACEMENTS = {
-    "≤": r"\le",
-    "≥": r"\ge",
-    "≠": r"\ne",
-    "×": r"\times",
-    "·": r"\cdot",
-    "…": r"\ldots",
-    "−": "-",
-    "–": "--",
-    "—": "---",
-    "→": r"\to",
-    "√": r"\sqrt{}",
-    "π": r"\pi",
+    "≤": (r"\le", True),
+    "≥": (r"\ge", True),
+    "≠": (r"\ne", True),
+    "×": (r"\times", True),
+    "·": (r"\cdot", True),
+    "…": (r"\ldots", False),
+    "−": ("-", False),
+    "–": ("--", False),
+    "—": ("---", False),
+    "→": (r"\to", True),
+    "√": (r"\sqrt{}", True),
+    "π": (r"\pi", True),
 }
 ENVIRONMENT_ALIASES = {
     "solution": (r"\textbf{Решение.}", ""),
@@ -36,6 +41,13 @@ ENVIRONMENT_ALIASES = {
     "exercise": (r"\begin{taskblock}{Упражнение}", r"\end{taskblock}"),
     "problem": (r"\begin{taskblock}{Задача}", r"\end{taskblock}"),
     "proof": (r"\textbf{Доказательство.}", r"\hfill $\square$"),
+    "definition": (r"\begin{infoblock}{Определение}", r"\end{infoblock}"),
+    "theorem": (r"\begin{infoblock}{Теорема}", r"\end{infoblock}"),
+    "remark": (r"\begin{infoblock}{Замечание}", r"\end{infoblock}"),
+    "note": (r"\begin{infoblock}{Заметка}", r"\end{infoblock}"),
+    "answer": (r"\answer{", "}"),
+    "tasks": (r"\begin{taskblock}{Задания}", r"\end{taskblock}"),
+    "questions": (r"\begin{taskblock}{Вопросы}", r"\end{taskblock}"),
 }
 
 SAFE_MODE_BLOCK_PATTERNS = [
@@ -118,11 +130,22 @@ def _extract_body_if_full_document(content: str) -> str:
     return match.group("body").strip() if match else content
 
 
-def _replace_unicode_symbols(content: str) -> str:
-    sanitized = content
-    for symbol, replacement in UNICODE_LATEX_REPLACEMENTS.items():
-        sanitized = sanitized.replace(symbol, replacement)
+def _replace_unicode_symbols_in_segment(segment: str, *, in_math: bool) -> str:
+    sanitized = segment
+    for symbol, (replacement, requires_math) in UNICODE_LATEX_REPLACEMENTS.items():
+        if in_math or not requires_math:
+            sanitized = sanitized.replace(symbol, replacement)
+        else:
+            sanitized = sanitized.replace(symbol, f"${replacement}$")
     return sanitized
+
+
+def _replace_unicode_symbols(content: str) -> str:
+    parts = MATH_SEGMENT_PATTERN.split(content)
+    replaced_parts = []
+    for index, part in enumerate(parts):
+        replaced_parts.append(_replace_unicode_symbols_in_segment(part, in_math=index % 2 == 1))
+    return "".join(replaced_parts)
 
 
 def _replace_environment_aliases(content: str) -> str:
@@ -139,6 +162,24 @@ def _replace_environment_aliases(content: str) -> str:
             sanitized,
         )
     return sanitized
+
+
+def _escape_text_special_characters(segment: str) -> str:
+    escaped = re.sub(r"(?<!\\)%", r"\\%", segment)
+    escaped = re.sub(r"(?<!\\)#", r"\\#", escaped)
+    escaped = re.sub(r"(?<!\\)_(?=[0-9A-Za-zА-Яа-яЁё])", r"\\_", escaped)
+    return escaped
+
+
+def _escape_text_special_characters_outside_math(content: str) -> str:
+    parts = MATH_SEGMENT_PATTERN.split(content)
+    escaped_parts = []
+    for index, part in enumerate(parts):
+        if index % 2 == 1:
+            escaped_parts.append(part)
+        else:
+            escaped_parts.append(_escape_text_special_characters(part))
+    return "".join(escaped_parts)
 
 
 def sanitize_generated_latex_body_for_safe_mode(content: str) -> str:
@@ -165,6 +206,7 @@ def sanitize_generated_latex_body(content: str) -> str:
     sanitized = BODY_BOUNDARY_PATTERN.sub("", sanitized)
     sanitized = _replace_environment_aliases(sanitized)
     sanitized = _replace_unicode_symbols(sanitized)
+    sanitized = _escape_text_special_characters_outside_math(sanitized)
     sanitized = sanitize_latex_source(sanitized)
     return re.sub(r"\n{3,}", "\n\n", sanitized).strip()
 

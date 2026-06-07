@@ -55,6 +55,14 @@ BALANCED_ENVIRONMENTS = [
 ]
 
 DOCUMENT_BODY_RE = re.compile(r"\\begin\{document\}(?P<body>.*)\\end\{document\}", re.DOTALL)
+MATH_SEGMENT_PATTERN = re.compile(
+    r"(\$\$.*?\$\$|(?<!\\)\$.*?(?<!\\)\$|\\\[.*?\\\]|\\\(.*?\\\)|"
+    r"\\begin\{(?:equation\*?|align\*?)\}.*?\\end\{(?:equation\*?|align\*?)\})",
+    re.DOTALL,
+)
+MATH_ONLY_COMMAND_PATTERN = re.compile(
+    r"\\(?:frac|sqrt|sum|int|lim|sin|cos|tan|log|ln|alpha|beta|gamma|delta|Delta|pi|le|ge|neq|ne|times|cdot|to)\b"
+)
 
 
 def _extract_document_body(content: str) -> str:
@@ -77,6 +85,26 @@ def _append_math_delimiter_errors(content: str, errors: list[str]) -> None:
         errors.append("Несбалансированные display math delimiters \\[ и \\].")
     if content.count(r"\(") != content.count(r"\)"):
         errors.append("Несбалансированные inline math delimiters \\( и \\).")
+
+
+def _count_unescaped(content: str, char: str) -> int:
+    return len(re.findall(rf"(?<!\\){re.escape(char)}", content))
+
+
+def _append_brace_balance_errors(content: str, errors: list[str]) -> None:
+    opening = _count_unescaped(content, "{")
+    closing = _count_unescaped(content, "}")
+    if opening != closing:
+        errors.append(f"Несбалансированные фигурные скобки: open={opening}, close={closing}.")
+
+
+def _append_math_command_mode_errors(content: str, errors: list[str]) -> None:
+    text_parts = MATH_SEGMENT_PATTERN.split(content)[::2]
+    for text_part in text_parts:
+        match = MATH_ONLY_COMMAND_PATTERN.search(text_part)
+        if match:
+            errors.append(f"Математическая команда {match.group(0)} найдена вне math mode; оберните выражение в $...$ или \\[...\\].")
+            return
 
 
 def validate_latex_document(content: str, *, safe_mode: bool = False) -> dict[str, object]:
@@ -124,6 +152,8 @@ def validate_latex_document(content: str, *, safe_mode: bool = False) -> dict[st
 
     _append_environment_balance_errors(stripped, errors)
     _append_math_delimiter_errors(body, errors)
+    _append_brace_balance_errors(body, errors)
+    _append_math_command_mode_errors(body, errors)
 
     for package in REQUIRED_LATEX_PACKAGES:
         if re.search(rf"\\usepackage(?:\[[^\]]*\])?\{{{re.escape(package)}\}}", stripped) is None:

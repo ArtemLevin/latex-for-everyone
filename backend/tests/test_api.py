@@ -313,6 +313,76 @@ def test_latex_sanitizer_simplifies_safe_mode_risky_fragments():
     assert r"\begin{infoblock}{Вставка файла пропущена}" in sanitized
 
 
+@pytest.mark.parametrize(
+    ("fixture_name", "expect_valid", "expected_fragments", "unexpected_fragments", "expected_error"),
+    [
+        (
+            "safe_special_chars.tex",
+            True,
+            [r"100\%", r"task\_1", r"\#3", r"$x_1 + y_2$"],
+            ["100%", "task_1"],
+            "",
+        ),
+        (
+            "aliases_unicode.tex",
+            True,
+            [
+                r"\begin{infoblock}{Определение}",
+                r"\begin{infoblock}{Заметка}",
+                r"$\le$",
+                r"$\ne$",
+                r"$\times$",
+                r"$\to$",
+                r"\ldots",
+            ],
+            ["≤", "≠", "×", "→", "…", r"\begin{definition}", r"\begin{note}"],
+            "",
+        ),
+        (
+            "risky_safe_fragments.tex",
+            True,
+            ["Схема упрощена", "Изображение пропущено"],
+            [r"\begin{tikzpicture}", r"\includegraphics"],
+            "",
+        ),
+        (
+            "unbalanced_braces.tex",
+            False,
+            [],
+            [],
+            "Несбалансированные фигурные скобки",
+        ),
+        (
+            "math_command_outside_math.tex",
+            False,
+            [],
+            [],
+            r"Математическая команда \frac найдена вне math mode",
+        ),
+    ],
+)
+def test_ai_output_failure_corpus_pipeline(fixture_name, expect_valid, expected_fragments, unexpected_fragments, expected_error):
+    from app.services.latex_document_builder import build_latex_document
+    from app.services.latex_sanitizer import sanitize_generated_latex_body, sanitize_generated_latex_body_for_safe_mode
+    from app.services.latex_validator import validate_latex_document
+
+    fixture_path = Path(__file__).parent / "fixtures" / "ai_outputs" / fixture_name
+    raw_output = fixture_path.read_text(encoding="utf-8")
+
+    body = sanitize_generated_latex_body(raw_output)
+    body = sanitize_generated_latex_body_for_safe_mode(body)
+    document = build_latex_document(body)
+    validation = validate_latex_document(document, safe_mode=True)
+
+    for fragment in expected_fragments:
+        assert fragment in document
+    for fragment in unexpected_fragments:
+        assert fragment not in document
+    assert validation["valid"] is expect_valid
+    if expected_error:
+        assert any(expected_error in error for error in validation["errors"])
+
+
 def test_latex_validator_rejects_unbalanced_generated_environments_and_body_preamble():
     from app.services.latex_document_builder import build_latex_document
     from app.services.latex_validator import validate_latex_document
