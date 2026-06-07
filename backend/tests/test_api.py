@@ -37,6 +37,47 @@ def setup_db():
 client = TestClient(app)
 
 
+def test_initialize_database_respects_auto_create_flag(monkeypatch):
+    from app import main as main_module
+    from app.config import settings
+
+    called = False
+
+    def fake_create_all(*args, **kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(settings, "AUTO_CREATE_TABLES", False)
+    monkeypatch.setattr(main_module.Base.metadata, "create_all", fake_create_all)
+
+    main_module.initialize_database()
+
+    assert called is False
+
+
+def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+    from app.config import settings
+
+    db_path = tmp_path / "migration_baseline.db"
+    monkeypatch.setattr(settings, "DATABASE_URL", f"sqlite:///{db_path}")
+
+    repo_root = Path(__file__).resolve().parents[2]
+    config = Config(str(repo_root / "backend" / "alembic.ini"))
+    config.set_main_option("script_location", str(repo_root / "backend" / "alembic"))
+    command.upgrade(config, "head")
+
+    engine = create_engine(f"sqlite:///{db_path}")
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+
+    assert {"projects", "files", "compile_history", "project_snapshots", "alembic_version"}.issubset(tables)
+    assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
+    assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
+
+
 def test_health_check():
     response = client.get("/api/health")
     assert response.status_code == 200
@@ -143,6 +184,37 @@ def test_list_templates():
     assert len(data) > 0
 
 
+def test_create_file_rejects_unsafe_name():
+    project_response = client.post("/api/projects/", json={"name": "Unsafe File Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}",
+        json={"name": "../secret.tex", "content": ""},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid LaTeX filename" in response.json()["detail"]
+
+
+def test_file_service_keeps_single_main_file_invariant():
+    project_response = client.post("/api/projects/", json={"name": "Main File Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}",
+        json={"name": "sections/lesson.tex", "content": "Lesson", "is_main": True},
+    )
+
+    assert response.status_code == 201
+    files_response = client.get(f"/api/files/project/{project_id}")
+    files = files_response.json()
+    main_flags = {file["name"]: file["is_main"] for file in files}
+
+    assert main_flags["sections/lesson.tex"] is True
+    assert main_flags["main.tex"] is False
+
+
 def test_latex_compiler_adds_russian_babel_environment_hint():
     from app.services.latex_compiler import LatexCompiler
 
@@ -194,6 +266,102 @@ def test_latex_sanitizer_normalizes_known_package_options():
     assert sanitize_latex_source(r"\usepackage[protrusion=true,expansion=true]{microtype}") == (
         r"\usepackage[protrusion=true,expansion=false]{microtype}"
     )
+
+
+def test_latex_sanitizer_normalizes_generated_body_artifacts():
+    from app.services.latex_sanitizer import sanitize_generated_latex_body
+
+    content = (
+        "```latex\n"
+        r"\documentclass{article}\usepackage{graphicx}\begin{document}"
+        r"\begin{solution}x ≤ 2…\end{solution}"
+        r"\begin{example}2 × 2 = 4\end{example}"
+        r"\end{document}"
+        "\n```"
+    )
+
+    sanitized = sanitize_generated_latex_body(content)
+
+    assert r"\documentclass" not in sanitized
+    assert r"\usepackage" not in sanitized
+    assert r"\begin{document}" not in sanitized
+    assert r"\begin{solution}" not in sanitized
+    assert r"\textbf{Решение.}" in sanitized
+    assert r"\begin{infoblock}{Пример}" in sanitized
+    assert r"\le" in sanitized
+    assert r"\times" in sanitized
+    assert r"\ldots" in sanitized
+
+
+def test_latex_validator_rejects_unbalanced_generated_environments_and_body_preamble():
+    from app.services.latex_document_builder import build_latex_document
+    from app.services.latex_validator import validate_latex_document
+
+    document = build_latex_document(r"\usepackage{graphicx}\begin{infoblock}{Важно}Текст $x+1")
+    validation = validate_latex_document(document)
+
+    assert validation["valid"] is False
+    assert any("Тело документа не должно содержать \\usepackage" in error for error in validation["errors"])
+    assert any("Несбалансированное окружение infoblock" in error for error in validation["errors"])
+    assert any("Несбалансированные inline math delimiters" in error for error in validation["errors"])
+
+
+def test_latex_file_policy_rejects_path_traversal_and_unsupported_extensions():
+    from app.services.latex_file_policy import LatexFilePolicyError, validate_latex_filename
+
+    assert validate_latex_filename("sections/topic.tex") == "sections/topic.tex"
+
+    for filename in ["../secret.tex", "/tmp/secret.tex", "bad\\name.tex", "image.png"]:
+        try:
+            validate_latex_filename(filename)
+        except LatexFilePolicyError as exc:
+            assert filename in str(exc)
+        else:
+            raise AssertionError(f"{filename} should be rejected")
+
+
+def test_artifact_cleanup_removes_only_old_allowed_files(tmp_path):
+    import os
+    import time
+    from app.services.artifact_cleanup import cleanup_old_files
+
+    old_pdf = tmp_path / "old.pdf"
+    new_pdf = tmp_path / "new.pdf"
+    old_txt = tmp_path / "old.txt"
+    old_pdf.write_bytes(b"old")
+    new_pdf.write_bytes(b"new")
+    old_txt.write_text("old")
+
+    old_time = time.time() - 3600
+    os.utime(old_pdf, (old_time, old_time))
+    os.utime(old_txt, (old_time, old_time))
+
+    removed = cleanup_old_files(tmp_path, max_age_seconds=60, suffixes={".pdf"})
+
+    assert removed == 1
+    assert not old_pdf.exists()
+    assert new_pdf.exists()
+    assert old_txt.exists()
+
+
+def test_latex_compiler_truncates_compiler_output(monkeypatch, tmp_path):
+    import subprocess
+    from app.config import settings
+    from app.services.latex_compiler import LatexCompiler
+
+    compiler = LatexCompiler()
+    monkeypatch.setattr(compiler, "work_dir", tmp_path)
+    monkeypatch.setattr(settings, "MAX_COMPILER_OUTPUT_CHARS", 12)
+
+    def fake_run(*args, **kwargs):
+        return subprocess.CompletedProcess(args=args, returncode=1, stdout="0123456789abcdef", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    result = compiler.compile(r"\documentclass{article}\begin{document}Hi\end{document}")
+
+    assert result.status == "error"
+    assert result.output == "456789abcdef"
 
 
 def test_latex_compiler_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch, tmp_path):
@@ -385,6 +553,109 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
 
 
+def test_compile_raw_rejects_too_many_files(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILES", 1)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Main\end{document}",
+            "files": {"notes.tex": "Notes"},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "Too many LaTeX files" in response.json()["detail"]
+
+
+def test_compile_raw_rejects_oversized_entrypoint(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILE_CHARS", 10)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Too large\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 413
+    assert "__entrypoint__.tex" in response.json()["detail"]
+    assert "too large" in response.json()["detail"]
+
+
+def test_compile_raw_rejects_unsupported_payload_extension():
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Main\end{document}",
+            "files": {"image.png": "not binary"},
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported LaTeX file extension" in response.json()["detail"]
+
+
+def test_compile_project_rejects_traversal_main_filename():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Traversal Compile Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/compile/",
+        json={
+            "project_id": project_id,
+            "main_file_name": "../main.tex",
+            "main_file_content": r"\documentclass{article}\begin{document}Main\end{document}",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "Invalid LaTeX filename" in response.json()["detail"]
+
+
+def test_export_tex_rejects_unsupported_filename_extension():
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Unsupported Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/export/tex",
+        json={"project_id": project_id, "format": "tex", "content": {"notes.exe": "bad"}},
+    )
+
+    assert response.status_code == 400
+    assert "Unsupported LaTeX file extension" in response.json()["detail"]
+
+
+def test_export_tex_rejects_payload_over_total_limit(monkeypatch):
+    from app.config import settings
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Oversized Export Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+    monkeypatch.setattr(settings, "MAX_LATEX_TOTAL_CHARS", 10)
+
+    response = client.post(
+        "/api/export/tex",
+        json={"project_id": project_id, "format": "tex", "content": {"main.tex": "x" * 20}},
+    )
+
+    assert response.status_code == 413
+    assert "LaTeX payload is too large" in response.json()["detail"]
+
+
 def test_compile_history_project_and_item_routes(monkeypatch):
     from app.routers import compile as compile_router
 
@@ -435,6 +706,7 @@ def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
     response = client.get("/api/compile/download/compiled.pdf")
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/pdf"
+    assert response.headers["content-disposition"].startswith('inline; filename="compiled.pdf"')
     assert response.content == b"%PDF-1.4 test pdf"
 
 
@@ -476,6 +748,7 @@ def test_frontend_generation_ui_contract():
     content = "\n".join(
         [
             frontend_html.read_text(encoding="utf-8"),
+            (frontend_dir / "css/app.css").read_text(encoding="utf-8"),
             *(path.read_text(encoding="utf-8") for path in frontend_js_files),
         ]
     )
@@ -486,12 +759,17 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationModal"' in content
     assert 'id="generationTopic"' in content
     assert 'id="generationMaterials"' in content
+    assert 'id="generationLanguage"' in content
+    assert 'id="generationContentSourceMode"' in content
+    assert 'value="gemma4"' in content
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
     assert "main_file_name" in content
     assert "validateCurrentLatex" in content
     assert "checkGenerationProvider" in content
     assert 'id="generationInsertMode"' in content
+    assert "language: getGenerationFieldValue('generationLanguage')" in content
+    assert "content_source_mode: getGenerationFieldValue('generationContentSourceMode')" in content
     assert 'id="generationFilename"' in content
     assert "copyGenerationPrompt" in content
     assert "copyGenerationRawOutput" in content
@@ -500,6 +778,29 @@ def test_frontend_generation_ui_contract():
     assert "'/generation/validate'" in content
     assert "generation/providers/status" in content
     assert "'/generation/generate'" in content
+    assert "await compileLatex();" not in content
+    assert "Соединение с backend установлено. Нажмите «Компиляция»" in content
+    assert "Документ открыт без автокомпиляции" in content
+    assert "ensureAdjacentPreviewVisible" in content
+    assert "pdf.min.js" in content
+    assert "pdf.worker.min.js" in content
+    assert "pdfPreviewDocument" in content
+    assert "window.pdfPreviewRenderTask" in content
+    assert "loadPdfPreview" in content
+    assert "pdfjsLib.getDocument" in content
+    assert "pdf-preview-frame" in content
+    assert "pdf-preview-container" in content
+    assert "pdf-preview-shell" in content
+    assert "pdf-preview-toolbar" in content
+    assert "pdf-preview-canvas" in content
+    assert "changePdfPreviewZoom" in content
+    assert "setPdfPreviewFit('width')" in content
+    assert "overflow: hidden" in content
+    preview_content = "\n".join(
+        (frontend_dir / path).read_text(encoding="utf-8")
+        for path in ["js/02-api.js", "js/05-compile-preview.js", "js/06-toolbar-view.js"]
+    )
+    assert "window.open" not in preview_content
 
 
 def test_export_pdf_receives_frontend_content_payload(monkeypatch):
@@ -713,6 +1014,8 @@ def test_generation_presets():
     assert len(presets) >= 1
     assert presets[0]["id"] == "ege_math_11_hard"
     assert presets[0]["defaults"]["gamma_code"] == 4
+    assert presets[0]["defaults"]["language"] == "русский"
+    assert presets[0]["defaults"]["content_source_mode"] == "materials_only"
 
 
 def test_generation_prompt_logs_safe_summary(caplog, monkeypatch):
@@ -750,6 +1053,29 @@ def test_generation_prompt_warns_against_invalid_enumitem_list_true_option():
     assert "невалидная опция enumitem" in prompt
 
 
+def test_generation_prompt_includes_style_reference_latex():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Квадратные уравнения"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert "РЕФЕРЕНС СТИЛЯ И ОФОРМЛЕНИЯ" in prompt
+    assert "<STYLE_REFERENCE_LATEX>" in prompt
+    assert r"\documentclass[a4paper,11pt]{article}" in prompt
+    assert r"\usepackage{helvet}" in prompt
+    assert r"\geometry{" in prompt
+    assert "margin=2.3cm" in prompt
+    assert r"\onehalfspacing" in prompt
+    assert r"\newenvironment{infoblock}" in prompt
+    assert r"\newenvironment{taskblock}" in prompt
+    assert r"\newcommand{\answer}" in prompt
+    assert "Обучающее пособие для углублённого изучения" in prompt
+    assert "Не выводите преамбулу из референса" in prompt
+    assert "backend добавит фиксированный технический минимум" in prompt
+
+
 def test_generation_prompt_preview_includes_fields_and_materials():
     response = client.post(
         "/api/generation/prompt",
@@ -775,8 +1101,39 @@ def test_generation_prompt_preview_includes_fields_and_materials():
     assert data["warnings"] == []
     assert "Показательные неравенства" in data["prompt"]
     assert "Михаил Романов" in data["prompt"]
+    assert "Язык пособия: русский" in data["prompt"]
+    assert "Режим LaTeX-компилируемости: safe" in data["prompt"]
+    assert "ЯЗЫК ДОКУМЕНТА" in data["prompt"]
+    assert "РЕЖИМ LATEX: safe" in data["prompt"]
+    assert "Режим источника содержания: materials_only" in data["prompt"]
+    assert "строго только по материалам пользователя" in data["prompt"]
     assert "Решить неравенство 2^x > 8." in data["prompt"]
     assert "```latex```" in data["prompt"]
+    assert "верните только тело LaTeX-документа" in data["prompt"]
+    assert "Строго НЕ пишите преамбулу" in data["prompt"]
+
+
+def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warning():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {
+                "topic": "Квадратные уравнения",
+                "language": "английский",
+                "content_source_mode": "ai_creative",
+            },
+            "materials": "",
+        },
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["warnings"] == []
+    assert "Язык пособия: английский" in data["prompt"]
+    assert "Режим источника содержания: ai_creative" in data["prompt"]
+    assert "Режим LaTeX-компилируемости: safe" in data["prompt"]
+    assert "разрешено генерировать содержание от себя" in data["prompt"]
+    assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
 
 
 def test_generation_prompt_preview_warns_without_topic_or_materials():
@@ -822,6 +1179,19 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
     assert second_response.status_code == 429
     assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
     generation_router.rate_limit_buckets.clear()
+
+
+def test_ai_generation_service_defaults_to_gemma4_for_ollama(monkeypatch):
+    from app.config import settings
+    from app.services.ai_generation import AIGenerationService
+
+    monkeypatch.setattr(settings, "AI_PROVIDER", "ollama")
+    monkeypatch.setattr(settings, "OLLAMA_MODEL", "gemma4")
+
+    provider, model = AIGenerationService().resolve_provider_model()
+
+    assert provider == "ollama"
+    assert model == "gemma4"
 
 
 def test_generation_provider_status_uses_selected_provider_and_model(monkeypatch):
@@ -922,7 +1292,7 @@ def test_generation_validate_accepts_minimal_document_with_warnings():
     assert data["warnings"]
 
 
-def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
+def test_generation_generate_wraps_provider_body_with_fixed_preamble(monkeypatch):
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
@@ -932,7 +1302,7 @@ def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
         assert model == "qwen2.5:14b"
         return (
             "```latex\n"
-            r"\documentclass{article}\begin{document}Generated\end{document}"
+            r"\section{Сгенерировано}Generated"
             "\n```",
             "ollama",
             "qwen2.5:14b",
@@ -957,10 +1327,159 @@ def test_generation_generate_uses_provider_and_extracts_latex(monkeypatch):
     assert data["status"] == "success"
     assert data["provider"] == "ollama"
     assert data["model"] == "qwen2.5:14b"
-    assert data["latex_code"] == r"\documentclass{article}\begin{document}Generated\end{document}"
+    assert data["latex_code"].startswith(r"\documentclass[a4paper,11pt]{article}")
+    assert r"\usepackage{hyperref}" in data["latex_code"]
+    assert r"\usepackage[most]{tcolorbox}" in data["latex_code"]
+    assert r"\begin{document}" in data["latex_code"]
+    assert r"\section{Сгенерировано}Generated" in data["latex_code"]
+    assert data["latex_code"].endswith(r"\end{document}")
     assert data["raw_output"].startswith("```latex")
     assert data["validation"]["valid"] is True
-    assert data["validation"]["warnings"]
+    assert data["validation"]["warnings"] == []
+
+
+def test_generation_generate_strips_accidental_model_preamble(monkeypatch):
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\documentclass{article}\usepackage{graphicx}\begin{document}Generated full doc\end{document}"
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Преамбула"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["latex_code"].count(r"\documentclass") == 1
+    assert r"\usepackage{graphicx}" not in data["latex_code"]
+    assert "Generated full doc" in data["latex_code"]
+    assert data["validation"]["valid"] is True
+
+
+
+
+def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.config import settings
+    from app.schemas import LatexCompileResult
+
+    prompts = []
+    compile_inputs = []
+
+    async def fake_generate(prompt, provider, model):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return (
+                "```latex\n"
+                r"\section{Broken}Компилируемый body, но компилятор вернул ошибку."
+                "\n```",
+                "ollama",
+                "gemma4",
+            )
+        return (
+            "```latex\n"
+            r"\section{Fixed}\begin{infoblock}{Важно}Закрыто\end{infoblock}"
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        compile_inputs.append(main_content)
+        if len(compile_inputs) == 1:
+            return LatexCompileResult(status="error", error="Compiler boom")
+        return LatexCompileResult(status="success", output="OK", compile_time="0.01s", pdf_url="/api/compile/download/test.pdf")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
+    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Компилируемость"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(prompts) == 2
+    assert "исправляешь LaTeX BODY" in prompts[1]
+    assert "Compiler boom" in prompts[1]
+    assert len(compile_inputs) == 2
+    assert "Broken" in compile_inputs[0]
+    assert "Fixed" in compile_inputs[1]
+    assert "Закрыто" in data["latex_code"]
+    assert data["raw_output"].startswith("```latex")
+    assert data["compile_check"] == {
+        "attempted": True,
+        "success": True,
+        "attempts": 2,
+        "repaired": True,
+        "skipped_reason": None,
+        "error": None,
+    }
+
+
+def test_generation_generate_repairs_safe_mode_validation_before_compile(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.config import settings
+    from app.schemas import LatexCompileResult
+
+    prompts = []
+    compile_inputs = []
+
+    async def fake_generate(prompt, provider, model):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return (
+                "```latex\n"
+                r"\section{Risky}\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
+                "\n```",
+                "ollama",
+                "gemma4",
+            )
+        return (
+            "```latex\n"
+            r"\section{Safe}График заменён текстовым объяснением."
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        compile_inputs.append(main_content)
+        return LatexCompileResult(status="success", output="OK", compile_time="0.01s")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
+    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Safe mode", "latex_mode": "safe"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(prompts) == 2
+    assert "Safe LaTeX mode forbids tikzpicture" in prompts[1]
+    assert len(compile_inputs) == 1
+    assert "Safe" in compile_inputs[0]
+    assert "tikzpicture" not in data["latex_code"]
+    assert data["compile_check"]["success"] is True
+    assert data["compile_check"]["repaired"] is True
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
