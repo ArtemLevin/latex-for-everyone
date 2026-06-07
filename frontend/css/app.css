@@ -1012,6 +1012,10 @@
         }
     }
 
+    #documentInsightModal {
+        z-index: 1003;
+    }
+
     .document-insight {
         display: flex;
         flex-direction: column;

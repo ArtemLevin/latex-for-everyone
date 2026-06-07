@@ -921,8 +921,12 @@ def test_frontend_generation_ui_contract():
     assert "createFileWithContent" in content
     assert 'id="documentInsightModal"' in content
     assert 'id="documentInsightPrompt"' in content
-    assert "contextAction('inspect')" in content
+    assert "event.stopPropagation(); contextAction('inspect')" in content
     assert "inspectContextDocument" in content
+    assert "openDocumentInsightModal" in content
+    assert "await inspectContextDocument(contextMenuFileId)" in content
+    assert "documentInsightModal {" in content
+    assert "z-index: 1003" in content
     assert "loadLatestGenerationInsight" in content
     assert "AI-прогоны" in content
     assert "Токены всего" in content

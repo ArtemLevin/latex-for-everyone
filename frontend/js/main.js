@@ -1035,14 +1035,31 @@ $$E = mc^2$$
         details.innerHTML = `<ul>${rows.map(row => `<li>${escapeInsightHtml(row)}</li>`).join('')}</ul>`;
     }
 
-    async function inspectContextDocument() {
-        const file = files[contextMenuFileId];
-        if (!file) return;
-        document.getElementById('documentInsightModal').classList.add('active');
-        document.getElementById('documentInsightStatus').textContent = `Ищу AI-следы для «${file.name}»...`;
-        document.getElementById('documentInsightStats').innerHTML = '';
-        document.getElementById('documentInsightPrompt').value = '';
-        document.getElementById('documentInsightMeta').innerHTML = '';
+    function openDocumentInsightModal(file) {
+        const modal = document.getElementById('documentInsightModal');
+        const status = document.getElementById('documentInsightStatus');
+        const stats = document.getElementById('documentInsightStats');
+        const promptBox = document.getElementById('documentInsightPrompt');
+        const metaBox = document.getElementById('documentInsightMeta');
+        if (!modal || !status || !stats || !promptBox || !metaBox) {
+            showToast('Окно исследования AI-документа не найдено в DOM', 'error');
+            return false;
+        }
+        modal.classList.add('active');
+        status.textContent = `Ищу AI-следы для «${file.name}»...`;
+        stats.innerHTML = '<div class="document-insight-card"><span>Статус</span><strong>Загрузка...</strong></div>';
+        promptBox.value = '';
+        metaBox.innerHTML = '';
+        return true;
+    }
+
+    async function inspectContextDocument(fileId = contextMenuFileId) {
+        const file = files[fileId];
+        if (!file) {
+            showToast('Файл для исследования не найден', 'error');
+            return;
+        }
+        if (!openDocumentInsightModal(file)) return;
 
         try {
             const meta = file.generationMeta || await loadLatestGenerationInsight();
@@ -1068,7 +1085,7 @@ $$E = mc^2$$
         if (!contextMenuFileId) return;
         switch (action) {
             case 'inspect':
-                inspectContextDocument();
+                await inspectContextDocument(contextMenuFileId);
                 break;
             case 'rename':
                 renameFile(contextMenuFileId);
@@ -2107,6 +2124,16 @@ $$E = mc^2$$
             stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
         }
+        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+    }
+
+    async function regenerateWithLatexMode(mode) {
+        const modeInput = document.getElementById('generationLatexMode');
+        if (modeInput) modeInput.value = mode;
+        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
+        request.fields = request.fields || {};
+        request.fields.latex_mode = mode;
+        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
     }
 
     async function generateLatexFromAi() {
