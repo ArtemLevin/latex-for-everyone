@@ -502,6 +502,14 @@
                         </select>
                     </div>
                     <div class="generation-field full">
+                        <label for="generationLatexMode">Режим LaTeX</label>
+                        <select id="generationLatexMode">
+                            <option value="safe" selected>Safe — максимум шансов на компиляцию</option>
+                            <option value="rich">Rich — разрешить сложные схемы и таблицы</option>
+                        </select>
+                        <div class="generation-hint">Safe избегает TikZ/pgfplots/longtable/изображений и запускает repair по validation errors до компиляции.</div>
+                    </div>
+                    <div class="generation-field full">
                         <label for="generationMaterials">Материалы / условия задач</label>
                         <textarea id="generationMaterials" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
                     </div>

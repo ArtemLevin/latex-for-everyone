@@ -41,6 +41,7 @@ PRESETS: list[GenerationPresetResponse] = [
             "level": "ЕГЭ",
             "language": "русский",
             "content_source_mode": "materials_only",
+            "latex_mode": "safe",
             "alpha_code": 1,
             "beta_code": 1,
             "gamma_code": 4,

@@ -380,9 +380,10 @@ Use this checklist to verify the complete generation path manually after the bac
 1. Confirm the status bar shows that the backend is online, or verify `make health` succeeds.
 2. Click **AI** in the header.
 3. Fill at least **Тема**; optionally fill **ФИО ученика** and **Материалы / условия задач**.
-4. Choose **Язык пособия** and **Источник содержания**:
+4. Choose **Язык пособия**, **Источник содержания**, and **Режим LaTeX**:
    - **Только по материалам пользователя** keeps generation grounded in the supplied materials and marks missing data instead of inventing it;
-   - **Разрешить нейросети генерировать от себя** lets the model create theory, examples, practice tasks, and answers from the selected topic/level/class.
+   - **Разрешить нейросети генерировать от себя** lets the model create theory, examples, practice tasks, and answers from the selected topic/level/class;
+   - **Safe** maximizes compile success by avoiding risky visual/table constructs, while **Rich** allows more complex LaTeX when you are ready to review/repair it.
 5. Click **Проверить prompt** and confirm the prompt preview status is successful.
 6. Click **Проверить провайдера** and confirm the selected provider/model is available.
 7. Choose where to place the result: create a new `generated.tex`, replace the active file, or append to the active file.
@@ -404,7 +405,7 @@ make ai-validate-smoke
 make clean-artifacts   # optional: remove local generated PDFs/exports in default /tmp artifact dirs
 curl -fsS -X POST http://localhost:8000/api/generation/prompt \
   -H 'Content-Type: application/json' \
-  --data '{"provider":"ollama","model":"gemma4","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only"},"materials":"Решить уравнение 2^x = 8."}'
+  --data '{"provider":"ollama","model":"gemma4","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only","latex_mode":"safe"},"materials":"Решить уравнение 2^x = 8."}'
 ```
 
 If generation fails, check provider status first, then inspect backend logs for provider errors, timeout messages, or missing API key/model configuration.

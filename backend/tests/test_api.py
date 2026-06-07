@@ -761,6 +761,9 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationMaterials"' in content
     assert 'id="generationLanguage"' in content
     assert 'id="generationContentSourceMode"' in content
+    assert 'id="generationLatexMode"' in content
+    assert 'value="safe" selected' in content
+    assert 'value="rich"' in content
     assert 'value="gemma4"' in content
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
@@ -770,6 +773,7 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationInsertMode"' in content
     assert "language: getGenerationFieldValue('generationLanguage')" in content
     assert "content_source_mode: getGenerationFieldValue('generationContentSourceMode')" in content
+    assert "latex_mode: getGenerationFieldValue('generationLatexMode')" in content
     assert 'id="generationFilename"' in content
     assert "copyGenerationPrompt" in content
     assert "copyGenerationRawOutput" in content
@@ -1016,6 +1020,7 @@ def test_generation_presets():
     assert presets[0]["defaults"]["gamma_code"] == 4
     assert presets[0]["defaults"]["language"] == "русский"
     assert presets[0]["defaults"]["content_source_mode"] == "materials_only"
+    assert presets[0]["defaults"]["latex_mode"] == "safe"
 
 
 def test_generation_prompt_logs_safe_summary(caplog, monkeypatch):
