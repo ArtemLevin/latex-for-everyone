@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, JSON
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -78,6 +78,10 @@ class GenerationHistory(Base):
     fields = Column(JSON, nullable=False)
     validation = Column(JSON, nullable=True)
     compile_check = Column(JSON, nullable=True)
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    total_tokens = Column(Integer, nullable=True)
+    token_count_source = Column(String(50), nullable=True)
     error = Column(Text, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 

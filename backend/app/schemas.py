@@ -199,11 +199,19 @@ class GenerationCompileCheckResponse(BaseModel):
     error: Optional[str] = None
 
 
+class GenerationTokenUsageResponse(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    source: str = "estimated"
+
+
 class GenerationResultResponse(GenerationPromptResponse):
     latex_code: str
     raw_output: str
     validation: GenerationValidationResponse
     compile_check: GenerationCompileCheckResponse = Field(default_factory=GenerationCompileCheckResponse)
+    token_usage: GenerationTokenUsageResponse = Field(default_factory=GenerationTokenUsageResponse)
 
 
 class GenerationPresetResponse(BaseModel):
@@ -229,6 +237,10 @@ class GenerationHistoryResponse(BaseModel):
     fields: dict[str, Any] = Field(default_factory=dict)
     validation: Optional[dict[str, Any]] = None
     compile_check: Optional[dict[str, Any]] = None
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    total_tokens: Optional[int] = None
+    token_count_source: Optional[str] = None
     error: Optional[str] = None
     created_at: datetime
 

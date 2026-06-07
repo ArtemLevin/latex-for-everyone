@@ -15,6 +15,7 @@ from app.schemas import (
     GenerationHistoryResponse,
     GenerationCompileCheckResponse,
     GenerationResultResponse,
+    GenerationTokenUsageResponse,
     GenerationValidationRequest,
     GenerationValidationResponse,
 )
@@ -30,6 +31,7 @@ from app.services.latex_sanitizer import (
 from app.services.latex_validator import validate_latex_document
 from app.services.generation_history_service import GenerationHistoryNotFoundError, GenerationHistoryService
 from app.services.prompt_builder import build_latex_generation_prompt, build_latex_repair_prompt
+from app.services.token_counter import add_estimated_usage
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +136,7 @@ async def compile_check_and_repair(
     provider: str,
     model: str,
     safe_mode: bool,
+    token_usage: GenerationTokenUsageResponse,
 ) -> tuple[str, str, str, dict[str, object], GenerationCompileCheckResponse]:
     """Compile-check generated LaTeX and ask the provider for one bounded repair when needed."""
     latex_body = normalize_generated_body(latex_body, safe_mode=safe_mode)
@@ -190,6 +193,7 @@ async def compile_check_and_repair(
             provider=provider,
             model=model,
         )
+        add_estimated_usage(token_usage, input_text=repair_prompt, output_text=repair_raw_output)
         enforce_text_limit("repair_raw_output", repair_raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
         raw_output = repair_raw_output
         latex_body = normalize_generated_body(extract_latex_code(repair_raw_output), safe_mode=safe_mode)
@@ -268,6 +272,7 @@ def record_generation_success(
     latex_code: str,
     validation: dict[str, object],
     compile_check: GenerationCompileCheckResponse,
+    token_usage: GenerationTokenUsageResponse,
 ) -> None:
     generation_history_service.create_success(
         db,
@@ -282,6 +287,7 @@ def record_generation_success(
         latex_code_preview=text_preview(latex_code),
         validation=validation,
         compile_check=compile_check,
+        token_usage=token_usage,
     )
 
 
@@ -378,6 +384,8 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         len(generation_request.materials),
     )
     prompt_response = build_generation_prompt_response(generation_request)
+    token_usage = GenerationTokenUsageResponse()
+    add_estimated_usage(token_usage, input_text=prompt_response.prompt)
     started_at = time.perf_counter()
 
     try:
@@ -407,6 +415,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         )
         raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
 
+    add_estimated_usage(token_usage, output_text=raw_output)
     enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
     latex_body = sanitize_generated_latex_body(extract_latex_code(raw_output))
     enforce_text_limit("latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
@@ -418,6 +427,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
             provider=provider,
             model=model,
             safe_mode=generation_request.fields.latex_mode == "safe",
+            token_usage=token_usage,
         )
     except AIGenerationError as exc:
         logger.warning(
@@ -441,7 +451,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
 
     logger.info(
-        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s compile_attempted=%s compile_success=%s compile_repaired=%s",
+        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s compile_attempted=%s compile_success=%s compile_repaired=%s input_tokens=%s output_tokens=%s total_tokens=%s token_source=%s",
         provider,
         model,
         (time.perf_counter() - started_at) * 1000,
@@ -456,6 +466,10 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         compile_check.attempted,
         compile_check.success,
         compile_check.repaired,
+        token_usage.input_tokens,
+        token_usage.output_tokens,
+        token_usage.total_tokens,
+        token_usage.source,
     )
 
     record_generation_success(
@@ -468,6 +482,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         latex_code=latex_code,
         validation=validation,
         compile_check=compile_check,
+        token_usage=token_usage,
     )
 
     return GenerationResultResponse(
@@ -480,4 +495,5 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         raw_output=raw_output,
         validation=GenerationValidationResponse(**validation),
         compile_check=compile_check,
+        token_usage=token_usage,
     )

@@ -77,6 +77,8 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
     assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
+    generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
+    assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
 
 
 def test_health_check():
@@ -878,6 +880,9 @@ def test_frontend_generation_ui_contract():
     assert "setGenerationRetryActionsVisible" in content
     assert "generationNeedsUserDecision" in content
     assert "compile_check" in content
+    assert "token_usage" in content
+    assert "describeTokenUsage" in content
+    assert "Токены за генерацию" in content
     assert "applyGeneratedLatex" in content
     assert "createFileWithContent" in content
     assert "'/generation/validate'" in content
@@ -1287,6 +1292,20 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
     generation_router.rate_limit_buckets.clear()
 
 
+def test_estimated_token_counter_splits_text_and_latex_commands():
+    from app.schemas import GenerationTokenUsageResponse
+    from app.services.token_counter import add_estimated_usage, estimate_token_count
+
+    assert estimate_token_count(r"\section{Тема} $x+1$") > 5
+    usage = GenerationTokenUsageResponse()
+    add_estimated_usage(usage, input_text="prompt text", output_text="answer text")
+
+    assert usage.input_tokens > 0
+    assert usage.output_tokens > 0
+    assert usage.total_tokens == usage.input_tokens + usage.output_tokens
+    assert usage.source == "estimated"
+
+
 def test_ai_generation_service_defaults_to_gemma4_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
@@ -1442,6 +1461,10 @@ def test_generation_generate_wraps_provider_body_with_fixed_preamble(monkeypatch
     assert data["raw_output"].startswith("```latex")
     assert data["validation"]["valid"] is True
     assert data["validation"]["warnings"] == []
+    assert data["token_usage"]["input_tokens"] > 0
+    assert data["token_usage"]["output_tokens"] > 0
+    assert data["token_usage"]["total_tokens"] == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
+    assert data["token_usage"]["source"] == "estimated"
 
 
 def test_generation_history_records_success_and_supports_project_and_item_routes(monkeypatch):
@@ -1488,6 +1511,10 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
     assert item["latex_code_preview"].startswith(r"\documentclass")
     assert item["compile_check"]["skipped_reason"] == "AI compile check is disabled."
     assert item["validation"]["valid"] is True
+    assert item["input_tokens"] > 0
+    assert item["output_tokens"] > 0
+    assert item["total_tokens"] == item["input_tokens"] + item["output_tokens"]
+    assert item["token_count_source"] == "estimated"
     assert "raw_output" not in item
     assert "prompt" not in item
 
@@ -1528,6 +1555,10 @@ def test_generation_history_records_provider_failure(monkeypatch):
     assert item["raw_output_hash"] is None
     assert item["latex_code_hash"] is None
     assert item["compile_check"] is None
+    assert item["input_tokens"] is None
+    assert item["output_tokens"] is None
+    assert item["total_tokens"] is None
+    assert item["token_count_source"] is None
 
 
 def test_generation_history_item_not_found():
@@ -1627,6 +1658,9 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
         "skipped_reason": None,
         "error": None,
     }
+    assert data["token_usage"]["input_tokens"] > 0
+    assert data["token_usage"]["output_tokens"] > 0
+    assert data["token_usage"]["total_tokens"] == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
 
 
 def test_generation_generate_simplifies_safe_mode_risky_latex_before_compile(monkeypatch):

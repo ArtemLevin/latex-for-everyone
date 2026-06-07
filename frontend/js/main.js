@@ -1637,6 +1637,15 @@ $$E = mc^2$$
         return details;
     }
 
+    function describeTokenUsage(tokenUsage) {
+        if (!tokenUsage) return [];
+        const input = tokenUsage.input_tokens ?? 0;
+        const output = tokenUsage.output_tokens ?? 0;
+        const total = tokenUsage.total_tokens ?? (input + output);
+        const source = tokenUsage.source === 'estimated' ? 'оценка' : tokenUsage.source;
+        return [`Токены за генерацию: вход ${input}, выход ${output}, всего ${total} (${source}).`];
+    }
+
     function buildGenerationDetails(result) {
         const items = [];
         if (result?.validation) {
@@ -1647,6 +1656,7 @@ $$E = mc^2$$
             }
         }
         describeCompileCheck(result?.compile_check).forEach(item => items.push(item));
+        describeTokenUsage(result?.token_usage).forEach(item => items.push(item));
         return items;
     }
 

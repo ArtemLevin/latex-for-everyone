@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.models import GenerationHistory
-from app.schemas import GenerationCompileCheckResponse, GenerationFields
+from app.schemas import GenerationCompileCheckResponse, GenerationFields, GenerationTokenUsageResponse
 
 
 class GenerationHistoryNotFoundError(ValueError):
@@ -26,6 +26,7 @@ class GenerationHistoryService:
         latex_code_preview: str,
         validation: dict[str, object],
         compile_check: GenerationCompileCheckResponse,
+        token_usage: GenerationTokenUsageResponse,
     ) -> GenerationHistory:
         item = GenerationHistory(
             project_id=project_id,
@@ -40,6 +41,10 @@ class GenerationHistoryService:
             fields=fields.model_dump(),
             validation=validation,
             compile_check=compile_check.model_dump(),
+            input_tokens=token_usage.input_tokens,
+            output_tokens=token_usage.output_tokens,
+            total_tokens=token_usage.total_tokens,
+            token_count_source=token_usage.source,
         )
         db.add(item)
         db.commit()
