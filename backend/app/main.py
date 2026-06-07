@@ -1,21 +1,37 @@
+import logging
+import time
+import uuid
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
-from app.config import settings
-from app.database import engine, Base
-from app.logging_config import configure_logging, reset_request_id, set_request_id
-from app.routers import files, compile, export, templates, projects, generation
-import logging
-import time
-import uuid
 
-# Create tables
-Base.metadata.create_all(bind=engine)
+from app.config import settings
+from app.database import Base, engine
+from app.logging_config import configure_logging, reset_request_id, set_request_id
+from app.routers import compile, export, files, generation, projects, templates
+
 
 # Logging
 configure_logging()
 logger = logging.getLogger(__name__)
+
+
+def initialize_database() -> None:
+    """Create tables for local/dev installs when migrations are not being run explicitly."""
+    if not settings.AUTO_CREATE_TABLES:
+        logger.info("database auto-create skipped; run Alembic migrations before serving traffic")
+        return
+    Base.metadata.create_all(bind=engine)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    initialize_database()
+    yield
+
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -24,6 +40,7 @@ app = FastAPI(
     docs_url="/api/docs",
     redoc_url="/api/redoc",
     openapi_url="/api/openapi.json",
+    lifespan=lifespan,
 )
 
 # CORS
