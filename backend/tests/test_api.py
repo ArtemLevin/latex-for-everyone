@@ -868,6 +868,16 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationFilename"' in content
     assert "copyGenerationPrompt" in content
     assert "copyGenerationRawOutput" in content
+    assert 'id="retryGenerationBtn"' in content
+    assert 'id="regenerateSafeBtn"' in content
+    assert 'id="regenerateRichBtn"' in content
+    assert 'id="insertLastGeneratedBtn"' in content
+    assert "retryLastGeneration" in content
+    assert "regenerateWithLatexMode" in content
+    assert "insertLastGeneratedLatex" in content
+    assert "setGenerationRetryActionsVisible" in content
+    assert "generationNeedsUserDecision" in content
+    assert "compile_check" in content
     assert "applyGeneratedLatex" in content
     assert "createFileWithContent" in content
     assert "'/generation/validate'" in content

@@ -9,6 +9,8 @@
     let generationPresets = [];
     let lastGenerationPrompt = '';
     let lastGenerationRawOutput = '';
+    let lastGenerationRequest = null;
+    let lastGenerationResult = null;
     let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
