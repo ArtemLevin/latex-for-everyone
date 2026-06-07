@@ -11,6 +11,12 @@ FORBIDDEN_LATEX_PATTERNS = {
     r"\\usepackage\s*\[[^\]]*\blist\s*=\s*true\b[^\]]*\]\s*\{\s*enumitem\s*\}": "Опция list=true недопустима для enumitem; используйте \\usepackage{enumitem} без этой опции.",
 }
 
+BODY_FORBIDDEN_LATEX_PATTERNS = {
+    r"\\documentclass\b": "Тело документа не должно содержать \\documentclass; backend добавляет преамбулу автоматически.",
+    r"\\usepackage\b": "Тело документа не должно содержать \\usepackage; используйте только пакеты фиксированной преамбулы.",
+    r"\\(?:newcommand|renewcommand|newenvironment|renewenvironment)\b": "Тело документа не должно объявлять новые команды или окружения.",
+    r"\\(?:geometry|definecolor|usetikzlibrary|pgfplotsset)\b": "Тело документа не должно менять преамбулу, geometry, colors или библиотеки.",
+}
 
 REQUIRED_LATEX_PACKAGES = [
     "fontenc",
@@ -23,6 +29,46 @@ REQUIRED_LATEX_PACKAGES = [
     "hyperref",
     "tabularx",
 ]
+
+BALANCED_ENVIRONMENTS = [
+    "document",
+    "infoblock",
+    "taskblock",
+    "enumerate",
+    "itemize",
+    "center",
+    "tabularx",
+    "longtable",
+    "tikzpicture",
+    "equation",
+    "equation*",
+    "align",
+    "align*",
+]
+
+DOCUMENT_BODY_RE = re.compile(r"\\begin\{document\}(?P<body>.*)\\end\{document\}", re.DOTALL)
+
+
+def _extract_document_body(content: str) -> str:
+    match = DOCUMENT_BODY_RE.search(content)
+    return match.group("body") if match else content
+
+
+def _append_environment_balance_errors(content: str, errors: list[str]) -> None:
+    for env in BALANCED_ENVIRONMENTS:
+        begins = len(re.findall(rf"\\begin\{{{re.escape(env)}\}}", content))
+        ends = len(re.findall(rf"\\end\{{{re.escape(env)}\}}", content))
+        if begins != ends:
+            errors.append(f"Несбалансированное окружение {env}: begin={begins}, end={ends}.")
+
+
+def _append_math_delimiter_errors(content: str, errors: list[str]) -> None:
+    if len(re.findall(r"(?<!\\)\$", content)) % 2:
+        errors.append("Несбалансированные inline math delimiters `$`.")
+    if content.count(r"\[") != content.count(r"\]"):
+        errors.append("Несбалансированные display math delimiters \\[ и \\].")
+    if content.count(r"\(") != content.count(r"\)"):
+        errors.append("Несбалансированные inline math delimiters \\( и \\).")
 
 
 def validate_latex_document(content: str) -> dict[str, object]:
@@ -57,6 +103,14 @@ def validate_latex_document(content: str) -> dict[str, object]:
     for pattern, message in FORBIDDEN_LATEX_PATTERNS.items():
         if re.search(pattern, stripped):
             errors.append(message)
+
+    body = _extract_document_body(stripped)
+    for pattern, message in BODY_FORBIDDEN_LATEX_PATTERNS.items():
+        if re.search(pattern, body):
+            errors.append(message)
+
+    _append_environment_balance_errors(stripped, errors)
+    _append_math_delimiter_errors(body, errors)
 
     for package in REQUIRED_LATEX_PACKAGES:
         if re.search(rf"\\usepackage(?:\[[^\]]*\])?\{{{re.escape(package)}\}}", stripped) is None:

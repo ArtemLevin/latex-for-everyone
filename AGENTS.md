@@ -1,318 +1,220 @@
-# AI Agent Guidelines
+# AI Agent Guidelines for Latexed
 
+## Project overview
 
-## Quick start (5 шагов)
+Latexed is an online LaTeX editor with:
 
-1. Проверьте структуру репозитория и наличие ключевых директорий (`app/`, `tests/`, `alembic/`).
-2. Определите scope задачи и соответствующий слой архитектуры (Endpoint / Service / Repository / DB).
-3. Выполните цикл `Explore → Plan → Code → Verify` небольшими инкрементами.
-4. Прогоните обязательные проверки (`make test`, `make lint`, `make typecheck`).
-5. Сверьте результат с `Definition of Done` перед PR/merge.
+- a FastAPI backend under `backend/app/`;
+- a single-page browser frontend under `frontend/`;
+- SQLAlchemy persistence for projects, files, compile history, and snapshots;
+- server-side LaTeX compilation/export through `pdflatex`;
+- local frontend preview fallback with CodeMirror and KaTeX;
+- AI-assisted LaTeX generation, prompt preview, provider status checks, and structural LaTeX validation.
 
-## Assumptions / Verify first
+This repository is **not** the booking-calendar example that older docs referenced. Treat any booking-domain examples as stale and replace them with Latexed-specific terminology.
 
-Перед использованием path-based примеров проверьте, что ожидаемая структура действительно существует:
+## Quick start for agents
+
+1. Verify the real repository layout before assuming paths.
+2. Identify the layer and feature area: frontend UI, API router, service, persistence model, migration, test, or documentation.
+3. Follow `Explore → Plan → Code → Verify` in small increments.
+4. Run the checks that exist in this repository and document any environment limitations.
+5. Keep the final diff focused; do not mix unrelated refactors with feature changes.
+
+## Verify first
+
+Run this before path-based work:
 
 ```bash
-rg --files | head -n 50
-for p in app tests alembic; do
+rg --files | head -n 80
+for p in backend/app backend/tests backend/alembic frontend docs; do
   if [ -d "$p" ]; then
     echo "OK: $p/"
   else
-    echo "MISSING: $p/ (примеры ниже считаются pseudocode)"
+    echo "MISSING: $p/"
   fi
 done
 ```
 
-Если директория отсутствует, воспринимайте пути в примерах как **pseudocode** и адаптируйте команды под фактическую структуру репозитория.
+Expected top-level structure:
 
-## Project Overview
-
-Booking calendar service (Cal.com-like) where users publish available time slots and others book meetings.
-
-**Key Constraints:**
-- No authentication, no user accounts
-- No external calendar integrations
-- 30-minute booking slots
-- Owner can view upcoming bookings
-
-## Project Structure
-
-```
-/app
-  /api          # FastAPI endpoints (presentation layer)
-  /services     # Business logic (service layer)
-  /db
-    /models     # SQLAlchemy models
-    /repositories # Data access (repository layer)
-  /schemas      # Pydantic validation schemas
-  /exceptions.py # Custom exceptions
-/tests
-  /api          # API integration tests
-  /services     # Service unit tests
-  /db           # Repository tests
-/alembic        # Database migrations
+```text
+backend/            FastAPI application, tests, Alembic scaffold, Docker/Nginx config
+backend/app/        Python package for API, models, schemas, services, worker, websockets
+backend/tests/      pytest tests for backend behavior
+backend/alembic/    Alembic migration environment
+frontend/main.html  Single-page editor UI markup
+frontend/css/       Frontend styles
+frontend/js/        Ordered browser scripts for state, API, editor, compile/export, AI, settings
+docs/               Project documentation for agents and maintainers
 ```
 
 ## Commands
 
+Use the actual Makefile targets:
+
 ```bash
-make setup       # Initial setup
-make dev         # Run development server
-make test        # Run all tests
-make lint        # Run linter (ruff/flake8)
-make typecheck   # Run type checker (mypy)
-make migrate     # Run database migrations
-make coverage    # Generate coverage report
+make sync             # Install/update uv environment with app and dev dependencies
+make backend          # Run FastAPI backend on BACKEND_PORT (default: 8000)
+make frontend         # Serve frontend/main.html on FRONTEND_PORT (default: 8080)
+make open             # Print useful local URLs
+make health           # Call GET /api/health on the running backend
+make test             # Run backend pytest suite
+make compileall       # Compile backend Python files for syntax errors
+make frontend-check   # Run node --check for frontend JavaScript files
+make check            # Run compileall, frontend-check, and test
+make latex-check      # Check local pdflatex + Russian babel/T2A support
+make migrate          # Run Alembic migrations
+make migration MSG="message"  # Create an Alembic autogeneration revision
 ```
 
-## Architecture Rules
+There are currently no `make lint` or `make typecheck` targets. If a task asks for lint/typecheck, either add the target intentionally or report that the repository does not define it.
 
-### Layered Architecture (STRICT)
+## Architecture rules
 
-```
-Endpoint → Service → Repository → Database
-```
+### Current architecture
 
-**Prohibited:**
-- ❌ Direct DB access from endpoints
-- ❌ Business logic in endpoints
-- ❌ HTTP requests from models
-- ❌ Bypassing service layer
-- ❌ Creating parallel types/entities
+The current codebase is a pragmatic FastAPI application:
 
-### SOLID Principles
-
-- **Single Responsibility**: One class, one purpose
-- **Open/Closed**: Extend without modifying
-- **Liskov Substitution**: Subtypes must be substitutable
-- **Interface Segregation**: Small, focused interfaces
-- **Dependency Inversion**: Depend on abstractions
-
-## Types and Data Models
-
-### Type Annotations (REQUIRED)
-
-```python
-# ✅ Good
-async def create_booking(
-    slot_start: datetime,
-    email: str
-) -> Booking:
-    ...
-
-# ❌ Bad
-async def create_booking(slot_start, email):
-    ...
+```text
+FastAPI app (`backend/app/main.py`)
+  → routers (`backend/app/routers/*.py`)
+  → services (`backend/app/services/*.py`) for LaTeX, PDF, AI, prompt, validation concerns
+  → SQLAlchemy models/session (`backend/app/models.py`, `backend/app/database.py`)
+  → Pydantic schemas (`backend/app/schemas.py`) for API/service boundaries
 ```
 
-### Pydantic Validation
+Some routers still access SQLAlchemy sessions directly. Treat this as **existing legacy**, not a pattern to expand.
 
-```python
-from pydantic import BaseModel, EmailStr
+### Target direction for new backend work
 
-class BookingCreate(BaseModel):
-    slot_start: datetime
-    customer_name: str = Field(min_length=2)
-    customer_email: EmailStr
+For new or substantially changed backend behavior, prefer:
+
+```text
+Router → Service → Database/session/model
 ```
 
-### Rules
+- Routers should focus on HTTP details: request/response models, dependency wiring, status codes, and translating known service errors to HTTP errors.
+- Services should own business and integration logic: LaTeX compilation orchestration, PDF export rules, AI provider interaction, validation, persistence workflows.
+- Models should remain persistence-only and must not perform HTTP calls, file-system side effects, subprocess calls, or AI provider calls.
+- Schemas in `backend/app/schemas.py` are the canonical API contracts; search before creating new ones.
 
-1. Search existing types before creating new ones
-2. Use `Enum`/`Union`/`Literal` for allowed values
-3. Run `make typecheck` after changes
-4. Avoid `Any` without justification
+Do **not** introduce a repository layer unless the change clearly benefits from it. If you do, keep it small and avoid rewriting unrelated routers.
 
-## Testing Rules
+### Feature ownership
 
-### Coverage Target
+- Projects/files/snapshots: `backend/app/routers/projects.py`, `backend/app/routers/files.py`, `backend/app/models.py`, `backend/app/schemas.py`.
+- Compilation: `backend/app/routers/compile.py`, `backend/app/services/latex_compiler.py`, `backend/app/services/latex_sanitizer.py`.
+- Export: `backend/app/routers/export.py`, `backend/app/services/pdf_generator.py`.
+- AI generation: `backend/app/routers/generation.py`, `backend/app/services/ai_generation.py`, `backend/app/services/prompt_builder.py`, `backend/app/services/latex_validator.py`.
+- Frontend startup/API/editor: `frontend/js/01-state.js`, `frontend/js/02-api.js`, `frontend/js/03-init.js`.
+- Frontend file tree: `frontend/js/04-files.js`.
+- Frontend compile/preview: `frontend/js/05-compile-preview.js`.
+- Frontend toolbar/view/settings: `frontend/js/06-toolbar-view.js`, `frontend/js/09-ui-settings.js`.
+- Frontend AI/templates/export: `frontend/js/07-generation.js`, `frontend/js/08-templates-export.js`.
 
-- **Minimum**: 80% for modified code
-- **Required**: All public methods tested
+## Code style
 
-### Test Structure (AAA Pattern)
+### Python
 
-```python
-async def test_create_booking_success(self, booking_service):
-    # Arrange
-    slot_start = datetime(2025, 1, 15, 10, 0)
-    
-    # Act
-    result = await booking_service.create_booking(...)
-    
-    # Assert
-    assert result.slot_start == slot_start
+- Use type annotations for new functions and meaningful return types.
+- Keep imports grouped: standard library, third-party, first-party.
+- Reuse existing Pydantic models from `backend/app/schemas.py` where possible.
+- Avoid `Any` unless the data is truly unstructured JSON or the existing schema already requires it.
+- Keep functions focused; extract helpers for non-trivial LaTeX, export, AI, or persistence logic.
+- Do not wrap imports in `try/except`.
+- Avoid logging sensitive content. For AI prompts/LaTeX content, prefer lengths, hashes, or short previews governed by settings.
+
+### JavaScript/frontend
+
+- Preserve the script ordering from `frontend/main.html`; files depend on globals loaded earlier.
+- Keep browser code dependency-free unless a library is already loaded by `main.html`.
+- Use the existing `apiRequest`, `showToast`, modal, and status helper patterns.
+- If backend is optional for a flow, preserve or add a local/offline fallback where appropriate.
+- Run `make frontend-check` after changing `frontend/js/*.js`.
+- If a perceptible UI change is made, run the app and take a screenshot when possible.
+
+### LaTeX-specific safety
+
+- Preserve filename/path sanitization for compile/export flows.
+- Never allow user-provided absolute paths, parent directory traversal, or external URLs to be passed to compiler file operations.
+- Keep compile timeouts and bounded output handling.
+- Prefer structural validation before inserting AI-generated LaTeX into user files.
+- Maintain Russian LaTeX support expectations (`babel` with Russian, T2A/fontenc where relevant) and document environment limitations.
+
+## Testing rules
+
+- Add or update tests for changed backend behavior in `backend/tests/`.
+- For service behavior, test happy path, edge/error path, and known LaTeX/AI/provider failure modes where practical.
+- For router changes, prefer `TestClient` integration tests matching the current test style.
+- For frontend JavaScript changes, at minimum run `make frontend-check`; add targeted browser/manual notes for UI behavior if automated tests do not exist.
+- When changing compile/export code, consider whether `pdflatex` availability affects the test. If the environment lacks TeX Live, document it as an environment limitation rather than hiding failures.
+
+## Database and migrations
+
+- Models live in `backend/app/models.py`.
+- `AUTO_CREATE_TABLES=true` keeps local/dev SQLite startup convenient; production should set `AUTO_CREATE_TABLES=false` and run Alembic migrations before serving traffic.
+- For schema changes, add an Alembic migration via `make migration MSG="..."` when autogeneration is viable, review it carefully, then run `make migrate` if the environment supports it.
+- Keep `backend/alembic/versions/` aligned with `backend/app/models.py`; do not rely on startup table creation as the only schema path.
+- Do not delete or rewrite local `.db` files unless the task explicitly requires cleanup.
+
+## Documentation rules
+
+Update documentation when changing:
+
+- public API paths, request/response schemas, or error behavior;
+- frontend/backend integration behavior;
+- AI generation prompt fields, provider configuration, validation, or insertion modes;
+- compile/export prerequisites, limitations, or operational workflow;
+- Makefile commands or setup steps.
+
+Keep examples Latexed-specific. Do not add booking/calendar examples.
+
+## Agent workflow
+
+### Explore
+
+- Inspect related routers, services, schemas, tests, and frontend call sites.
+- Search existing schemas/helpers before creating new ones.
+- Verify whether docs or README already describe the behavior.
+
+### Plan
+
+- State the intended layer(s) and files.
+- Identify compatibility risks for frontend/API clients.
+- Decide which tests/checks are relevant.
+
+### Code
+
+- Make small focused edits.
+- Preserve existing public contracts unless the task explicitly changes them.
+- Avoid unrelated formatting churn.
+
+### Verify
+
+Prefer this order after changes:
+
+```bash
+make frontend-check    # if frontend JS changed
+make compileall        # if Python changed
+make test              # if backend behavior changed
+make check             # when broad confidence is needed and dependencies are available
 ```
 
-### What to Test
+If `uv` cannot download dependencies or `pdflatex` is missing, report the exact command and failure as an environment limitation.
 
-- Happy path
-- Edge cases
-- Error conditions
-- Boundary values
+## Safety rules
 
-## Code Style
+- Never commit secrets, API keys, tokens, PDFs with sensitive content, or local databases.
+- Never run destructive commands such as `rm -rf` or database drops unless the user explicitly requested them.
+- Never delete files without confirmation unless you created them during the current task and they are clearly temporary.
+- Do not expose full prompts, source documents, or LaTeX content in logs/errors when it may contain user data.
 
-### Naming
+## Definition of Done
 
-- Classes: `PascalCase` (BookingService)
-- Functions: `snake_case` (create_booking)
-- Constants: `UPPER_CASE` (MAX_BOOKING_DAYS)
-- Private: `_prefix` (_internal_method)
-
-### Function Size
-
-- Maximum ~50 lines
-- Extract complex logic to separate functions
-
-### Imports
-
-```python
-# Standard library
-from datetime import datetime
-
-# Third-party
-from fastapi import APIRouter
-
-# First-party
-from app.services.booking_service import BookingService
-```
-
-## Comments
-
-### Write "Why", Not "What"
-
-```python
-# ❌ Bad (restates code)
-# Check if slot is available
-if not available:
-    raise Error()
-
-# ✅ Good (explains reason)
-# Prevent double-booking: race condition possible under high load
-if not available:
-    raise SlotNotAvailableError()
-```
-
-### Document
-
-- Workarounds
-- API limitations
-- Business reasons
-- Non-trivial decisions
-
-## Legacy and Migrations
-
-### Working with Legacy Code
-
-1. Do not use legacy patterns as examples
-2. Add tests before refactoring
-3. Incremental improvements preferred
-4. Document technical debt with TODO comments
-
-### Migration Process
-
-1. Plan migration in issue tracker
-2. Write failing tests first
-3. Implement minimal change
-4. Verify all tests pass
-5. Update documentation
-
-## Agent Workflow
-
-### Always Follow: Explore → Plan → Code → Verify
-
-#### 1. Explore
-- Read existing code
-- Understand context
-- Find similar patterns
-
-#### 2. Plan
-- Write implementation plan
-- List components to modify
-- Identify risks
-
-#### 3. Code
-- Small, incremental changes
-- Commit frequently
-- Keep tests passing
-
-#### 4. Verify
-- Run `make test`
-- Run `make lint`
-- Run `make typecheck`
-- Manual testing if needed
-
-### Vibe Coding vs Analytical Work
-
-**Vibe Coding OK for:**
-- Prototypes
-- Utilities
-- Parsers
-- Easy-to-regenerate code
-
-**Analytical Approach REQUIRED for:**
-- Production code
-- Refactoring
-- Migrations
-- Security-sensitive code
-- Related changes across files
-
-## Safety Rules
-
-### Permissions
-
-- ❌ Never delete files without confirmation
-- ❌ Never run destructive commands (`rm -rf`, `DROP TABLE`)
-- ❌ Never commit secrets
-- ❌ Never modify files you don't understand
-
-### MCP Servers
-
-- Use only for stateful integrations (browser, DB)
-- Minimal required permissions
-- Prefer CLI when possible
-
-### Data Protection
-
-- Do not log sensitive data
-- Do not expose PII in errors
-- Validate all user input
-
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Setup | `make setup` |
-| Dev server | `make dev` |
-| Tests | `make test` |
-| Lint | `make lint` |
-| Type check | `make typecheck` |
-| Migrate | `make migrate` |
-| Coverage | `make coverage` |
-
-## Skills Available
-
-- `new-endpoint` — Create API endpoints
-- `add-tests` — Write comprehensive tests
-- `code-review` — Review code changes
-- `db-migration` — Database schema changes
-- `debug-failing-test` — Diagnose test failures
-- `refactor-module` — Improve code structure
-
-## Subagents Available
-
-- `explorer` — Read-only code investigation
-- `debugger` — Bug diagnosis (no code changes)
-- `reviewer` — Code review feedback
-
-## Definition of Done (DoD)
-
-- [ ] Изменения реализуют согласованный scope задачи и соответствуют архитектурному слою.
-- [ ] Для нового/измененного поведения добавлены или обновлены тесты (happy path, edge, error/conflict; concurrency где применимо).
-- [ ] Выполнены `make test`, `make lint`, `make typecheck`; падения устранены или явно задокументированы.
-- [ ] Документация обновлена при изменении API, поведения или операционного процесса.
-- [ ] Нет нарушений архитектуры `Endpoint → Service → Repository → Database`.
-- [ ] Сохранена типизация и валидация входных/выходных контрактов.
-- [ ] Финальный diff очищен от временного debug-кода и нерелевантных правок.
+- [ ] Change matches the requested Latexed scope.
+- [ ] Existing docs/examples are not stale booking-domain content for touched areas.
+- [ ] Public schemas/API behavior are preserved or intentionally documented.
+- [ ] Relevant tests/checks were run, or limitations are clearly documented.
+- [ ] No secrets, debug code, local DB artifacts, generated PDFs, or unrelated formatting churn are included.
+- [ ] Final response cites changed files and lists exact verification commands.
