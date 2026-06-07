@@ -383,7 +383,7 @@ Use this checklist to verify the complete generation path manually after the bac
 4. Choose **Язык пособия**, **Источник содержания**, and **Режим LaTeX**:
    - **Только по материалам пользователя** keeps generation grounded in the supplied materials and marks missing data instead of inventing it;
    - **Разрешить нейросети генерировать от себя** lets the model create theory, examples, practice tasks, and answers from the selected topic/level/class;
-   - **Safe** maximizes compile success by avoiding risky visual/table constructs, while **Rich** allows more complex LaTeX when you are ready to review/repair it.
+   - **Safe** maximizes compile success by avoiding or simplifying risky visual/table constructs, while **Rich** allows more complex LaTeX when you are ready to review/repair it.
 5. Click **Проверить prompt** and confirm the prompt preview status is successful.
 6. Click **Проверить провайдера** and confirm the selected provider/model is available.
 7. Choose where to place the result: create a new `generated.tex`, replace the active file, or append to the active file.
@@ -391,7 +391,7 @@ Use this checklist to verify the complete generation path manually after the bac
 9. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`; the backend now wraps the model's body-only answer with the fixed Latexed preamble (Russian/T2A, math, tables, TikZ/pgfplots, typography, blocks, and hyperref/tcolorbox packages).
 10. Click **Проверить .tex** if you want to validate the current editor content again.
 11. Compile with **Компиляция** or `Ctrl+Enter`.
-12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, validates environment/math balance and safe-mode restrictions, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
+12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, deterministically simplifies risky Safe-mode fragments, validates environment/math balance and safe-mode restrictions, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
 13. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands

@@ -38,6 +38,35 @@ ENVIRONMENT_ALIASES = {
     "proof": (r"\textbf{Доказательство.}", r"\hfill $\square$"),
 }
 
+SAFE_MODE_BLOCK_PATTERNS = [
+    (
+        re.compile(r"\\begin\{tikzpicture\}(?:\[[^\]]*\])?.*?\\end\{tikzpicture\}", re.DOTALL),
+        r"\begin{infoblock}{Схема упрощена}Сложная TikZ-схема заменена текстовым описанием для стабильной компиляции в safe-режиме.\end{infoblock}",
+    ),
+    (
+        re.compile(r"\\begin\{axis\}(?:\[[^\]]*\])?.*?\\end\{axis\}", re.DOTALL),
+        r"\begin{infoblock}{График упрощён}Сложный pgfplots-график заменён текстовым описанием для стабильной компиляции в safe-режиме.\end{infoblock}",
+    ),
+    (
+        re.compile(r"\\begin\{longtable\}(?:\{[^{}]*\})?.*?\\end\{longtable\}", re.DOTALL),
+        r"\begin{infoblock}{Таблица упрощена}Длинная таблица заменена кратким текстовым блоком для стабильной компиляции в safe-режиме.\end{infoblock}",
+    ),
+]
+SAFE_MODE_INLINE_PATTERNS = [
+    (
+        re.compile(r"\\includegraphics(?:\[[^\]]*\])?\{[^{}]*\}"),
+        r"\begin{infoblock}{Изображение пропущено}Изображение заменено текстовой заметкой, потому что safe-режим не использует внешние файлы.\end{infoblock}",
+    ),
+    (
+        re.compile(r"\\(?:input|include)\{[^{}]*\}"),
+        r"\begin{infoblock}{Вставка файла пропущена}Команда вставки внешнего файла заменена текстовой заметкой для стабильной компиляции.\end{infoblock}",
+    ),
+    (
+        re.compile(r"^\s*\\addplot\b.*$", re.MULTILINE),
+        r"\begin{infoblock}{График упрощён}Команда pgfplots заменена текстовым описанием для стабильной компиляции в safe-режиме.\end{infoblock}",
+    ),
+]
+
 
 def _split_latex_options(options: str | None) -> list[str]:
     if options is None:
@@ -110,6 +139,16 @@ def _replace_environment_aliases(content: str) -> str:
             sanitized,
         )
     return sanitized
+
+
+def sanitize_generated_latex_body_for_safe_mode(content: str) -> str:
+    """Deterministically simplify risky AI LaTeX body fragments for safe-mode generation."""
+    sanitized = content
+    for pattern, replacement in SAFE_MODE_BLOCK_PATTERNS:
+        sanitized = pattern.sub(lambda _match, value=replacement: value, sanitized)
+    for pattern, replacement in SAFE_MODE_INLINE_PATTERNS:
+        sanitized = pattern.sub(lambda _match, value=replacement: value, sanitized)
+    return re.sub(r"\n{3,}", "\n\n", sanitized).strip()
 
 
 def sanitize_latex_source(content: str) -> str:

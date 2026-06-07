@@ -293,6 +293,26 @@ def test_latex_sanitizer_normalizes_generated_body_artifacts():
     assert r"\ldots" in sanitized
 
 
+def test_latex_sanitizer_simplifies_safe_mode_risky_fragments():
+    from app.services.latex_sanitizer import sanitize_generated_latex_body_for_safe_mode
+
+    content = (
+        r"\section{Графики}"
+        r"\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
+        r"\includegraphics[width=5cm]{plot.png}"
+        r"\input{extra.tex}"
+    )
+
+    sanitized = sanitize_generated_latex_body_for_safe_mode(content)
+
+    assert r"\begin{tikzpicture}" not in sanitized
+    assert r"\includegraphics" not in sanitized
+    assert r"\input" not in sanitized
+    assert r"\begin{infoblock}{Схема упрощена}" in sanitized
+    assert r"\begin{infoblock}{Изображение пропущено}" in sanitized
+    assert r"\begin{infoblock}{Вставка файла пропущена}" in sanitized
+
+
 def test_latex_validator_rejects_unbalanced_generated_environments_and_body_preamble():
     from app.services.latex_document_builder import build_latex_document
     from app.services.latex_validator import validate_latex_document
@@ -1435,7 +1455,7 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
     }
 
 
-def test_generation_generate_repairs_safe_mode_validation_before_compile(monkeypatch):
+def test_generation_generate_simplifies_safe_mode_risky_latex_before_compile(monkeypatch):
     from app.routers import generation as generation_router
     from app.config import settings
     from app.schemas import LatexCompileResult
@@ -1445,17 +1465,9 @@ def test_generation_generate_repairs_safe_mode_validation_before_compile(monkeyp
 
     async def fake_generate(prompt, provider, model):
         prompts.append(prompt)
-        if len(prompts) == 1:
-            return (
-                "```latex\n"
-                r"\section{Risky}\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
-                "\n```",
-                "ollama",
-                "gemma4",
-            )
         return (
             "```latex\n"
-            r"\section{Safe}График заменён текстовым объяснением."
+            r"\section{Risky}\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
             "\n```",
             "ollama",
             "gemma4",
@@ -1478,13 +1490,14 @@ def test_generation_generate_repairs_safe_mode_validation_before_compile(monkeyp
 
     assert response.status_code == 200
     data = response.json()
-    assert len(prompts) == 2
-    assert "Safe LaTeX mode forbids tikzpicture" in prompts[1]
+    assert len(prompts) == 1
     assert len(compile_inputs) == 1
-    assert "Safe" in compile_inputs[0]
+    assert "Схема упрощена" in compile_inputs[0]
+    assert "tikzpicture" not in compile_inputs[0]
+    assert "Схема упрощена" in data["latex_code"]
     assert "tikzpicture" not in data["latex_code"]
     assert data["compile_check"]["success"] is True
-    assert data["compile_check"]["repaired"] is True
+    assert data["compile_check"]["repaired"] is False
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):

@@ -20,7 +20,10 @@ from app.config import settings
 from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
 from app.services.latex_document_builder import build_latex_document
 from app.services.latex_compiler import LatexCompiler
-from app.services.latex_sanitizer import sanitize_generated_latex_body
+from app.services.latex_sanitizer import (
+    sanitize_generated_latex_body,
+    sanitize_generated_latex_body_for_safe_mode,
+)
 from app.services.latex_validator import validate_latex_document
 from app.services.prompt_builder import build_latex_generation_prompt, build_latex_repair_prompt
 
@@ -76,6 +79,14 @@ def enforce_ai_rate_limit(request: Request) -> None:
     bucket.append(now)
 
 
+def normalize_generated_body(content: str, *, safe_mode: bool) -> str:
+    """Apply generation body normalization, including deterministic safe-mode simplification."""
+    latex_body = sanitize_generated_latex_body(content)
+    if safe_mode:
+        latex_body = sanitize_generated_latex_body_for_safe_mode(latex_body)
+    return latex_body
+
+
 def enforce_text_limit(label: str, value: str, max_chars: int) -> None:
     if max_chars > 0 and len(value) > max_chars:
         logger.warning(
@@ -120,7 +131,7 @@ async def compile_check_and_repair(
     safe_mode: bool,
 ) -> tuple[str, str, str, dict[str, object], GenerationCompileCheckResponse]:
     """Compile-check generated LaTeX and ask the provider for one bounded repair when needed."""
-    latex_body = sanitize_generated_latex_body(latex_body)
+    latex_body = normalize_generated_body(latex_body, safe_mode=safe_mode)
     latex_code = build_latex_document(latex_body)
     enforce_text_limit("latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
     validation = validate_latex_document(latex_code, safe_mode=safe_mode)
@@ -176,7 +187,7 @@ async def compile_check_and_repair(
         )
         enforce_text_limit("repair_raw_output", repair_raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
         raw_output = repair_raw_output
-        latex_body = sanitize_generated_latex_body(extract_latex_code(repair_raw_output))
+        latex_body = normalize_generated_body(extract_latex_code(repair_raw_output), safe_mode=safe_mode)
         enforce_text_limit("repair_latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
         latex_code = build_latex_document(latex_body)
         enforce_text_limit("repair_latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
