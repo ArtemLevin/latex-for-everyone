@@ -112,6 +112,7 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
+| `make clean-artifacts` | Remove generated compile/export artifacts from default `/tmp` runtime dirs. |
 | `make docker-up` | Build and start Docker Compose services. |
 | `make docker-down` | Stop Docker Compose services. |
 | `make clean` | Remove local DB files and Python/test caches. |
@@ -124,7 +125,7 @@ make backend BACKEND_PORT=9000
 make frontend FRONTEND_PORT=3000
 make frontend PYTHON=python
 make migration MSG="add users table"
-make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
+make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
 ```
 
 ## uv notes
@@ -133,6 +134,32 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 - The project is configured with `package = false`, so `uv` manages the environment without requiring this repository to be installed as a Python package.
 - Backend commands run from `backend/` so `app.main:app` imports resolve the same way they do with plain `uvicorn`.
 - `requirements.txt` remains available for Docker and pip-based workflows.
+
+
+## Runtime artifacts and cleanup
+
+Latexed creates local runtime files during development and tests. These files are intentionally ignored by git:
+
+- SQLite databases such as `latexed.db`, `test_latexed.db`, `*.sqlite`, and `*.sqlite3`;
+- Python/test caches such as `__pycache__/` and `.pytest_cache/`;
+- generated compile/export/upload artifacts under the configured runtime directories, for example `/tmp/latexed_compiles` and `/tmp/latexed_uploads`.
+
+Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
+
+## Database migrations
+
+Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, but production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+
+Recommended workflow:
+
+```bash
+make migrate
+make migration MSG="describe schema change"
+# review backend/alembic/versions/*.py
+make migrate
+```
+
+When changing `backend/app/models.py`, create or update an Alembic revision in the same PR and verify it against a disposable database. If you have an old local SQLite database that was created before Alembic tracking existed, either remove it with `make clean` before `make migrate` or stamp it manually only after confirming its schema matches the baseline.
 
 ## Frontend/backend integration
 
@@ -143,9 +170,9 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
 3. loads project files from `GET /api/files/project/{project_id}`;
 4. loads templates from `GET /api/templates/`;
 5. autosaves the current file with `PUT /api/files/{file_id}`;
-6. compiles with `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
+6. waits for an explicit user action before compiling; the **Компиляция** button or `Ctrl+Enter` calls `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
-8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, validates returned `latex_code`, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
+8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate` (default `latex_mode=safe` for maximum compile success), receives backend-wrapped `latex_code` plus a best-effort `compile_check` result, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
 
 ### Configuring the API base URL
 
@@ -235,12 +262,19 @@ Deprecated compatibility routes are still available for compile history:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | `sqlite:///./latexed.db` | Database connection string |
+| `AUTO_CREATE_TABLES` | `true` | Create SQLAlchemy tables on app startup for local/dev convenience; set `false` in production and use Alembic migrations |
 | `DEBUG` | `false` | Debug mode |
 | `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
 | `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; override with exact public/reverse-proxy hostnames in production |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
 | `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
+| `MAX_LATEX_FILES` | `100` | Maximum number of LaTeX project files accepted by compile/export payloads; set `0` to disable |
+| `MAX_LATEX_FILE_CHARS` | `500000` | Maximum characters allowed in a single LaTeX file for compile/export payloads; set `0` to disable |
+| `MAX_LATEX_TOTAL_CHARS` | `2000000` | Maximum total characters allowed across a compile/export payload; set `0` to disable |
+| `MAX_COMPILER_OUTPUT_CHARS` | `20000` | Maximum compiler output/log characters returned through API responses/history; set `0` to disable truncation |
+| `LATEX_ALLOWED_EXTENSIONS` | `.tex,.bib,.cls,.sty` | Comma-separated allowlist for user-provided LaTeX project files accepted by compile/export payloads |
+| `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for generated compile/export artifacts; set `0` to disable automatic cleanup |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
 | `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
@@ -252,12 +286,14 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_MAX_PROMPT_CHARS` | `60000` | Maximum generated prompt size before a provider call is allowed |
 | `AI_MAX_RAW_OUTPUT_CHARS` | `200000` | Maximum provider raw output / LaTeX validation payload size |
 | `AI_EXPOSE_PROVIDER_ERRORS` | `false` | Expose upstream provider error details to clients; keep `false` in production |
+| `AI_COMPILE_CHECK_ENABLED` | `true` | Run a best-effort backend compile check after AI generation when `pdflatex` is available |
+| `AI_REPAIR_ATTEMPTS` | `1` | Maximum automatic AI repair attempts after a generated LaTeX document fails the compile check |
 | `LOG_LEVEL` | `INFO` | Backend log level (`DEBUG`, `INFO`, `WARNING`, `ERROR`) |
 | `LOG_FORMAT` | timestamped text format | Python logging format; includes `request_id` by default |
 | `LOG_SLOW_REQUEST_MS` | `1000` | Requests at or above this duration are logged as warnings |
 | `AI_LOG_PROMPT_PREVIEW_CHARS` | `500` | Max compact prompt preview characters in AI logs; set `0` to disable previews |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `qwen2.5:14b` | Default Ollama model for LaTeX generation |
+| `OLLAMA_MODEL` | `gemma4` | Default Ollama model for LaTeX generation |
 | `AI_VENDOR_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible vendor API base URL |
 | `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
@@ -308,13 +344,13 @@ Use this checklist to verify the complete generation path manually after the bac
 2. Pull the configured model, for example:
 
    ```bash
-   ollama pull qwen2.5:14b
+   ollama pull gemma4
    ```
 
 3. Check that the backend can reach Ollama:
 
    ```bash
-   make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
+   make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
    ```
 
 4. In the browser, click **AI** → **Проверить провайдера**. The status should say that Ollama is reachable and the model is available.
@@ -344,15 +380,19 @@ Use this checklist to verify the complete generation path manually after the bac
 1. Confirm the status bar shows that the backend is online, or verify `make health` succeeds.
 2. Click **AI** in the header.
 3. Fill at least **Тема**; optionally fill **ФИО ученика** and **Материалы / условия задач**.
-4. Click **Проверить prompt** and confirm the prompt preview status is successful.
-5. Click **Проверить провайдера** and confirm the selected provider/model is available.
-6. Choose where to place the result: create a new `generated.tex`, replace the active file, or append to the active file.
-7. Click **Сгенерировать и вставить**.
-8. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`.
-9. Click **Проверить .tex** if you want to validate the current editor content again.
-10. Compile with **Компиляция** or `Ctrl+Enter`.
-11. Confirm the PDF preview loads when `pdflatex` is available, or review the compile error panel if LaTeX needs correction.
-12. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
+4. Choose **Язык пособия**, **Источник содержания**, and **Режим LaTeX**:
+   - **Только по материалам пользователя** keeps generation grounded in the supplied materials and marks missing data instead of inventing it;
+   - **Разрешить нейросети генерировать от себя** lets the model create theory, examples, practice tasks, and answers from the selected topic/level/class;
+   - **Safe** maximizes compile success by avoiding risky visual/table constructs, while **Rich** allows more complex LaTeX when you are ready to review/repair it.
+5. Click **Проверить prompt** and confirm the prompt preview status is successful.
+6. Click **Проверить провайдера** and confirm the selected provider/model is available.
+7. Choose where to place the result: create a new `generated.tex`, replace the active file, or append to the active file.
+8. Click **Сгенерировать и вставить**.
+9. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`; the backend now wraps the model's body-only answer with the fixed Latexed preamble (Russian/T2A, math, tables, TikZ/pgfplots, typography, blocks, and hyperref/tcolorbox packages).
+10. Click **Проверить .tex** if you want to validate the current editor content again.
+11. Compile with **Компиляция** or `Ctrl+Enter`.
+12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, validates environment/math balance and safe-mode restrictions, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
+13. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands
 
@@ -360,11 +400,12 @@ These commands are useful when debugging without the browser:
 
 ```bash
 make health
-make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b
+make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
 make ai-validate-smoke
+make clean-artifacts   # optional: remove local generated PDFs/exports in default /tmp artifact dirs
 curl -fsS -X POST http://localhost:8000/api/generation/prompt \
   -H 'Content-Type: application/json' \
-  --data '{"provider":"ollama","model":"qwen2.5:14b","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов"},"materials":"Решить уравнение 2^x = 8."}'
+  --data '{"provider":"ollama","model":"gemma4","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only","latex_mode":"safe"},"materials":"Решить уравнение 2^x = 8."}'
 ```
 
 If generation fails, check provider status first, then inspect backend logs for provider errors, timeout messages, or missing API key/model configuration.

@@ -1,15 +1,28 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
 from typing import Optional
-from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+
 from app.database import get_db
-from app.models import Project, File, ProjectSnapshot
-from app.schemas import (
-    ProjectCreate, ProjectUpdate, ProjectResponse,
-    ProjectDetailResponse, MessageResponse, SnapshotCreate, SnapshotResponse
-)
 from app.dependencies import get_project
+from app.models import Project
+from app.schemas import (
+    MessageResponse,
+    ProjectCreate,
+    ProjectDetailResponse,
+    ProjectResponse,
+    ProjectUpdate,
+    SnapshotCreate,
+    SnapshotResponse,
+)
+from app.services.project_service import (
+    ProjectService,
+    SnapshotNotFoundError,
+    SnapshotProjectMismatchError,
+)
+
 router = APIRouter()
+project_service = ProjectService()
 
 
 @router.get("/", response_model=list[ProjectResponse])
@@ -19,13 +32,7 @@ async def list_projects(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
-    query = db.query(Project)
-
-    if search:
-        query = query.filter(Project.name.ilike(f"%{search}%"))
-
-    projects = query.order_by(Project.updated_at.desc()).offset(skip).limit(limit).all()
-    return projects
+    return project_service.list_projects(db, skip=skip, limit=limit, search=search)
 
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
@@ -35,31 +42,7 @@ async def create_project(
 ):
     from app.routers.templates import get_template_content
 
-    project = Project(
-        name=project_data.name,
-        is_public=project_data.is_public,
-    )
-    db.add(project)
-    db.flush()
-
-    # Create main file
-    main_content = ""
-    if project_data.template:
-        template = get_template_content(project_data.template)
-        if template:
-            main_content = template["content"]
-
-    main_file = File(
-        project_id=project.id,
-        name="main.tex",
-        content=main_content,
-        is_main=True,
-    )
-    db.add(main_file)
-    db.commit()
-    db.refresh(project)
-
-    return project
+    return project_service.create_project(db, project_data, template_resolver=get_template_content)
 
 
 @router.get("/{project_id}", response_model=ProjectDetailResponse)
@@ -73,15 +56,7 @@ async def update_project(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
-    update_data = project_data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(project, key, value)
-
-    project.updated_at = datetime.utcnow()
-    db.commit()
-    db.refresh(project)
-
-    return project
+    return project_service.update_project(db, project, project_data)
 
 
 @router.delete("/{project_id}", response_model=MessageResponse)
@@ -89,10 +64,8 @@ async def delete_project(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
-    db.delete(project)
-    db.commit()
-
-    return {"message": f"Project '{project.name}' deleted"}
+    project_name = project_service.delete_project(db, project)
+    return {"message": f"Project '{project_name}' deleted"}
 
 
 @router.post("/{project_id}/snapshot", response_model=SnapshotResponse, status_code=status.HTTP_201_CREATED)
@@ -101,19 +74,10 @@ async def create_snapshot(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
-    if snapshot_data.project_id and snapshot_data.project_id != project.id:
-        raise HTTPException(status_code=400, detail="Snapshot project_id does not match path project_id")
-
-    snapshot = ProjectSnapshot(
-        project_id=project.id,
-        name=snapshot_data.name,
-        data=snapshot_data.data,
-    )
-    db.add(snapshot)
-    db.commit()
-    db.refresh(snapshot)
-
-    return snapshot
+    try:
+        return project_service.create_snapshot(db, project, snapshot_data)
+    except SnapshotProjectMismatchError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
 
 @router.get("/{project_id}/snapshots", response_model=list[SnapshotResponse])
@@ -121,14 +85,7 @@ async def get_snapshots(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
-    snapshots = (
-        db.query(ProjectSnapshot)
-        .filter(ProjectSnapshot.project_id == project.id)
-        .order_by(ProjectSnapshot.created_at.desc())
-        .limit(50)
-        .all()
-    )
-    return snapshots
+    return project_service.list_snapshots(db, project)
 
 
 @router.post("/{project_id}/restore", response_model=MessageResponse)
@@ -137,36 +94,10 @@ async def restore_snapshot(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
-    snapshot = (
-        db.query(ProjectSnapshot)
-        .filter(
-            ProjectSnapshot.id == snapshot_id,
-            ProjectSnapshot.project_id == project.id,
-        )
-        .first()
-    )
-
-    if not snapshot:
-        raise HTTPException(status_code=404, detail="Snapshot not found")
-
-    # Restore files
-    files_data = snapshot.data.get("files", [])
-
-    # Delete existing files
-    db.query(File).filter(File.project_id == project.id).delete()
-
-    # Create restored files
-    for file_data in files_data:
-        file = File(
-            project_id=project.id,
-            name=file_data["name"],
-            content=file_data["content"],
-            is_main=file_data.get("is_main", False),
-        )
-        db.add(file)
-
-    project.updated_at = datetime.utcnow()
-    db.commit()
+    try:
+        project_service.restore_snapshot(db, project, snapshot_id)
+    except SnapshotNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
 
     return {"message": "Snapshot restored successfully"}
 
@@ -176,24 +107,4 @@ async def duplicate_project(
     project: Project = Depends(get_project),
     db: Session = Depends(get_db),
 ):
-    new_project = Project(
-        name=f"{project.name} (копия)",
-        is_public=False,
-    )
-    db.add(new_project)
-    db.flush()
-
-    # Copy files
-    for file in project.files:
-        new_file = File(
-            project_id=new_project.id,
-            name=file.name,
-            content=file.content,
-            is_main=file.is_main,
-        )
-        db.add(new_file)
-
-    db.commit()
-    db.refresh(new_project)
-
-    return new_project
+    return project_service.duplicate_project(db, project)

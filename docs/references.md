@@ -1,341 +1,255 @@
-# Reference Files
+# Latexed Reference Files
 
-This document lists reference files and patterns to follow (or avoid) in the project.
+Use these files as the first references for future work. The examples are intentionally Latexed-specific.
 
----
+## Project entry points
 
-## Golden References (Follow These)
+### FastAPI app
 
-### Endpoint Pattern
+Reference: `backend/app/main.py`
 
-**File:** `/app/api/endpoints/bookings.py` *(TODO: Create as reference)*
+Use it for:
 
-```python
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
-from app.db.session import get_db_session
-from app.services.booking_service import BookingService
-from app.schemas.booking import BookingResponse, BookingCreate
+- app metadata and docs URLs;
+- middleware registration;
+- CORS/trusted host behavior;
+- router prefixes;
+- health/root endpoint shape.
 
-router = APIRouter(prefix="/api/bookings", tags=["bookings"])
+### Frontend shell
 
-def get_booking_service(db: AsyncSession = Depends(get_db_session)) -> BookingService:
-    """Dependency injector for BookingService."""
-    from app.db.repositories.booking_repository import BookingRepository
-    repo = BookingRepository(db)
-    return BookingService(repo)
+Reference: `frontend/main.html`
 
-@router.get("/", response_model=list[BookingResponse])
-async def list_bookings(
-    service: BookingService = Depends(get_booking_service)
-) -> list[BookingResponse]:
-    """List all bookings."""
-    bookings = await service.list_all()
-    return [BookingResponse.model_validate(b) for b in bookings]
+Use it for:
 
-@router.post("/", response_model=BookingResponse, status_code=201)
-async def create_booking(
-    data: BookingCreate,
-    service: BookingService = Depends(get_booking_service)
-) -> BookingResponse:
-    """Create a new booking."""
-    booking = await service.create_booking(data)
-    return BookingResponse.model_validate(booking)
+- DOM IDs and modal structure;
+- third-party libraries loaded from CDNs;
+- local CSS and JS load order;
+- visible UI text and controls.
+
+Script order matters:
+
+```text
+01-state.js → 02-api.js → 03-init.js → 04-files.js →
+05-compile-preview.js → 06-toolbar-view.js → 07-generation.js →
+08-templates-export.js → 09-ui-settings.js
 ```
 
-**Why it's good:**
-- ✅ Dependency injection pattern
-- ✅ Service layer abstraction
-- ✅ Pydantic schemas for validation
-- ✅ Proper response models
-- ✅ Type annotations throughout
+## Backend references
 
----
+### Schemas
 
-### Service Pattern
+Reference: `backend/app/schemas.py`
 
-**File:** `/app/services/booking_service.py` *(TODO: Create as reference)*
+Canonical contracts include:
 
-```python
-from app.db.repositories.booking_repository import BookingRepository
-from app.schemas.booking import BookingCreate
-from app.db.models.booking import Booking
-from app.exceptions import SlotNotAvailableError, BookingNotFoundError
+- `ProjectCreate`, `ProjectUpdate`, `ProjectResponse`, `ProjectDetailResponse`;
+- `FileCreate`, `FileUpdate`, `FileResponse`;
+- `CompileRequest`, `RawCompileRequest`, `LatexCompileResult`, `CompileResponse`, `CompileHistoryResponse`;
+- `PDFGenerationResult`, `ExportRequest`, `ExportResponse`;
+- generation request/response/validation/provider/preset schemas;
+- snapshot and generic response schemas.
 
-class BookingService:
-    """Business logic for booking operations."""
-    
-    def __init__(self, repository: BookingRepository):
-        self.repository = repository
-    
-    async def create_booking(self, data: BookingCreate) -> Booking:
-        """
-        Create a new booking.
-        
-        Args:
-            data: Booking creation data
-            
-        Returns:
-            Created booking
-            
-        Raises:
-            SlotNotAvailableError: If slot is already booked
-        """
-        # Check availability first
-        is_available = await self.repository.is_slot_available(data.slot_start)
-        if not is_available:
-            raise SlotNotAvailableError(data.slot_start)
-        
-        # Create booking
-        return await self.repository.create(data)
-    
-    async def get_by_id(self, booking_id: int) -> Booking:
-        """
-        Get booking by ID.
-        
-        Raises:
-            BookingNotFoundError: If booking doesn't exist
-        """
-        booking = await self.repository.get_by_id(booking_id)
-        if booking is None:
-            raise BookingNotFoundError(booking_id)
-        return booking
-```
+Before adding a schema:
 
-**Why it's good:**
-- ✅ Single responsibility
-- ✅ Clear error handling
-- ✅ Docstrings with raises
-- ✅ Type hints complete
-- ✅ No direct DB access
+1. Search for an existing model with `rg -n "class .*Response|class .*Request|class .*Create|class .*Update" backend/app/schemas.py`.
+2. Prefer extending or reusing an existing contract.
+3. Document public API changes.
 
----
+### Models and database
 
-### Repository Pattern
+References:
 
-**File:** `/app/db/repositories/booking_repository.py` *(TODO: Create as reference)*
+- `backend/app/models.py`
+- `backend/app/database.py`
+- `backend/alembic/`
 
-```python
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from app.db.models.booking import Booking
-from app.schemas.booking import BookingCreate
-from typing import Optional
+Persisted entities:
 
-class BookingRepository:
-    """Data access layer for bookings."""
-    
-    def __init__(self, session: AsyncSession):
-        self.session = session
-    
-    async def get_by_id(self, booking_id: int) -> Optional[Booking]:
-        """Get booking by ID."""
-        result = await self.session.execute(
-            select(Booking).where(Booking.id == booking_id)
-        )
-        return result.scalar_one_or_none()
-    
-    async def create(self, data: BookingCreate) -> Booking:
-        """Create new booking."""
-        booking = Booking(**data.model_dump())
-        self.session.add(booking)
-        await self.session.commit()
-        await self.session.refresh(booking)
-        return booking
-    
-    async def is_slot_available(self, slot_start: datetime) -> bool:
-        """Check if time slot is available."""
-        result = await self.session.execute(
-            select(Booking)
-            .where(Booking.slot_start == slot_start)
-            .where(Booking.status != 'cancelled')
-        )
-        return result.scalar_one_or_none() is None
-```
+- `Project`
+- `File`
+- `CompileHistory`
+- `ProjectSnapshot`
 
-**Why it's good:**
-- ✅ Session encapsulation
-- ✅ SQLAlchemy ORM usage
-- ✅ Type hints
-- ✅ Clear method names
+Guidelines:
 
----
+- Keep models persistence-focused.
+- Use migrations for schema changes when practical.
+- Do not commit local SQLite databases.
 
-### Pydantic Schema Pattern
+### Projects and files routers
 
-**File:** `/app/schemas/booking.py` *(TODO: Create as reference)*
+References:
 
-```python
-from pydantic import BaseModel, EmailStr, Field
-from datetime import datetime
-from enum import Enum
+- `backend/app/routers/projects.py`
+- `backend/app/routers/files.py`
 
-class BookingStatus(str, Enum):
-    PENDING = "pending"
-    CONFIRMED = "confirmed"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
+Use them for current CRUD behavior, snapshots, duplication, upload flows, and existing `TestClient` patterns. Note that direct SQLAlchemy use in these routers is legacy/current style; do not expand it for complex new behavior if a service is more appropriate.
 
-class BookingCreate(BaseModel):
-    """Schema for creating a booking."""
-    slot_start: datetime
-    customer_name: str = Field(min_length=2, max_length=255)
-    customer_email: EmailStr
+### Compile flow
 
-class BookingResponse(BaseModel):
-    """Schema for booking response."""
-    id: int
-    slot_start: datetime
-    customer_name: str
-    customer_email: str
-    status: BookingStatus
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
-```
+References:
 
-**Why it's good:**
-- ✅ Enum for status values
-- ✅ EmailStr validation
-- ✅ Field constraints
-- ✅ Separate create/response schemas
-- ✅ ORM mode enabled
+- `backend/app/routers/compile.py`
+- `backend/app/services/latex_compiler.py`
+- `backend/app/services/latex_sanitizer.py`
 
----
+Good patterns:
 
-### Test Pattern
+- typed service result with `LatexCompileResult`;
+- file map sanitization before writing to temporary work directories;
+- `Path(filename).name` for compile entrypoint safety;
+- bounded compile timeout and output/error fields;
+- generated PDF stored under configured compile output directory.
 
-**File:** `/tests/services/test_booking_service.py` *(TODO: Create as reference)*
+### Export flow
+
+References:
+
+- `backend/app/routers/export.py`
+- `backend/app/services/pdf_generator.py`
+
+Use them for PDF/HTML/TEX export response shape, generated file download behavior, and path-safety expectations.
+
+### AI generation flow
+
+References:
+
+- `backend/app/routers/generation.py`
+- `backend/app/services/ai_generation.py`
+- `backend/app/services/prompt_builder.py`
+- `backend/app/services/latex_validator.py`
+
+Good patterns:
+
+- enforce AI rate limits and text limits at API boundaries;
+- build prompt separately from provider calls;
+- sanitize provider errors unless explicitly configured otherwise;
+- extract LaTeX code before validation/insertion;
+- validate generated LaTeX structure;
+- log metadata, hashes, counts, and status instead of full user content.
+
+### Tests
+
+Reference: `backend/tests/test_api.py`
+
+Current style:
+
+- `TestClient(app)`;
+- dependency override for `get_db`;
+- test SQLite database;
+- `setup_db` fixture that creates/drops metadata;
+- direct API assertions for health, projects, files, templates, and selected LaTeX service helpers.
+
+Add tests here or split into additional files under `backend/tests/` when a feature grows large.
+
+## Frontend references
+
+### State and API bootstrap
+
+References:
+
+- `frontend/js/01-state.js`
+- `frontend/js/02-api.js`
+- `frontend/js/03-init.js`
+
+Use them for:
+
+- API base URL resolution;
+- backend availability state;
+- startup flow;
+- project/file bootstrap;
+- editor initialization and keyboard shortcuts.
+
+### File tree
+
+Reference: `frontend/js/04-files.js`
+
+Use it for file selection, creation, renaming, deletion, duplication, upload, and context menu behavior.
+
+### Compile and preview
+
+Reference: `frontend/js/05-compile-preview.js`
+
+Use it for server compile calls, local preview fallback, PDF preview embedding, error panel updates, and compile status behavior.
+
+### Toolbar, templates, export, AI, settings
+
+References:
+
+- `frontend/js/06-toolbar-view.js`
+- `frontend/js/07-generation.js`
+- `frontend/js/08-templates-export.js`
+- `frontend/js/09-ui-settings.js`
+
+Use the existing helper/UI patterns instead of creating parallel modal/status/toast systems.
+
+## Good examples to follow
+
+### Typed service result
 
 ```python
-import pytest
-from datetime import datetime
-from unittest.mock import AsyncMock
-from app.services.booking_service import BookingService
-from app.exceptions import SlotNotAvailableError
-
-@pytest.fixture
-def mock_repository():
-    repo = AsyncMock()
-    repo.is_slot_available = AsyncMock(return_value=True)
-    repo.create = AsyncMock()
-    return repo
-
-@pytest.fixture
-def booking_service(mock_repository):
-    return BookingService(mock_repository)
-
-class TestBookingServiceCreate:
-    """Tests for BookingService.create_booking."""
-    
-    async def test_create_booking_success(self, booking_service, mock_repository):
-        """Test successful booking creation."""
-        # Arrange
-        data = BookingCreate(
-            slot_start=datetime(2025, 1, 15, 10, 0),
-            customer_name="John Doe",
-            customer_email="john@example.com"
-        )
-        
-        # Act
-        result = await booking_service.create_booking(data)
-        
-        # Assert
-        assert result is not None
-        mock_repository.is_slot_available.assert_called_once()
-        mock_repository.create.assert_called_once()
-    
-    async def test_create_booking_slot_taken(self, booking_service, mock_repository):
-        """Test booking creation when slot is taken."""
-        # Arrange
-        mock_repository.is_slot_available.return_value = False
-        data = BookingCreate(...)
-        
-        # Act & Assert
-        with pytest.raises(SlotNotAvailableError):
-            await booking_service.create_booking(data)
+class PDFGenerationResult(BaseModel):
+    success: bool
+    filename: str | None = None
+    size: int | None = None
+    error: str | None = None
 ```
 
-**Why it's good:**
-- ✅ AAA pattern (Arrange-Act-Assert)
-- ✅ Fixtures for reuse
-- ✅ Test isolation
-- ✅ Error case coverage
-- ✅ Descriptive test names
+Why:
 
----
+- routers get a stable contract;
+- implementation details stay in the service;
+- error/success fields are explicit.
 
-## Anti-References (Do NOT Follow)
+### Safe frontend backend fallback
 
-### Legacy Code Markers
+```javascript
+try {
+    await apiRequest('/health');
+    setBackendAvailability(true);
+} catch (error) {
+    setBackendAvailability(false);
+    compileLatexLocal();
+}
+```
 
-Look for these comments indicating code to avoid copying:
+Why:
+
+- the editor remains useful without a backend;
+- user feedback remains explicit;
+- API availability is centralized.
+
+### Safe LaTeX validation helper
 
 ```python
-# LEGACY: Do not use as example
-# TODO: Refactor this endpoint
-# DEPRECATED: Use new /api/v2/ endpoints
-# HACK: Temporary workaround for issue #123
+validation = validate_latex_document(latex_code)
+return GenerationValidationResponse(**validation)
 ```
 
-### Common Anti-Patterns
+Why:
 
-```python
-# ❌ BAD: Direct DB access in endpoint
-@router.get("/bookings")
-async def get_bookings(db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Booking))
-    return result.scalars().all()
+- LaTeX structure checks are reusable;
+- API response shape is typed;
+- generated content is checked before insertion/compilation.
 
-# ❌ BAD: No type hints
-async def create_booking(data):
-    ...
+## Anti-references
 
-# ❌ BAD: Business logic in endpoint
-@router.post("/bookings")
-async def create(data, db):
-    if "@" not in data.email:  # Validation in wrong place
-        raise HTTPException(400)
-    ...
+Do not follow or add examples involving:
 
-# ❌ BAD: Parallel types
-class BookingDTO(BaseModel): ...
-class BookingSchema(BaseModel): ...  # Duplicate!
-class BookingModel(BaseModel): ...   # Which one to use?
-```
+- booking, calendar slots, customer email, meeting settings, or colleagues;
+- `/app/api`, `/app/db/repositories`, or `/tests/services` paths unless those paths are actually created in this repository;
+- `make lint` or `make typecheck` unless the Makefile is updated to provide them;
+- model methods that perform HTTP, subprocess, file-system, or AI-provider side effects;
+- frontend code that bypasses `apiRequest` for normal backend API calls;
+- logging full prompts, full generated LaTeX, uploaded source material, or generated PDFs.
 
----
+## Reference update policy
 
-## TODO: Files to Create as References
+Update this file when:
 
-The following reference files should be created:
-
-| File | Purpose | Priority |
-|------|---------|----------|
-| `/app/api/endpoints/bookings.py` | Endpoint pattern | High |
-| `/app/services/booking_service.py` | Service pattern | High |
-| `/app/db/repositories/booking_repository.py` | Repository pattern | High |
-| `/app/schemas/booking.py` | Schema pattern | High |
-| `/tests/services/test_booking_service.py` | Test pattern | High |
-| `/tests/api/test_bookings.py` | API test pattern | Medium |
-| `/app/exceptions.py` | Exception pattern | Medium |
-| `/app/db/models/booking.py` | Model pattern | High |
-
----
-
-## Reference Updates
-
-When adding new patterns:
-
-1. Create the implementation
-2. Add to this document as golden reference
-3. Document why it's a good pattern
-4. Update skills to reference new file
-
-When refactoring legacy:
-
-1. Mark old code with `# LEGACY` comment
-2. Create new reference implementation
-3. Update this document
-4. Migrate callers incrementally
+- a new backend service/module becomes the canonical pattern;
+- frontend script ownership changes;
+- API schemas are reorganized;
+- checks or Makefile targets change;
+- docs discover and remove stale non-Latexed examples.

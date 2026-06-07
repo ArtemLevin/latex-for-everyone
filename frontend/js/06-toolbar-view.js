@@ -128,6 +128,8 @@
         el.parentElement.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
         el.classList.add('active');
 
+        setPreviewPdfMode(false);
+
         if (tab === 'source') {
             document.getElementById('previewContent').textContent = editor.getValue();
             document.getElementById('previewContent').style.fontFamily = "'JetBrains Mono', monospace";
