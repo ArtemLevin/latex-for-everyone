@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
 from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, LatexCompileResult, RawCompileRequest
 from app.services.latex_compiler import LatexCompiler
+from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
+from app.services.payload_limits import PayloadLimitError, enforce_latex_payload_limits
 from sqlalchemy.orm import Session
 from app.database import get_db
 from fastapi.responses import FileResponse
@@ -15,6 +17,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 compiler = LatexCompiler()
+
+
+def enforce_compile_payload_limits(files: dict[str, str]) -> None:
+    try:
+        enforce_latex_file_policy(
+            files,
+            allowed_extensions=parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS),
+        )
+        enforce_latex_payload_limits(
+            files,
+            max_files=settings.MAX_LATEX_FILES,
+            max_file_chars=settings.MAX_LATEX_FILE_CHARS,
+            max_total_chars=settings.MAX_LATEX_TOTAL_CHARS,
+        )
+    except LatexFilePolicyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except PayloadLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
 
 
 @router.post("/", response_model=CompileResponse)
@@ -45,7 +65,16 @@ async def compile_project(
 
     # Find the compile entrypoint. The frontend passes the currently selected file
     # as main_file_name; otherwise we keep the historical is_main/main.tex fallback.
-    main_file_name = Path(request.main_file_name).name if request.main_file_name else None
+    if request.main_file_name:
+        try:
+            main_file_name = validate_latex_filename(
+                request.main_file_name,
+                allowed_extensions=parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS),
+            )
+        except LatexFilePolicyError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+    else:
+        main_file_name = None
     main_content = request.main_file_content
 
     if main_file_name and main_content is None:
@@ -71,6 +100,9 @@ async def compile_project(
             len(files),
         )
         raise HTTPException(status_code=400, detail="No main LaTeX file found")
+
+    files[main_file_name] = main_content
+    enforce_compile_payload_limits(files)
 
     # Create history record
     history = CompileHistory(
@@ -113,6 +145,8 @@ async def compile_project(
 @router.post("/raw", response_model=CompileResponse)
 async def compile_raw_latex(request: RawCompileRequest):
     logger.info("compile raw requested content_chars=%s files=%s", len(request.content), len(request.files))
+    files_for_limits = {"__entrypoint__.tex": request.content, **request.files}
+    enforce_compile_payload_limits(files_for_limits)
     result = LatexCompileResult.model_validate(compiler.compile(request.content, request.files))
     logger.info(
         "compile raw completed status=%s compile_time=%s pdf_url=%s",
@@ -176,4 +210,5 @@ async def download_compiled_pdf(filename: str):
         path=str(filepath),
         filename=filename,
         media_type="application/pdf",
+        content_disposition_type="inline",
     )
