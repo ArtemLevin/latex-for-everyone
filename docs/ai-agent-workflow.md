@@ -1,297 +1,164 @@
 # AI Agent Workflow Guide
 
-## Core Principle: Explore → Plan → Code → Verify
+Use this workflow for Latexed changes. It complements `AGENTS.md` and is intentionally specific to this repository.
 
-All complex tasks must follow this cycle. Never skip steps.
+## Core loop: Explore → Plan → Code → Verify
 
+Do not start from stale assumptions. This repository is a LaTeX editor, not the booking-calendar template that earlier docs referenced.
 
-## Assumptions / Verify first
+## Phase 1: Explore
 
-Before applying path-based examples, verify expected directories exist:
+### Verify layout
 
 ```bash
-rg --files | head -n 50
-for p in app tests alembic; do
+rg --files | head -n 80
+for p in backend/app backend/tests backend/alembic frontend docs; do
   if [ -d "$p" ]; then
     echo "OK: $p/"
   else
-    echo "MISSING: $p/ (treat path examples as pseudocode)"
+    echo "MISSING: $p/"
   fi
 done
 ```
 
-If a directory is missing, treat path examples in this document as **pseudocode** and adapt commands to the actual repository structure.
+### Find the feature area
 
----
-
-## Phase 1: Explore
-
-**Goal:** Understand context before making changes.
-
-### When to Use Explore
-
-- Starting a new feature
-- Investigating a bug
-- Before refactoring
-- Understanding dependencies
-
-### Explore Actions
+Use targeted searches:
 
 ```bash
-# Verify repo file layout first
-rg --files | head -n 50
-
-# Find related code
-rg -n "BookingService" -g "*.py"
-
-# Read file structure
-head -100 app/services/booking_service.py
-
-# Check test coverage
-pytest tests/ --cov=app --cov-report=term-missing
+rg -n "@router\.(get|post|put|delete|patch)" backend/app/routers
+rg -n "class |def |async def " backend/app/services backend/app/routers
+rg -n "apiRequest\(|compileLatex|generateLatex|exportPDF" frontend/js
 ```
 
-### Explore Output
+### Read related boundaries
 
-Document findings:
-- Location of relevant files
-- Existing patterns to follow
-- Dependencies and callers
-- Similar implementations
+- API behavior: `backend/app/routers/*.py`
+- request/response contracts: `backend/app/schemas.py`
+- persistence shape: `backend/app/models.py`
+- compiler/PDF/AI logic: `backend/app/services/*.py`
+- browser flow: `frontend/js/*.js`, loaded in the order declared by `frontend/main.html`
+- tests: `backend/tests/test_api.py`
 
----
+### Explore output
+
+Before coding, know:
+
+- which public endpoint/UI action is affected;
+- which schemas or frontend payloads are involved;
+- whether user LaTeX content, generated PDFs, or provider responses cross a trust boundary;
+- which checks can realistically run in the current environment.
 
 ## Phase 2: Plan
 
-**Goal:** Create implementation blueprint before coding.
-
-### When to Write a Plan
-
-- Any feature with >3 files to modify
-- Database schema changes
-- API modifications
-- Refactoring work
-
-### Plan Template
+Write a short implementation plan for non-trivial changes:
 
 ```markdown
-## Implementation Plan: [Feature Name]
+## Plan
 
-### Components to Modify
-1. `/app/api/endpoints/bookings.py` - Add new route
-2. `/app/services/booking_service.py` - Add method
-3. `/app/schemas/booking.py` - Add schema
+1. Update [router/service/frontend file] to ...
+2. Reuse or extend [schema/helper] for ...
+3. Add/update tests in ...
+4. Verify with ...
 
-### Dependencies
-- Import BookingService in endpoint
-- Add error handling for 404
-
-### Testing Strategy
-- Unit test for service method
-- Integration test for endpoint
-- Test error cases
-
-### Risks
-- Race condition in slot booking
-- Mitigation: Database-level locking
+Risks:
+- API compatibility: ...
+- pdflatex/provider availability: ...
+- frontend offline fallback: ...
 ```
 
-### When NOT to Skip Planning
+Planning is required for:
 
-❌ Production code changes
-❌ Database migrations
-❌ Security-sensitive features
-❌ Breaking API changes
-
----
+- API contract changes;
+- DB/model/migration changes;
+- compile/export/AI provider behavior;
+- broad frontend workflow changes;
+- refactors across multiple files.
 
 ## Phase 3: Code
 
-**Goal:** Implement in small, verifiable increments.
+### Backend guidelines
 
-### Coding Principles
+- Keep router handlers focused on HTTP-level work.
+- Move non-trivial compile/export/AI/persistence orchestration into services.
+- Reuse `backend/app/schemas.py` contracts.
+- Keep logs safe: no full prompts or full user LaTeX unless explicitly required for a response.
+- Preserve compile/export path sanitization and timeouts.
 
-1. **Small commits**: Each commit should be reviewable
-2. **Tests first**: Write tests before or alongside code
-3. **Type annotations**: Always include type hints
-4. **Follow patterns**: Match existing code style
+### Frontend guidelines
 
-### Vibe Coding vs Analytical Work
+- Respect script ordering in `frontend/main.html`.
+- Use existing global helpers such as `apiRequest`, `showToast`, `setButtonLoading`, and modal helpers.
+- Keep local/offline fallback behavior where it already exists.
+- Avoid adding a build step unless explicitly requested.
 
-**Vibe Coding OK for:**
-- Prototypes and experiments
-- Utility functions
-- One-off scripts
-- Easy-to-regenerate code
+### Documentation guidelines
 
-**Analytical Approach REQUIRED for:**
-- Production business logic
-- Database operations
-- Authentication/authorization
-- Payment processing
-- Data migrations
-- Cross-file changes
-
-### Code Incrementally
-
-```python
-# ✅ Good: Small, testable function
-async def check_availability(slot_start: datetime) -> bool:
-    """Check if time slot is available."""
-    return await self.repository.is_slot_available(slot_start)
-
-# ❌ Bad: Large function doing multiple things
-async def process_booking(data):
-    # 100 lines of validation, database access, notifications...
-```
-
----
+- Keep examples Latexed-specific.
+- Update README/docs when endpoints, commands, environment requirements, AI behavior, or frontend/backend integration changes.
+- Remove stale booking/calendar wording when encountered in touched docs.
 
 ## Phase 4: Verify
 
-**Goal:** Ensure changes work correctly and don't break existing functionality.
-
-### Verification Checklist
+Use the smallest relevant checks first:
 
 ```bash
-# Run tests
-make test
-
-# Check types
-make typecheck
-
-# Run linter
-make lint
-
-# Manual testing (if applicable)
-curl http://localhost:8000/api/bookings
+make frontend-check    # frontend/js changes
+make compileall        # Python syntax check
+make test              # backend tests
+make check             # broad check when dependencies are available
+make latex-check       # TeX Live environment validation when compile/export work depends on it
 ```
 
-### Verify After Each Change
+If a check fails because `uv` cannot download dependencies or `pdflatex`/TeX Live is unavailable, record it as an environment limitation with the exact error. Do not mark it as a code failure unless the output proves the patch caused it.
 
-- Tests pass
-- Types are correct
-- Linting passes
-- No regressions
+## Common task playbooks
 
----
+### Add or change an API endpoint
 
-## Interview Pattern
+1. Explore the relevant router and frontend call sites.
+2. Reuse existing schema or add a clearly named schema in `backend/app/schemas.py`.
+3. Put non-trivial logic in a service.
+4. Add `TestClient` coverage in `backend/tests/`.
+5. Run `make compileall` and `make test`.
+6. Update README/docs if the public API changes.
 
-Use when requirements are unclear.
+### Change LaTeX compilation
 
-### Ask Clarifying Questions
+1. Inspect `backend/app/services/latex_compiler.py` and `latex_sanitizer.py`.
+2. Preserve temp directory isolation, filename sanitization, timeout handling, and bounded logs.
+3. Add tests for sanitizer/error extraction when possible without requiring TeX Live.
+4. Run `make compileall`, `make test`, and `make latex-check` if compile environment matters.
 
-```
-Before implementing, clarify:
+### Change AI generation
 
-1. What is the expected input format?
-2. What are the error conditions?
-3. Are there edge cases to consider?
-4. What is the expected output?
-5. Are there performance requirements?
-```
+1. Inspect `backend/app/routers/generation.py`, `ai_generation.py`, `prompt_builder.py`, and `latex_validator.py`.
+2. Preserve rate limits, text limits, provider error sanitization, and validation.
+3. Avoid logging full prompts or raw model output.
+4. Update frontend insertion/status behavior if response shape changes.
+5. Run backend checks and `make frontend-check` if UI changed.
 
-### Example Dialogue
+### Change frontend UI
 
-```
-User: Add booking cancellation
+1. Inspect `frontend/main.html` for DOM IDs and script load order.
+2. Update the smallest JS module responsible for the flow.
+3. Run `make frontend-check`.
+4. If visual behavior changes, run the app and capture a screenshot when possible.
 
-Agent: Let me clarify the requirements:
+### Change database shape
 
-1. Should cancelled slots become immediately available?
-2. Is there a cancellation deadline (e.g., 24 hours before)?
-3. Should we notify the booking owner?
-4. What status should cancelled bookings have?
-5. Should we track cancellation reason?
-```
+1. Update `backend/app/models.py` and schemas if needed.
+2. Create/review an Alembic migration with `make migration MSG="..."` when autogeneration is viable.
+3. Update tests and docs.
+4. Run `make migrate` if the environment supports it.
 
----
+## Self-review checklist
 
-## Restart with Accumulated Knowledge
+Before finalizing:
 
-When stuck or after major discoveries:
-
-### How to Restart
-
-```markdown
-## Context Summary
-
-So far I've learned:
-1. BookingService handles all booking logic
-2. Repository pattern is used for data access
-3. Tests are in /tests/ following AAA pattern
-4. Pydantic schemas validate all input
-
-Current task: Add booking cancellation
-
-Next step: Implement cancel_booking method in BookingService
-```
-
----
-
-## Critic Mode
-
-Review your own work before submitting.
-
-### Self-Review Questions
-
-1. Does this follow project architecture?
-2. Are all edge cases handled?
-3. Are types complete?
-4. Would I approve this PR?
-5. What could go wrong?
-
-### Critic Template
-
-```markdown
-## Self-Review
-
-### Strengths
-- Follows layered architecture
-- Comprehensive test coverage
-- Proper error handling
-
-### Concerns
-1. Race condition possible under high load
-   - Consider adding database lock
-   
-2. Missing audit log for cancellations
-   - Add event emission for tracking
-
-### Recommendation
-Address concern 1 before merge. Concern 2 can be follow-up.
-```
-
----
-
-## When to Use Subagents
-
-| Task | Agent |
-|------|-------|
-| Find code locations | `explorer` |
-| Debug failing test | `debugger` |
-| Review before merge | `reviewer` |
-| Complex investigation | `explorer` + `debugger` |
-
----
-
-## Common Mistakes to Avoid
-
-1. **Skipping Explore**: Leads to wrong assumptions
-2. **No Plan**: Results in scattered changes
-3. **Large Commits**: Hard to review and revert
-4. **No Verification**: Misses regressions
-5. **Ignoring Types**: Causes runtime errors
-6. **Copying Legacy Patterns**: Perpetuates bad practices
-
----
-
-## Definition of Done for doc usage
-
-- [ ] Explore → Plan → Code → Verify flow was followed and documented in the PR notes.
-- [ ] Repository structure was verified before using path-based examples (`app/`, `tests/`, `alembic/`).
-- [ ] Search/file discovery commands use `rg`-based patterns (no legacy recursive grep/find examples).
-- [ ] Verification commands were run as applicable (`make test`, `make lint`, `make typecheck`) or limitations were documented.
-- [ ] Path-specific snippets were adapted to real repository structure (or explicitly treated as pseudocode).
-- [ ] Final PR summary includes risks, tests/checks, and any unresolved assumptions.
+- Does the diff only contain relevant Latexed changes?
+- Are public API contracts preserved or documented?
+- Are user content and generated artifacts handled safely?
+- Are tests/checks appropriate for changed files?
+- Are environment limitations explicit and not hidden?
+- Did you avoid introducing stale booking-domain examples?

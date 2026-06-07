@@ -554,11 +554,13 @@
         display: flex;
         flex-direction: column;
         min-width: 0;
+        min-height: 0;
         border-left: 1px solid var(--border-color);
     }
 
     .preview-container {
         flex: 1;
+        min-height: 0;
         overflow: auto;
         padding: 30px;
         background: #ffffff;
@@ -575,6 +577,95 @@
         font-family: 'Computer Modern', 'Latin Modern Math', 'STIX Two Math', Georgia, serif;
         color: #000;
         line-height: 1.7;
+    }
+
+    .preview-container.pdf-preview-container {
+        padding: 0;
+        display: flex;
+        overflow: hidden;
+        background: #525659;
+    }
+
+    .preview-content.pdf-preview-content {
+        flex: 1;
+        display: flex;
+        max-width: none;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        margin: 0;
+        line-height: normal;
+        background: #525659;
+    }
+
+    .pdf-preview-frame,
+    .pdf-preview-shell {
+        flex: 1;
+        width: 100%;
+        height: 100%;
+        min-height: 0;
+        border: 0;
+        background: #525659;
+        border-radius: 0;
+    }
+
+    .pdf-preview-shell {
+        display: flex;
+        flex-direction: column;
+    }
+
+    .pdf-preview-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        background: #2f3136;
+        color: #f8fafc;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+        font-size: 12px;
+    }
+
+    .pdf-preview-btn {
+        border: 1px solid rgba(255, 255, 255, 0.16);
+        background: rgba(255, 255, 255, 0.08);
+        color: #f8fafc;
+        border-radius: 6px;
+        padding: 5px 9px;
+        cursor: pointer;
+        font: inherit;
+    }
+
+    .pdf-preview-btn:hover,
+    .pdf-preview-btn.active {
+        background: rgba(255, 255, 255, 0.18);
+    }
+
+    .pdf-preview-page-info,
+    .pdf-preview-zoom {
+        min-width: 72px;
+        text-align: center;
+        color: #e2e8f0;
+    }
+
+    .pdf-preview-spacer {
+        flex: 1;
+    }
+
+    .pdf-preview-stage {
+        flex: 1;
+        min-height: 0;
+        overflow: auto;
+        display: flex;
+        align-items: flex-start;
+        justify-content: center;
+        padding: 16px;
+        background: #525659;
+    }
+
+    .pdf-preview-canvas {
+        display: block;
+        background: white;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
     }
 
     .preview-content h1 {
@@ -915,7 +1006,51 @@
         .generation-grid {
             grid-template-columns: 1fr;
         }
+
+        .document-insight-grid {
+            grid-template-columns: 1fr;
+        }
     }
+
+    .document-insight {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .document-insight-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .document-insight-card {
+        padding: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background: var(--bg-tertiary);
+    }
+
+    .document-insight-card strong {
+        display: block;
+        margin-top: 4px;
+        color: var(--text-primary);
+        font-size: 15px;
+    }
+
+    .document-insight-card span {
+        color: var(--text-muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    #documentInsightPrompt {
+        min-height: 180px;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        white-space: pre-wrap;
+    }
+
 
     /* Context Menu */
     .context-menu {
