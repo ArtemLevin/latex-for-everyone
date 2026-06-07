@@ -2124,6 +2124,16 @@ $$E = mc^2$$
             stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
         }
+        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+    }
+
+    async function regenerateWithLatexMode(mode) {
+        const modeInput = document.getElementById('generationLatexMode');
+        if (modeInput) modeInput.value = mode;
+        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
+        request.fields = request.fields || {};
+        request.fields.latex_mode = mode;
+        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
     }
 
     async function generateLatexFromAi() {
