@@ -138,18 +138,16 @@ Latexed уже имеет рабочий вертикальный срез он�
 ### Этап 5 — AI generation v2
 
 **Приоритет:** P1
-**Статус:** начат: generation уже использует body-only contract, фиксированную преамбулу, language/source-mode поля, safe/rich LaTeX mode, deterministic Safe-mode simplification, failure-corpus regression tests, validation-gated repair, compile-check/auto-repair, pre-compile body sanitizer и validator баланса окружений/math delimiters/braces/math-mode commands перед возвратом результата.
+**Статус:** начат: generation уже использует body-only contract, фиксированную преамбулу, language/source-mode поля, safe/rich LaTeX mode, deterministic Safe-mode simplification, failure-corpus regression tests, persisted generation history endpoints, validation-gated repair, compile-check/auto-repair, pre-compile body sanitizer и validator баланса окружений/math delimiters/braces/math-mode commands перед возвратом результата.
 
 **Цель:** сделать AI generation воспроизводимой, управляемой и удобной.
 
 **Работы:**
 
-- Добавить persisted `generation_history`:
-  - `project_id`, provider, model, prompt hash, prompt preview, raw output/latex code policy, validation result, status, timestamps.
-- Добавить endpoints:
-  - `GET /api/generation/history/project/{project_id}`;
-  - `GET /api/generation/history/item/{history_id}`;
-  - при необходимости `POST /api/generation/history/{history_id}/restore`.
+- Расширить persisted `generation_history` (базовая таблица и GET endpoints добавлены):
+  - добавить UI для просмотра истории в проекте;
+  - добавить restore-flow при необходимости `POST /api/generation/history/{history_id}/restore`;
+  - определить политику хранения полного generated `.tex` vs bounded previews.
 - Добавить `generate-to-project` endpoint для атомарной записи generated LaTeX в файл проекта на backend.
 - Вынести provider/model presets в backend endpoint/config, чтобы frontend не был source of truth.
 - Вынести prompt templates в конфигурационные файлы или отдельный модуль с тестируемыми template parts.
@@ -185,7 +183,9 @@ Latexed уже имеет рабочий вертикальный срез он�
 
 **Цель:** подготовить сервис к эксплуатации и диагностике.
 
-**Работы:**
+## 6. Definition of Done для этапов
+
+Для каждого этапа:
 
 - Добавить readiness endpoint или расширенный health report для:
   - DB connectivity;

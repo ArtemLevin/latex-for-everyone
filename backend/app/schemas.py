@@ -213,6 +213,26 @@ class GenerationPresetResponse(BaseModel):
     defaults: dict[str, Any]
 
 
+class GenerationHistoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    provider: str
+    model: Optional[str] = None
+    status: str
+    prompt_hash: str
+    prompt_preview: Optional[str] = None
+    raw_output_hash: Optional[str] = None
+    latex_code_hash: Optional[str] = None
+    latex_code_preview: Optional[str] = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+    validation: Optional[dict[str, Any]] = None
+    compile_check: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+    created_at: datetime
+
+
 # Snapshot Schemas
 class SnapshotCreate(BaseModel):
     project_id: Optional[str] = None

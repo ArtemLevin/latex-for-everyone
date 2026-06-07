@@ -392,7 +392,8 @@ Use this checklist to verify the complete generation path manually after the bac
 10. Click **Проверить .tex** if you want to validate the current editor content again.
 11. Compile with **Компиляция** or `Ctrl+Enter`.
 12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, escapes common text-only special characters, deterministically simplifies risky Safe-mode fragments, validates environment/math/braces/math-mode balance and safe-mode restrictions, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
-13. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
+13. If a `project_id` was sent, inspect generation history through `/api/generation/history/project/{project_id}`; history stores bounded prompt/LaTeX previews plus hashes/metadata, not full raw provider output.
+14. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands
 
@@ -406,6 +407,7 @@ make clean-artifacts   # optional: remove local generated PDFs/exports in defaul
 curl -fsS -X POST http://localhost:8000/api/generation/prompt \
   -H 'Content-Type: application/json' \
   --data '{"provider":"ollama","model":"gemma4","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only","latex_mode":"safe"},"materials":"Решить уравнение 2^x = 8."}'
+curl -fsS http://localhost:8000/api/generation/history/project/YOUR_PROJECT_ID
 ```
 
 If generation fails, check provider status first, then inspect backend logs for provider errors, timeout messages, or missing API key/model configuration.

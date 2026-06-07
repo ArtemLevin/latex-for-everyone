@@ -4,19 +4,22 @@ import logging
 import shutil
 import time
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from sqlalchemy.orm import Session
 
 from app.schemas import (
     GenerationPresetResponse,
     GenerationPromptResponse,
     GenerationProviderStatusResponse,
     GenerationRequest,
+    GenerationHistoryResponse,
     GenerationCompileCheckResponse,
     GenerationResultResponse,
     GenerationValidationRequest,
     GenerationValidationResponse,
 )
 from app.config import settings
+from app.database import get_db
 from app.services.ai_generation import AIGenerationError, AIGenerationService, extract_latex_code
 from app.services.latex_document_builder import build_latex_document
 from app.services.latex_compiler import LatexCompiler
@@ -25,6 +28,7 @@ from app.services.latex_sanitizer import (
     sanitize_generated_latex_body_for_safe_mode,
 )
 from app.services.latex_validator import validate_latex_document
+from app.services.generation_history_service import GenerationHistoryNotFoundError, GenerationHistoryService
 from app.services.prompt_builder import build_latex_generation_prompt, build_latex_repair_prompt
 
 logger = logging.getLogger(__name__)
@@ -33,6 +37,7 @@ router = APIRouter()
 
 ai_generator = AIGenerationService()
 generation_compiler = LatexCompiler()
+generation_history_service = GenerationHistoryService()
 rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
 
 PRESETS: list[GenerationPresetResponse] = [
@@ -231,6 +236,55 @@ def build_generation_prompt_response(request: GenerationRequest) -> GenerationPr
     )
 
 
+def record_generation_failure(
+    db: Session,
+    *,
+    generation_request: GenerationRequest,
+    provider: str | None,
+    model: str | None,
+    prompt: str,
+    error: str,
+) -> None:
+    generation_history_service.create_failure(
+        db,
+        project_id=generation_request.project_id,
+        provider=provider or generation_request.provider or "default",
+        model=model or generation_request.model,
+        fields=generation_request.fields,
+        prompt_hash=text_digest(prompt),
+        prompt_preview=text_preview(prompt),
+        error=error,
+    )
+
+
+def record_generation_success(
+    db: Session,
+    *,
+    generation_request: GenerationRequest,
+    provider: str,
+    model: str,
+    prompt: str,
+    raw_output: str,
+    latex_code: str,
+    validation: dict[str, object],
+    compile_check: GenerationCompileCheckResponse,
+) -> None:
+    generation_history_service.create_success(
+        db,
+        project_id=generation_request.project_id,
+        provider=provider,
+        model=model,
+        fields=generation_request.fields,
+        prompt_hash=text_digest(prompt),
+        prompt_preview=text_preview(prompt),
+        raw_output_hash=text_digest(raw_output),
+        latex_code_hash=text_digest(latex_code),
+        latex_code_preview=text_preview(latex_code),
+        validation=validation,
+        compile_check=compile_check,
+    )
+
+
 @router.get("/presets", response_model=list[GenerationPresetResponse])
 async def list_generation_presets():
     return PRESETS
@@ -247,6 +301,24 @@ async def preview_generation_prompt(request: Request, generation_request: Genera
         len(generation_request.materials),
     )
     return build_generation_prompt_response(generation_request)
+
+
+@router.get("/history/project/{project_id}", response_model=list[GenerationHistoryResponse])
+async def list_generation_history_for_project(
+    project_id: str,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+):
+    return generation_history_service.list_project_history(db, project_id, skip=skip, limit=limit)
+
+
+@router.get("/history/item/{history_id}", response_model=GenerationHistoryResponse)
+async def get_generation_history_item(history_id: str, db: Session = Depends(get_db)):
+    try:
+        return generation_history_service.get_history_item(db, history_id)
+    except GenerationHistoryNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 @router.get("/providers/status", response_model=GenerationProviderStatusResponse)
@@ -296,7 +368,7 @@ async def validate_generated_latex(request: Request, validation_request: Generat
 
 
 @router.post("/generate", response_model=GenerationResultResponse)
-async def generate_latex(request: Request, generation_request: GenerationRequest):
+async def generate_latex(request: Request, generation_request: GenerationRequest, db: Session = Depends(get_db)):
     enforce_ai_rate_limit(request)
     logger.info(
         "ai generation requested provider=%s model=%s topic=%s materials_chars=%s",
@@ -324,7 +396,16 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
             (time.perf_counter() - started_at) * 1000,
             exc,
         )
-        raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
+        error_detail = provider_error_detail(exc)
+        record_generation_failure(
+            db,
+            generation_request=generation_request,
+            provider=generation_request.provider,
+            model=generation_request.model,
+            prompt=prompt_response.prompt,
+            error=error_detail,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
 
     enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
     latex_body = sanitize_generated_latex_body(extract_latex_code(raw_output))
@@ -348,7 +429,16 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
             (time.perf_counter() - started_at) * 1000,
             exc,
         )
-        raise HTTPException(status_code=exc.status_code, detail=provider_error_detail(exc)) from exc
+        error_detail = provider_error_detail(exc)
+        record_generation_failure(
+            db,
+            generation_request=generation_request,
+            provider=provider,
+            model=model,
+            prompt=prompt_response.prompt,
+            error=error_detail,
+        )
+        raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
 
     logger.info(
         "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s compile_attempted=%s compile_success=%s compile_repaired=%s",
@@ -366,6 +456,18 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
         compile_check.attempted,
         compile_check.success,
         compile_check.repaired,
+    )
+
+    record_generation_success(
+        db,
+        generation_request=generation_request,
+        provider=provider,
+        model=model,
+        prompt=prompt_response.prompt,
+        raw_output=raw_output,
+        latex_code=latex_code,
+        validation=validation,
+        compile_check=compile_check,
     )
 
     return GenerationResultResponse(

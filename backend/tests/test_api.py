@@ -73,9 +73,10 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
-    assert {"projects", "files", "compile_history", "project_snapshots", "alembic_version"}.issubset(tables)
+    assert {"projects", "files", "compile_history", "project_snapshots", "generation_history", "alembic_version"}.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
+    assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
 
 
 def test_health_check():
@@ -1431,6 +1432,99 @@ def test_generation_generate_wraps_provider_body_with_fixed_preamble(monkeypatch
     assert data["raw_output"].startswith("```latex")
     assert data["validation"]["valid"] is True
     assert data["validation"]["warnings"] == []
+
+
+def test_generation_history_records_success_and_supports_project_and_item_routes(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.config import settings
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{History}Generated history body"
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Generation History Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"project_id": project_id, "fields": {"topic": "История генерации"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 200
+    history_response = client.get(f"/api/generation/history/project/{project_id}")
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert len(history) == 1
+    item = history[0]
+    assert item["project_id"] == project_id
+    assert item["provider"] == "ollama"
+    assert item["model"] == "gemma4"
+    assert item["status"] == "success"
+    assert item["fields"]["topic"] == "История генерации"
+    assert item["prompt_hash"]
+    assert item["raw_output_hash"]
+    assert item["latex_code_hash"]
+    assert item["latex_code_preview"].startswith(r"\documentclass")
+    assert item["compile_check"]["skipped_reason"] == "AI compile check is disabled."
+    assert item["validation"]["valid"] is True
+    assert "raw_output" not in item
+    assert "prompt" not in item
+
+    item_response = client.get(f"/api/generation/history/item/{item['id']}")
+    assert item_response.status_code == 200
+    assert item_response.json()["id"] == item["id"]
+
+
+def test_generation_history_records_provider_failure(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError("Provider unavailable", status_code=503)
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Generation Failure History Project", "template": "article"},
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"project_id": project_id, "fields": {"topic": "Ошибка"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 503
+    history_response = client.get(f"/api/generation/history/project/{project_id}")
+    assert history_response.status_code == 200
+    history = history_response.json()
+    assert len(history) == 1
+    item = history[0]
+    assert item["status"] == "error"
+    assert item["error"] == "AI provider request failed. Check backend logs or provider configuration."
+    assert item["prompt_hash"]
+    assert item["raw_output_hash"] is None
+    assert item["latex_code_hash"] is None
+    assert item["compile_check"] is None
+
+
+def test_generation_history_item_not_found():
+    response = client.get("/api/generation/history/item/missing")
+
+    assert response.status_code == 404
+    assert "Generation history item missing not found" in response.json()["detail"]
 
 
 def test_generation_generate_strips_accidental_model_preamble(monkeypatch):
