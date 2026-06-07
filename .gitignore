@@ -131,3 +131,19 @@ dmypy.json
 # OS files
 .DS_Store
 Thumbs.db
+
+# Latexed runtime artifacts
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+backend/*.db
+backend/*.db-journal
+backend/*.sqlite
+backend/*.sqlite3
+latexed.db
+test_latexed.db
+tmp/latexed_compiles/
+tmp/latexed_uploads/
+backend/latexed_compiles/
+backend/latexed_uploads/

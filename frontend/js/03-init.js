@@ -91,6 +91,7 @@
             if (e.key === 'Escape') {
                 closeModal('templateModal');
                 closeModal('generationModal');
+                closeModal('documentInsightModal');
                 closeModal('settingsModal');
                 document.getElementById('commandPalette').classList.remove('active');
                 document.getElementById('contextMenu').classList.remove('active');

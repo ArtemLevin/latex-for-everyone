@@ -17,7 +17,7 @@ PYTHONPATH_BACKEND := PYTHONPATH=$(BACKEND_DIR)
 BACKEND_URL := http://localhost:$(BACKEND_PORT)
 FRONTEND_URL := http://localhost:$(FRONTEND_PORT)/main.html
 AI_PROVIDER ?= ollama
-AI_MODEL ?= qwen2.5:14b
+AI_MODEL ?= gemma4
 LATEX_COMPILER ?= pdflatex
 
 .DEFAULT_GOAL := help
@@ -65,7 +65,7 @@ health: ## Call the backend health endpoint.
 	@echo
 
 .PHONY: ai-provider-status
-ai-provider-status: ## Check configured AI provider/model: make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:14b.
+ai-provider-status: ## Check configured AI provider/model: make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4.
 	curl -fsS "$(BACKEND_URL)/api/generation/providers/status?provider=$(AI_PROVIDER)&model=$(AI_MODEL)"
 	@echo
 
@@ -131,6 +131,10 @@ docker-logs: ## Follow docker compose logs.
 clean: ## Remove local test databases and Python/test caches.
 	rm -f $(BACKEND_DIR)/latexed.db $(BACKEND_DIR)/test_latexed.db $(ROOT_DIR)/latexed.db $(ROOT_DIR)/test_latexed.db
 	find $(ROOT_DIR) -type d \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +
+
+.PHONY: clean-artifacts
+clean-artifacts: ## Remove local compile/export artifacts from the default /tmp Latexed directories.
+	rm -rf /tmp/latexed_compiles /tmp/latexed_uploads
 
 .PHONY: clean-venv
 clean-venv: ## Remove the uv virtual environment.
