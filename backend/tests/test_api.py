@@ -883,8 +883,19 @@ def test_frontend_generation_ui_contract():
     assert "token_usage" in content
     assert "describeTokenUsage" in content
     assert "Токены за генерацию" in content
+    assert "startGenerationFunWait" in content
+    assert "TeX-единорога" in content
+    assert "Разогреваю LaTeX-котёл" in content
     assert "applyGeneratedLatex" in content
     assert "createFileWithContent" in content
+    assert 'id="documentInsightModal"' in content
+    assert 'id="documentInsightPrompt"' in content
+    assert "contextAction('inspect')" in content
+    assert "inspectContextDocument" in content
+    assert "loadLatestGenerationInsight" in content
+    assert "AI-прогоны" in content
+    assert "Токены всего" in content
+    assert "generationMeta" in content
     assert "'/generation/validate'" in content
     assert "generation/providers/status" in content
     assert "'/generation/generate'" in content

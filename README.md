@@ -172,7 +172,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 5. autosaves the current file with `PUT /api/files/{file_id}`;
 6. waits for an explicit user action before compiling; the **Компиляция** button or `Ctrl+Enter` calls `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
-8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate` (default `latex_mode=safe` for maximum compile success), receives backend-wrapped `latex_code` plus a best-effort `compile_check` result and estimated input/output token usage for the valid generation, pauses on failed validation/compile-check with repair/retry actions, and only inserts the document automatically after checks pass.
+8. opens the AI generation dialog with a playful rotating wait state, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate` (default `latex_mode=safe` for maximum compile success), receives backend-wrapped `latex_code` plus a best-effort `compile_check` result and estimated input/output token usage for the valid generation, pauses on failed validation/compile-check with repair/retry actions, and only inserts the document automatically after checks pass. Right-clicking a generated file can open **Исследование AI-документа** with the prompt/preview, AI run count, token totals, provider/model, validation and compile-check metadata.
 
 ### Configuring the API base URL
 
@@ -393,8 +393,9 @@ Use this checklist to verify the complete generation path manually after the bac
 11. Click **Проверить .tex** if you want to validate the current editor content again.
 12. Compile with **Компиляция** or `Ctrl+Enter`.
 13. Confirm the response includes `compile_check` and `token_usage`; `token_usage.input_tokens` and `token_usage.output_tokens` are deterministic estimates for the prompt/repair inputs and provider outputs used to produce one valid пособие. When `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, escapes common text-only special characters, deterministically simplifies risky Safe-mode fragments, validates environment/math/braces/math-mode balance and safe-mode restrictions, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
-14. If a `project_id` was sent, inspect generation history through `/api/generation/history/project/{project_id}`; history stores bounded prompt/LaTeX previews plus hashes/metadata and token totals, not full raw provider output.
-15. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
+14. Right-click the generated file in the file tree and choose **Исследовать AI-документ** to review the prompt (or stored prompt preview), AI run count, token totals, provider/model, validation and compile-check metadata.
+15. If a `project_id` was sent, inspect generation history through `/api/generation/history/project/{project_id}`; history stores bounded prompt/LaTeX previews plus hashes/metadata and token totals, not full raw provider output.
+16. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands
 

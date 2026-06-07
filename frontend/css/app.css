@@ -1006,7 +1006,51 @@
         .generation-grid {
             grid-template-columns: 1fr;
         }
+
+        .document-insight-grid {
+            grid-template-columns: 1fr;
+        }
     }
+
+    .document-insight {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .document-insight-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 10px;
+    }
+
+    .document-insight-card {
+        padding: 12px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-md);
+        background: var(--bg-tertiary);
+    }
+
+    .document-insight-card strong {
+        display: block;
+        margin-top: 4px;
+        color: var(--text-primary);
+        font-size: 15px;
+    }
+
+    .document-insight-card span {
+        color: var(--text-muted);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    #documentInsightPrompt {
+        min-height: 180px;
+        font-family: 'JetBrains Mono', 'Fira Code', monospace;
+        white-space: pre-wrap;
+    }
+
 
     /* Context Menu */
     .context-menu {

@@ -37,6 +37,40 @@
         }
     }
 
+    function startGenerationFunWait() {
+        const messages = [
+            '🧙‍♂️ Разогреваю LaTeX-котёл и приручаю формулы...',
+            '🦄 Запрягаю TeX-единорога: он несёт преамбулу без ошибок...',
+            '🧩 Собираю задачи, ответы и аккуратные блоки в одно пособие...',
+            '🔬 Прогоняю sanity-check: скобки, окружения, math-mode...',
+            '🚀 Почти готово: полирую PDF-магнитные поля и токены...'
+        ];
+        const facts = [
+            'Safe-режим специально упрощает рискованные таблицы и графику.',
+            'Если compile-check споткнётся, backend попробует один repair-прогон.',
+            'Prompt и raw output не пишутся целиком в history — только безопасные превью и хэши.',
+            'Токены считаются отдельно для входа и выхода генерации.',
+            'После успеха PDF не компилируется сам: вы контролируете момент сборки.'
+        ];
+        stopGenerationFunWait();
+        generationFunStep = 0;
+        const renderStep = () => {
+            const index = generationFunStep % messages.length;
+            setGenerationStatus(messages[index]);
+            setGenerationDetails([`Шаг ${generationFunStep + 1}: ${facts[index]}`]);
+            generationFunStep += 1;
+        };
+        renderStep();
+        generationFunTimer = window.setInterval(renderStep, 1800);
+    }
+
+    function stopGenerationFunWait() {
+        if (generationFunTimer) {
+            window.clearInterval(generationFunTimer);
+            generationFunTimer = null;
+        }
+    }
+
     function escapeHtml(value) {
         return String(value)
             .replace(/&/g, '&amp;')
@@ -308,25 +342,55 @@
         return candidate;
     }
 
-    async function createFileWithContent(name, content) {
+    async function createFileWithContent(name, content, generationMeta = null) {
         const filename = uniqueFileName(name);
         if (backendAvailable && currentProject) {
             const file = await apiRequest(`/files/project/${currentProject.id}`, {
                 method: 'POST',
                 body: JSON.stringify({ name: filename, content, is_main: false })
             });
+            if (generationMeta) file.generationMeta = generationMeta;
             files[file.id] = file;
             await switchFile(file.id);
             return file;
         }
 
         const id = 'file_' + Date.now();
-        files[id] = { id, name: filename, content, is_main: false };
+        files[id] = { id, name: filename, content, is_main: false, generationMeta };
         await switchFile(id);
         return files[id];
     }
 
-    async function applyGeneratedLatex(latexCode) {
+    function getGenerationRunCountFromMeta(meta) {
+        const compileCheck = meta?.compile_check || {};
+        if (!compileCheck.repaired) return 1;
+        return 1 + Math.max((compileCheck.attempts || 1) - 1, 1);
+    }
+
+    function buildGenerationMeta(result) {
+        const fields = lastGenerationRequest?.fields || {};
+        const tokenUsage = result.token_usage || {};
+        const meta = {
+            prompt: result.prompt || '',
+            provider: result.provider || 'default',
+            model: result.model || 'default',
+            status: result.status || 'success',
+            topic: fields.topic || '',
+            subject: fields.subject || '',
+            language: fields.language || '',
+            latex_mode: fields.latex_mode || '',
+            content_source_mode: fields.content_source_mode || '',
+            validation: result.validation || null,
+            compile_check: result.compile_check || null,
+            token_usage: tokenUsage,
+            created_at: new Date().toISOString()
+        };
+        meta.ai_runs = getGenerationRunCountFromMeta(meta);
+        meta.total_tokens = tokenUsage.total_tokens ?? ((tokenUsage.input_tokens || 0) + (tokenUsage.output_tokens || 0));
+        return meta;
+    }
+
+    async function applyGeneratedLatex(latexCode, generationMeta = null) {
         const mode = getGenerationInsertMode();
         const currentName = files[currentFileId]?.name || 'текущий файл';
 
@@ -339,6 +403,7 @@
             editor.setValue(latexCode);
             suppressEditorChange = false;
             files[currentFileId].content = latexCode;
+            if (generationMeta) files[currentFileId].generationMeta = generationMeta;
             updateWordCount();
             await saveCurrentFile();
             return true;
@@ -350,12 +415,13 @@
             editor.setValue(`${editor.getValue()}${separator}${latexCode}`);
             suppressEditorChange = false;
             files[currentFileId].content = editor.getValue();
+            if (generationMeta) files[currentFileId].generationMeta = generationMeta;
             updateWordCount();
             await saveCurrentFile();
             return true;
         }
 
-        await createFileWithContent(getGenerationFieldValue('generationFilename'), latexCode);
+        await createFileWithContent(getGenerationFieldValue('generationFilename'), latexCode, generationMeta);
         updateWordCount();
         return true;
     }
@@ -393,7 +459,7 @@
             return;
         }
 
-        const applied = await applyGeneratedLatex(lastGenerationResult.latex_code);
+        const applied = await applyGeneratedLatex(lastGenerationResult.latex_code, buildGenerationMeta(lastGenerationResult));
         if (!applied) return;
 
         closeModal('generationModal');
@@ -412,9 +478,8 @@
         const previousFileId = currentFileId;
         setButtonLoading(loadingButtonId, true, 'Генерация...');
         setGenerationRetryActionsVisible(false);
-        setGenerationStatus('Генерация LaTeX через AI-provider...');
-        setGenerationDetails();
-        document.getElementById('statusText').textContent = 'AI-генерация...';
+        startGenerationFunWait();
+        document.getElementById('statusText').textContent = 'AI-генерация — творим чудо...';
 
         try {
             await saveCurrentFile();
@@ -423,6 +488,7 @@
                 method: 'POST',
                 body: JSON.stringify(request)
             });
+            stopGenerationFunWait();
             lastGenerationResult = result;
             lastGenerationRawOutput = result.raw_output || '';
 
@@ -447,7 +513,7 @@
                 setGenerationStatus(formatValidation(result.validation));
             }
 
-            const applied = await applyGeneratedLatex(result.latex_code);
+            const applied = await applyGeneratedLatex(result.latex_code, buildGenerationMeta(result));
             if (!applied) return;
 
             closeModal('generationModal');
@@ -455,6 +521,7 @@
             document.getElementById('statusText').textContent = 'AI-документ вставлен';
             compileLatex();
         } catch (error) {
+            stopGenerationFunWait();
             if (getGenerationInsertMode() !== 'new' && files[previousFileId]) {
                 currentFileId = previousFileId;
                 suppressEditorChange = true;
@@ -469,8 +536,19 @@
             document.getElementById('statusText').textContent = 'Ошибка AI-генерации';
             showToast(`Ошибка AI-генерации: ${error.message}`, 'error');
         } finally {
+            stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
         }
+        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+    }
+
+    async function regenerateWithLatexMode(mode) {
+        const modeInput = document.getElementById('generationLatexMode');
+        if (modeInput) modeInput.value = mode;
+        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
+        request.fields = request.fields || {};
+        request.fields.latex_mode = mode;
+        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
     }
 
     async function generateLatexFromAi() {

@@ -11,6 +11,8 @@
     let lastGenerationRawOutput = '';
     let lastGenerationRequest = null;
     let lastGenerationResult = null;
+    let generationFunTimer = null;
+    let generationFunStep = 0;
     let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;

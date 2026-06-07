@@ -126,6 +126,120 @@
         }
     }
 
+    // ==================== DOCUMENT INSIGHT ====================
+    function escapeInsightHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#039;');
+    }
+
+    function formatInsightDate(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return '—';
+        return date.toLocaleString('ru-RU');
+    }
+
+    function getInsightTokenUsage(meta) {
+        const tokenUsage = meta?.token_usage || {};
+        const input = tokenUsage.input_tokens ?? meta?.input_tokens ?? 0;
+        const output = tokenUsage.output_tokens ?? meta?.output_tokens ?? 0;
+        const total = tokenUsage.total_tokens ?? meta?.total_tokens ?? (input + output);
+        const source = tokenUsage.source || meta?.token_count_source || 'estimated';
+        return { input, output, total, source };
+    }
+
+    function getInsightAiRuns(meta) {
+        if (meta?.ai_runs) return meta.ai_runs;
+        const compileCheck = meta?.compile_check || {};
+        if (!compileCheck.repaired) return 1;
+        return 1 + Math.max((compileCheck.attempts || 1) - 1, 1);
+    }
+
+    function historyItemToInsightMeta(item) {
+        if (!item) return null;
+        return {
+            prompt: item.prompt_preview || '',
+            prompt_hash: item.prompt_hash || '',
+            provider: item.provider || '—',
+            model: item.model || '—',
+            status: item.status || '—',
+            topic: item.fields?.topic || '',
+            subject: item.fields?.subject || '',
+            language: item.fields?.language || '',
+            latex_mode: item.fields?.latex_mode || '',
+            content_source_mode: item.fields?.content_source_mode || '',
+            validation: item.validation || null,
+            compile_check: item.compile_check || null,
+            input_tokens: item.input_tokens || 0,
+            output_tokens: item.output_tokens || 0,
+            total_tokens: item.total_tokens || 0,
+            token_count_source: item.token_count_source || 'estimated',
+            latex_code_hash: item.latex_code_hash || '',
+            created_at: item.created_at || null,
+            history_id: item.id || ''
+        };
+    }
+
+    async function loadLatestGenerationInsight() {
+        if (!backendAvailable || !currentProject) return null;
+        const history = await apiRequest(`/generation/history/project/${currentProject.id}?limit=1`);
+        return historyItemToInsightMeta(history[0]);
+    }
+
+    function renderDocumentInsight(file, meta, sourceLabel) {
+        const status = document.getElementById('documentInsightStatus');
+        const stats = document.getElementById('documentInsightStats');
+        const promptBox = document.getElementById('documentInsightPrompt');
+        const details = document.getElementById('documentInsightMeta');
+        const tokenUsage = getInsightTokenUsage(meta);
+        const validation = meta?.validation || {};
+        const compileCheck = meta?.compile_check || {};
+        const promptText = meta?.prompt || 'Prompt не найден. Для старых/загруженных файлов доступно только сохранённое превью из generation history.';
+        const aiRuns = getInsightAiRuns(meta);
+
+        status.textContent = meta
+            ? `Исследование «${file.name}»: ${sourceLabel}.`
+            : `Для «${file.name}» нет AI-метаданных в текущей сессии и generation history.`;
+        stats.innerHTML = [
+            ['AI-прогоны', aiRuns],
+            ['Токены всего', tokenUsage.total],
+            ['Вход / выход', `${tokenUsage.input} / ${tokenUsage.output}`],
+            ['Источник', tokenUsage.source === 'estimated' ? 'оценка' : tokenUsage.source]
+        ].map(([label, value]) => `<div class="document-insight-card"><span>${escapeInsightHtml(label)}</span><strong>${escapeInsightHtml(value)}</strong></div>`).join('');
+        promptBox.value = promptText;
+
+        const rows = [];
+        rows.push(`Провайдер/модель: ${meta?.provider || '—'} / ${meta?.model || '—'}`);
+        rows.push(`Тема: ${meta?.topic || '—'}; предмет: ${meta?.subject || '—'}; язык: ${meta?.language || '—'}`);
+        rows.push(`Режимы: content_source=${meta?.content_source_mode || '—'}, latex_mode=${meta?.latex_mode || '—'}`);
+        rows.push(`Validation: ${validation.valid === undefined ? 'нет данных' : (validation.valid ? 'ok' : 'ошибки')}; warnings=${(validation.warnings || []).length}; errors=${(validation.errors || []).length}`);
+        rows.push(`Compile-check: ${compileCheck.attempted ? (compileCheck.success ? 'success' : 'failed') : (compileCheck.skipped_reason || 'не запускался')}; repaired=${compileCheck.repaired ? 'yes' : 'no'}; attempts=${compileCheck.attempts || 0}`);
+        rows.push(`Создано: ${formatInsightDate(meta?.created_at)}; prompt_hash=${meta?.prompt_hash || '—'}; latex_hash=${meta?.latex_code_hash || '—'}`);
+        details.innerHTML = `<ul>${rows.map(row => `<li>${escapeInsightHtml(row)}</li>`).join('')}</ul>`;
+    }
+
+    async function inspectContextDocument() {
+        const file = files[contextMenuFileId];
+        if (!file) return;
+        document.getElementById('documentInsightModal').classList.add('active');
+        document.getElementById('documentInsightStatus').textContent = `Ищу AI-следы для «${file.name}»...`;
+        document.getElementById('documentInsightStats').innerHTML = '';
+        document.getElementById('documentInsightPrompt').value = '';
+        document.getElementById('documentInsightMeta').innerHTML = '';
+
+        try {
+            const meta = file.generationMeta || await loadLatestGenerationInsight();
+            renderDocumentInsight(file, meta, file.generationMeta ? 'метаданные текущей сессии' : 'последняя запись generation history проекта');
+        } catch (error) {
+            renderDocumentInsight(file, file.generationMeta || null, 'локальные метаданные');
+            showToast(`Не удалось загрузить generation history: ${error.message}`, 'error');
+        }
+    }
+
     // ==================== CONTEXT MENU ====================
     function showContextMenu(e, id) {
         e.preventDefault();
@@ -140,6 +254,9 @@
         document.getElementById('contextMenu').classList.remove('active');
         if (!contextMenuFileId) return;
         switch (action) {
+            case 'inspect':
+                inspectContextDocument();
+                break;
             case 'rename':
                 renameFile(contextMenuFileId);
                 break;

@@ -664,8 +664,38 @@
     </div>
 </div>
 
+<!-- Document Insight Modal -->
+<div class="modal-overlay" id="documentInsightModal">
+    <div class="modal modal-wide">
+        <div class="modal-header">
+            <span class="modal-title">Исследование AI-документа</span>
+            <button class="modal-close" onclick="closeModal('documentInsightModal')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
+        </div>
+        <div class="modal-body document-insight">
+            <div id="documentInsightStatus" class="generation-status">Выберите AI-документ через правый клик.</div>
+            <div id="documentInsightStats" class="document-insight-grid"></div>
+            <div class="generation-field full">
+                <label for="documentInsightPrompt">Использованный prompt / сохранённое превью</label>
+                <textarea id="documentInsightPrompt" readonly placeholder="Prompt появится здесь, если документ был создан через AI в текущей сессии или есть запись generation history."></textarea>
+            </div>
+            <div id="documentInsightMeta" class="generation-details"></div>
+        </div>
+    </div>
+</div>
+
 <!-- Context Menu -->
 <div class="context-menu" id="contextMenu">
+    <div class="context-item" onclick="contextAction('inspect')">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+        </svg>
+        Исследовать AI-документ
+    </div>
+    <div class="context-divider"></div>
     <div class="context-item" onclick="contextAction('rename')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
