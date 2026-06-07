@@ -18,6 +18,14 @@ BODY_FORBIDDEN_LATEX_PATTERNS = {
     r"\\(?:geometry|definecolor|usetikzlibrary|pgfplotsset)\b": "Тело документа не должно менять преамбулу, geometry, colors или библиотеки.",
 }
 
+SAFE_MODE_FORBIDDEN_BODY_PATTERNS = {
+    r"\\begin\{tikzpicture\}": "Safe LaTeX mode forbids tikzpicture; замените рисунок текстовым объяснением или простой формулой.",
+    r"\\begin\{axis\}": "Safe LaTeX mode forbids pgfplots axis; замените график текстовым объяснением или таблицей.",
+    r"\\addplot\b": "Safe LaTeX mode forbids pgfplots \\addplot; замените график текстовым объяснением.",
+    r"\\begin\{longtable\}": "Safe LaTeX mode forbids longtable; используйте простой tabularx или список.",
+    r"\\includegraphics\b": "Safe LaTeX mode forbids \\includegraphics; внешние изображения не поддерживаются в AI-body.",
+}
+
 REQUIRED_LATEX_PACKAGES = [
     "fontenc",
     "inputenc",
@@ -71,7 +79,7 @@ def _append_math_delimiter_errors(content: str, errors: list[str]) -> None:
         errors.append("Несбалансированные inline math delimiters \\( и \\).")
 
 
-def validate_latex_document(content: str) -> dict[str, object]:
+def validate_latex_document(content: str, *, safe_mode: bool = False) -> dict[str, object]:
     """Perform fast structural validation before inserting or compiling generated LaTeX."""
     errors: list[str] = []
     warnings: list[str] = []
@@ -108,6 +116,11 @@ def validate_latex_document(content: str) -> dict[str, object]:
     for pattern, message in BODY_FORBIDDEN_LATEX_PATTERNS.items():
         if re.search(pattern, body):
             errors.append(message)
+
+    if safe_mode:
+        for pattern, message in SAFE_MODE_FORBIDDEN_BODY_PATTERNS.items():
+            if re.search(pattern, body):
+                errors.append(message)
 
     _append_environment_balance_errors(stripped, errors)
     _append_math_delimiter_errors(body, errors)

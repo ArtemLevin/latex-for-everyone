@@ -116,12 +116,13 @@ async def compile_check_and_repair(
     raw_output: str,
     provider: str,
     model: str,
+    safe_mode: bool,
 ) -> tuple[str, str, str, dict[str, object], GenerationCompileCheckResponse]:
     """Compile-check generated LaTeX and ask the provider for one bounded repair when needed."""
     latex_body = sanitize_generated_latex_body(latex_body)
     latex_code = build_latex_document(latex_body)
     enforce_text_limit("latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
-    validation = validate_latex_document(latex_code)
+    validation = validate_latex_document(latex_code, safe_mode=safe_mode)
 
     compile_check = GenerationCompileCheckResponse()
     if not settings.AI_COMPILE_CHECK_ENABLED:
@@ -137,21 +138,26 @@ async def compile_check_and_repair(
 
     for attempt in range(max_attempts + 1):
         compile_check.attempts = attempt + 1
-        compile_result = generation_compiler.compile(latex_code, {}, "main.tex")
-        if compile_result.status == "success":
-            compile_check.success = True
-            compile_check.error = None
-            return latex_body, raw_output, latex_code, validation, compile_check
+        validation_errors = list(validation.get("errors") or [])
+        if validation_errors:
+            compile_error = "Validation failed before compile:\n" + "\n".join(validation_errors[:10])
+            compile_check.error = compile_error
+        else:
+            compile_result = generation_compiler.compile(latex_code, {}, "main.tex")
+            if compile_result.status == "success":
+                compile_check.success = True
+                compile_check.error = None
+                return latex_body, raw_output, latex_code, validation, compile_check
+            compile_error = compile_result.error or compile_result.output or "Compilation failed without details."
+            compile_check.error = compile_error
 
-        compile_error = compile_result.error or compile_result.output or "Compilation failed without details."
-        compile_check.error = compile_error
         if attempt >= max_attempts:
             return latex_body, raw_output, latex_code, validation, compile_check
 
         repair_prompt = build_latex_repair_prompt(
             body=latex_body,
             compiler_error=compile_error,
-            validation_errors=list(validation.get("errors") or []),
+            validation_errors=validation_errors,
         )
         enforce_text_limit("repair_prompt", repair_prompt, settings.AI_MAX_PROMPT_CHARS)
         logger.info(
@@ -173,7 +179,7 @@ async def compile_check_and_repair(
         enforce_text_limit("repair_latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
         latex_code = build_latex_document(latex_body)
         enforce_text_limit("repair_latex_code", latex_code, settings.AI_MAX_RAW_OUTPUT_CHARS)
-        validation = validate_latex_document(latex_code)
+        validation = validate_latex_document(latex_code, safe_mode=safe_mode)
         compile_check.repaired = True
 
     return latex_body, raw_output, latex_code, validation, compile_check
@@ -318,6 +324,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
             raw_output=raw_output,
             provider=provider,
             model=model,
+            safe_mode=generation_request.fields.latex_mode == "safe",
         )
     except AIGenerationError as exc:
         logger.warning(

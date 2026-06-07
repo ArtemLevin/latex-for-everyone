@@ -1102,7 +1102,9 @@ def test_generation_prompt_preview_includes_fields_and_materials():
     assert "Показательные неравенства" in data["prompt"]
     assert "Михаил Романов" in data["prompt"]
     assert "Язык пособия: русский" in data["prompt"]
+    assert "Режим LaTeX-компилируемости: safe" in data["prompt"]
     assert "ЯЗЫК ДОКУМЕНТА" in data["prompt"]
+    assert "РЕЖИМ LATEX: safe" in data["prompt"]
     assert "Режим источника содержания: materials_only" in data["prompt"]
     assert "строго только по материалам пользователя" in data["prompt"]
     assert "Решить неравенство 2^x > 8." in data["prompt"]
@@ -1129,6 +1131,7 @@ def test_generation_prompt_allows_ai_creative_source_mode_without_materials_warn
     assert data["warnings"] == []
     assert "Язык пособия: английский" in data["prompt"]
     assert "Режим источника содержания: ai_creative" in data["prompt"]
+    assert "Режим LaTeX-компилируемости: safe" in data["prompt"]
     assert "разрешено генерировать содержание от себя" in data["prompt"]
     assert "Разрешено самостоятельно сгенерировать содержание" in data["prompt"]
 
@@ -1377,7 +1380,7 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
         if len(prompts) == 1:
             return (
                 "```latex\n"
-                r"\section{Broken}\begin{infoblock}{Важно}Нет закрытия"
+                r"\section{Broken}Компилируемый body, но компилятор вернул ошибку."
                 "\n```",
                 "ollama",
                 "gemma4",
@@ -1393,7 +1396,7 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
     def fake_compile(main_content, files, main_filename="main.tex"):
         compile_inputs.append(main_content)
         if len(compile_inputs) == 1:
-            return LatexCompileResult(status="error", error=r"! LaTeX Error: \begin{infoblock} ended by \end{document}.")
+            return LatexCompileResult(status="error", error="Compiler boom")
         return LatexCompileResult(status="success", output="OK", compile_time="0.01s", pdf_url="/api/compile/download/test.pdf")
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
@@ -1411,7 +1414,7 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
     data = response.json()
     assert len(prompts) == 2
     assert "исправляешь LaTeX BODY" in prompts[1]
-    assert "ended by" in prompts[1]
+    assert "Compiler boom" in prompts[1]
     assert len(compile_inputs) == 2
     assert "Broken" in compile_inputs[0]
     assert "Fixed" in compile_inputs[1]
@@ -1425,6 +1428,58 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
         "skipped_reason": None,
         "error": None,
     }
+
+
+def test_generation_generate_repairs_safe_mode_validation_before_compile(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.config import settings
+    from app.schemas import LatexCompileResult
+
+    prompts = []
+    compile_inputs = []
+
+    async def fake_generate(prompt, provider, model):
+        prompts.append(prompt)
+        if len(prompts) == 1:
+            return (
+                "```latex\n"
+                r"\section{Risky}\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
+                "\n```",
+                "ollama",
+                "gemma4",
+            )
+        return (
+            "```latex\n"
+            r"\section{Safe}График заменён текстовым объяснением."
+            "\n```",
+            "ollama",
+            "gemma4",
+        )
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        compile_inputs.append(main_content)
+        return LatexCompileResult(status="success", output="OK", compile_time="0.01s")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
+    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
+    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Safe mode", "latex_mode": "safe"}, "materials": "Сделать пособие."},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert len(prompts) == 2
+    assert "Safe LaTeX mode forbids tikzpicture" in prompts[1]
+    assert len(compile_inputs) == 1
+    assert "Safe" in compile_inputs[0]
+    assert "tikzpicture" not in data["latex_code"]
+    assert data["compile_check"]["success"] is True
+    assert data["compile_check"]["repaired"] is True
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):

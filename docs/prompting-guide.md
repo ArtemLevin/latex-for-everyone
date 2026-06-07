@@ -128,7 +128,7 @@ Update AI generation behavior while preserving:
 - provider error sanitization;
 - structural LaTeX validation;
 - backend wrapping of model output with the fixed Latexed preamble;
-- backend body sanitization, environment/math balance validation, compile-check and bounded automatic repair attempts for generated LaTeX when `pdflatex` is available;
+- backend body sanitization, safe/rich LaTeX mode rules, environment/math balance validation, compile-check and bounded automatic repair attempts for generated LaTeX when `pdflatex` is available;
 - prompt instructions that tell the model to return only document body content, not `\documentclass`, `\usepackage`, `\begin{document}`, or `\end{document}`;
 - safe logging with hashes/lengths instead of full prompts.
 Update frontend insertion/status UI if response shape changes.

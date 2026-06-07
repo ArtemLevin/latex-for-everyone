@@ -138,7 +138,7 @@ Latexed уже имеет рабочий вертикальный срез он�
 ### Этап 5 — AI generation v2
 
 **Приоритет:** P1
-**Статус:** начат: generation уже использует body-only contract, фиксированную преамбулу, language/source-mode поля, compile-check/auto-repair, pre-compile body sanitizer и validator баланса окружений/math delimiters перед возвратом результата.
+**Статус:** начат: generation уже использует body-only contract, фиксированную преамбулу, language/source-mode поля, safe/rich LaTeX mode, validation-gated repair, compile-check/auto-repair, pre-compile body sanitizer и validator баланса окружений/math delimiters перед возвратом результата.
 
 **Цель:** сделать AI generation воспроизводимой, управляемой и удобной.
 

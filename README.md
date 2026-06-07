@@ -172,7 +172,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 5. autosaves the current file with `PUT /api/files/{file_id}`;
 6. waits for an explicit user action before compiling; the **Компиляция** button or `Ctrl+Enter` calls `POST /api/compile/` and embeds returned PDFs with `/api/compile/download/{filename}`;
 7. exports through `/api/export/pdf`, `/api/export/html`, and `/api/export/tex` when the backend is online;
-8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate`, receives backend-wrapped `latex_code` plus a best-effort `compile_check` result, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
+8. opens the AI generation dialog, can check the selected AI provider/model, sends prompt fields to `/api/generation/generate` (default `latex_mode=safe` for maximum compile success), receives backend-wrapped `latex_code` plus a best-effort `compile_check` result, lets the user choose whether to create a new `.tex`, replace the active file, or append to it, then saves and starts compilation.
 
 ### Configuring the API base URL
 
@@ -390,7 +390,7 @@ Use this checklist to verify the complete generation path manually after the bac
 9. Confirm generated LaTeX appears in the selected target and begins with `\documentclass`; the backend now wraps the model's body-only answer with the fixed Latexed preamble (Russian/T2A, math, tables, TikZ/pgfplots, typography, blocks, and hyperref/tcolorbox packages).
 10. Click **Проверить .tex** if you want to validate the current editor content again.
 11. Compile with **Компиляция** or `Ctrl+Enter`.
-12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, validates environment/math balance, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
+12. Confirm the response includes `compile_check`; when `pdflatex` is available, the backend normalizes common model LaTeX body mistakes, validates environment/math balance and safe-mode restrictions, attempts to compile generated LaTeX and performs one automatic repair attempt before returning the final code. Confirm the PDF preview loads after insertion, or review the compile error panel if LaTeX still needs correction.
 13. Exercise exports through **Экспорт** → PDF, HTML, and `.tex` archive.
 
 ### API-only smoke commands
