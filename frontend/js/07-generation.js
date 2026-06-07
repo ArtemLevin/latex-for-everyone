@@ -50,11 +50,11 @@
         const provider = getGenerationFieldValue('generationProvider');
         const modelInput = document.getElementById('generationModel');
         if (!modelInput) return;
-        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'qwen2.5:14b')) {
+        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'gemma4')) {
             modelInput.value = 'gpt-4o-mini';
         }
         if (provider === 'ollama' && (!modelInput.value || modelInput.value === 'gpt-4o-mini')) {
-            modelInput.value = 'qwen2.5:14b';
+            modelInput.value = 'gemma4';
         }
     }
 
@@ -62,6 +62,7 @@
         const modal = document.getElementById('generationModal');
         modal.classList.add('active');
         setGenerationDetails();
+        setGenerationRetryActionsVisible(false);
 
         if (backendAvailable) {
             try {
@@ -80,6 +81,9 @@
         if (!preset || !preset.defaults) return;
         const mapping = {
             level: 'generationLevel',
+            language: 'generationLanguage',
+            content_source_mode: 'generationContentSourceMode',
+            latex_mode: 'generationLatexMode',
             alpha_code: 'generationAlpha',
             beta_code: 'generationBeta',
             gamma_code: 'generationGamma',
@@ -103,6 +107,9 @@
             project_id: currentProject?.id || null,
             fields: {
                 level: getGenerationFieldValue('generationLevel') || 'ЕГЭ',
+                language: getGenerationFieldValue('generationLanguage') || 'русский',
+                content_source_mode: getGenerationFieldValue('generationContentSourceMode') || 'materials_only',
+                latex_mode: getGenerationFieldValue('generationLatexMode') || 'safe',
                 alpha_code: parseInt(getGenerationFieldValue('generationAlpha') || '1', 10),
                 beta_code: parseInt(getGenerationFieldValue('generationBeta') || '1', 10),
                 gamma_code: parseInt(getGenerationFieldValue('generationGamma') || '4', 10),
@@ -149,6 +156,67 @@
         const errors = validation.errors?.length ? ` Ошибки: ${validation.errors.join(' ')}` : '';
         const warnings = validation.warnings?.length ? ` Предупреждения: ${validation.warnings.join(' ')}` : '';
         return `${validation.valid ? 'LaTeX прошел структурную проверку.' : 'LaTeX не прошел структурную проверку.'}${errors}${warnings}`;
+    }
+
+    function setGenerationRetryActionsVisible(visible, allowInsert = false) {
+        ['retryGenerationBtn', 'regenerateSafeBtn', 'regenerateRichBtn'].forEach(id => {
+            const element = document.getElementById(id);
+            if (element) element.style.display = visible ? '' : 'none';
+        });
+        const insertButton = document.getElementById('insertLastGeneratedBtn');
+        if (insertButton) insertButton.style.display = visible && allowInsert ? '' : 'none';
+    }
+
+    function cloneGenerationRequest(request) {
+        return JSON.parse(JSON.stringify(request));
+    }
+
+    function describeCompileCheck(compileCheck) {
+        if (!compileCheck) return [];
+        if (compileCheck.skipped_reason) {
+            return [`Compile-check пропущен: ${compileCheck.skipped_reason}`];
+        }
+        if (!compileCheck.attempted) {
+            return ['Compile-check не запускался.'];
+        }
+        const attempts = compileCheck.attempts || 0;
+        if (compileCheck.success) {
+            const repairInfo = compileCheck.repaired ? ' после автоматического repair' : '';
+            return [`Compile-check пройден${repairInfo}. Попыток: ${attempts}.`];
+        }
+        const details = [`Compile-check не пройден. Попыток: ${attempts}.`];
+        if (compileCheck.error) details.push(`Ошибка компиляции: ${compileCheck.error}`);
+        return details;
+    }
+
+    function describeTokenUsage(tokenUsage) {
+        if (!tokenUsage) return [];
+        const input = tokenUsage.input_tokens ?? 0;
+        const output = tokenUsage.output_tokens ?? 0;
+        const total = tokenUsage.total_tokens ?? (input + output);
+        const source = tokenUsage.source === 'estimated' ? 'оценка' : tokenUsage.source;
+        return [`Токены за генерацию: вход ${input}, выход ${output}, всего ${total} (${source}).`];
+    }
+
+    function buildGenerationDetails(result) {
+        const items = [];
+        if (result?.validation) {
+            (result.validation.errors || []).forEach(error => items.push(`Ошибка структуры: ${error}`));
+            (result.validation.warnings || []).forEach(warning => items.push(`Предупреждение структуры: ${warning}`));
+            if (result.validation.valid && !(result.validation.errors || []).length && !(result.validation.warnings || []).length) {
+                items.push('Структурная проверка LaTeX пройдена.');
+            }
+        }
+        describeCompileCheck(result?.compile_check).forEach(item => items.push(item));
+        describeTokenUsage(result?.token_usage).forEach(item => items.push(item));
+        return items;
+    }
+
+    function renderGenerationResultDetails(result) {
+        const validationFailed = result?.validation && !result.validation.valid;
+        const compileFailed = result?.compile_check?.attempted && !result.compile_check.success;
+        const type = validationFailed || compileFailed ? 'error' : 'success';
+        setGenerationDetails(buildGenerationDetails(result), type);
     }
 
     function renderValidationDetails(validation) {
@@ -313,38 +381,68 @@
         await copyTextToClipboard(lastGenerationRawOutput, 'Raw output скопирован', 'Raw output появится после генерации');
     }
 
-    async function generateLatexFromAi() {
+    function generationNeedsUserDecision(result) {
+        if (result?.validation && !result.validation.valid) return true;
+        return Boolean(result?.compile_check?.attempted && !result.compile_check.success);
+    }
+
+    async function insertLastGeneratedLatex() {
+        if (!lastGenerationResult?.latex_code) {
+            setGenerationStatus('Нет последнего результата для вставки.', 'error');
+            showToast('Сначала выполните AI-генерацию', 'error');
+            return;
+        }
+
+        const applied = await applyGeneratedLatex(lastGenerationResult.latex_code);
+        if (!applied) return;
+
+        closeModal('generationModal');
+        showToast('LaTeX вставлен для ручной правки', 'success');
+        document.getElementById('statusText').textContent = 'AI-документ вставлен для ручной правки';
+    }
+
+    async function runGenerationRequest(request, loadingButtonId = 'generateLatexBtn') {
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
             showToast('Запустите backend для AI-генерации', 'error');
             return;
         }
 
-        const btn = document.getElementById('generateLatexBtn');
         const previousContent = editor.getValue();
         const previousFileId = currentFileId;
-        setButtonLoading('generateLatexBtn', true, 'Генерация...');
+        setButtonLoading(loadingButtonId, true, 'Генерация...');
+        setGenerationRetryActionsVisible(false);
         setGenerationStatus('Генерация LaTeX через AI-provider...');
         setGenerationDetails();
         document.getElementById('statusText').textContent = 'AI-генерация...';
 
         try {
             await saveCurrentFile();
+            lastGenerationRequest = cloneGenerationRequest(request);
             const result = await apiRequest('/generation/generate', {
                 method: 'POST',
-                body: JSON.stringify(collectGenerationRequest())
+                body: JSON.stringify(request)
             });
+            lastGenerationResult = result;
             lastGenerationRawOutput = result.raw_output || '';
 
             if (!result.latex_code || !result.latex_code.includes('\\documentclass')) {
                 throw new Error('Модель не вернула компилируемый LaTeX от \\documentclass');
             }
-            if (result.validation) {
-                renderValidationDetails(result.validation);
+
+            renderGenerationResultDetails(result);
+
+            if (generationNeedsUserDecision(result)) {
+                const reason = result.validation && !result.validation.valid
+                    ? formatValidation(result.validation)
+                    : 'Compile-check не прошёл: можно повторить repair, перегенерировать в safe/rich режиме или вставить результат вручную.';
+                setGenerationStatus(reason, 'error');
+                setGenerationRetryActionsVisible(true, Boolean(result.latex_code));
+                document.getElementById('statusText').textContent = 'AI-генерация требует проверки';
+                showToast('AI-результат требует repair/retry перед вставкой', 'error');
+                return;
             }
-            if (result.validation && !result.validation.valid) {
-                throw new Error(formatValidation(result.validation));
-            }
+
             if (result.validation?.warnings?.length) {
                 setGenerationStatus(formatValidation(result.validation));
             }
@@ -365,11 +463,36 @@
                 files[currentFileId].content = previousContent;
                 renderFileTree();
             }
+            setGenerationRetryActionsVisible(Boolean(lastGenerationRequest), Boolean(lastGenerationResult?.latex_code));
             setGenerationStatus(`Ошибка генерации: ${error.message}`, 'error');
             setGenerationDetails([error.message], 'error');
             document.getElementById('statusText').textContent = 'Ошибка AI-генерации';
             showToast(`Ошибка AI-генерации: ${error.message}`, 'error');
         } finally {
-            setButtonLoading('generateLatexBtn', false);
+            setButtonLoading(loadingButtonId, false);
         }
+    }
+
+    async function generateLatexFromAi() {
+        lastGenerationResult = null;
+        lastGenerationRawOutput = '';
+        await runGenerationRequest(collectGenerationRequest(), 'generateLatexBtn');
+    }
+
+    async function retryLastGeneration() {
+        if (!lastGenerationRequest) {
+            setGenerationStatus('Нет сохранённого запроса для retry.', 'error');
+            showToast('Сначала выполните AI-генерацию', 'error');
+            return;
+        }
+        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+    }
+
+    async function regenerateWithLatexMode(mode) {
+        const modeInput = document.getElementById('generationLatexMode');
+        if (modeInput) modeInput.value = mode;
+        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
+        request.fields = request.fields || {};
+        request.fields.latex_mode = mode;
+        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
     }

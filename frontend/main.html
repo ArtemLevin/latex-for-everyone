@@ -34,6 +34,12 @@
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.1/dist/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        }
+    </script>
     <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
@@ -426,7 +432,7 @@
                     </div>
                     <div class="generation-field">
                         <label for="generationModel">Модель</label>
-                        <input id="generationModel" type="text" value="qwen2.5:14b" placeholder="qwen2.5:14b или gpt-4o-mini">
+                        <input id="generationModel" type="text" value="gemma4" placeholder="gemma4 или gpt-4o-mini">
                     </div>
                     <div class="generation-field">
                         <label for="generationLevel">Уровень</label>
@@ -439,6 +445,16 @@
                     <div class="generation-field">
                         <label for="generationSubject">Предмет</label>
                         <input id="generationSubject" type="text" value="математика">
+                    </div>
+                    <div class="generation-field">
+                        <label for="generationLanguage">Язык пособия</label>
+                        <select id="generationLanguage">
+                            <option value="русский" selected>Русский</option>
+                            <option value="английский">English</option>
+                            <option value="казахский">Қазақша</option>
+                            <option value="немецкий">Deutsch</option>
+                            <option value="французский">Français</option>
+                        </select>
                     </div>
                     <div class="generation-field">
                         <label for="generationStudent">ФИО ученика</label>
@@ -479,6 +495,21 @@
                         <input id="generationPriorityMethod" type="text" value="нейросеть выбирает самостоятельно по отношению к уровню и классу">
                     </div>
                     <div class="generation-field full">
+                        <label for="generationContentSourceMode">Источник содержания</label>
+                        <select id="generationContentSourceMode">
+                            <option value="materials_only" selected>Только по материалам пользователя</option>
+                            <option value="ai_creative">Разрешить нейросети генерировать от себя</option>
+                        </select>
+                    </div>
+                    <div class="generation-field full">
+                        <label for="generationLatexMode">Режим LaTeX</label>
+                        <select id="generationLatexMode">
+                            <option value="safe" selected>Safe — максимум шансов на компиляцию</option>
+                            <option value="rich">Rich — разрешить сложные схемы и таблицы</option>
+                        </select>
+                        <div class="generation-hint">Safe избегает TikZ/pgfplots/longtable/изображений и запускает repair по validation errors до компиляции.</div>
+                    </div>
+                    <div class="generation-field full">
                         <label for="generationMaterials">Материалы / условия задач</label>
                         <textarea id="generationMaterials" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
                     </div>
@@ -504,6 +535,10 @@
                     <button class="btn btn-secondary" id="checkProviderBtn" onclick="checkGenerationProvider()">Проверить провайдера</button>
                     <button class="btn btn-secondary" id="validateLatexBtn" onclick="validateCurrentLatex()">Проверить .tex</button>
                     <button class="btn btn-secondary" onclick="copyGenerationRawOutput()">Скопировать raw output</button>
+                    <button class="btn btn-secondary" id="retryGenerationBtn" onclick="retryLastGeneration()" style="display: none;">Повторить repair</button>
+                    <button class="btn btn-secondary" id="regenerateSafeBtn" onclick="regenerateWithLatexMode('safe')" style="display: none;">Перегенерировать safe</button>
+                    <button class="btn btn-secondary" id="regenerateRichBtn" onclick="regenerateWithLatexMode('rich')" style="display: none;">Перегенерировать rich</button>
+                    <button class="btn btn-secondary" id="insertLastGeneratedBtn" onclick="insertLastGeneratedLatex()" style="display: none;">Вставить всё равно</button>
                     <button class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
                     <button class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
                         <span>Сгенерировать и вставить</span>
