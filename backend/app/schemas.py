@@ -139,6 +139,9 @@ class TemplateResponse(BaseModel):
 # Generation Schemas
 class GenerationFields(BaseModel):
     level: str = "ЕГЭ"
+    language: str = "русский"
+    content_source_mode: Literal["materials_only", "ai_creative"] = "materials_only"
+    latex_mode: Literal["safe", "rich"] = "safe"
     alpha_code: int = Field(1, ge=0, le=2)
     beta_code: int = Field(1, ge=0, le=50)
     gamma_code: int = Field(4, ge=1, le=5)
@@ -187,10 +190,20 @@ class GenerationProviderStatusResponse(BaseModel):
     model_available: Optional[bool] = None
 
 
+class GenerationCompileCheckResponse(BaseModel):
+    attempted: bool = False
+    success: bool = False
+    attempts: int = 0
+    repaired: bool = False
+    skipped_reason: Optional[str] = None
+    error: Optional[str] = None
+
+
 class GenerationResultResponse(GenerationPromptResponse):
     latex_code: str
     raw_output: str
     validation: GenerationValidationResponse
+    compile_check: GenerationCompileCheckResponse = Field(default_factory=GenerationCompileCheckResponse)
 
 
 class GenerationPresetResponse(BaseModel):
@@ -198,6 +211,26 @@ class GenerationPresetResponse(BaseModel):
     name: str
     description: str
     defaults: dict[str, Any]
+
+
+class GenerationHistoryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    provider: str
+    model: Optional[str] = None
+    status: str
+    prompt_hash: str
+    prompt_preview: Optional[str] = None
+    raw_output_hash: Optional[str] = None
+    latex_code_hash: Optional[str] = None
+    latex_code_preview: Optional[str] = None
+    fields: dict[str, Any] = Field(default_factory=dict)
+    validation: Optional[dict[str, Any]] = None
+    compile_check: Optional[dict[str, Any]] = None
+    error: Optional[str] = None
+    created_at: datetime
 
 
 # Snapshot Schemas

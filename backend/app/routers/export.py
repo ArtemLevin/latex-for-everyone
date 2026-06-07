@@ -5,10 +5,13 @@ from fastapi.responses import FileResponse
 from app.config import settings
 from app.models import Project
 from app.schemas import ExportRequest, ExportResponse, PDFGenerationResult
+from app.services.artifact_cleanup import cleanup_old_files
+from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.pdf_generator import PDFGenerator
+from app.services.payload_limits import PayloadLimitError, enforce_latex_payload_limits
 from sqlalchemy.orm import Session
 from app.database import get_db
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -23,16 +26,33 @@ EXPORT_MEDIA_TYPES = {
 }
 
 
+def enforce_export_payload_limits(files: dict[str, str]) -> None:
+    try:
+        enforce_latex_file_policy(
+            files,
+            allowed_extensions=parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS),
+        )
+        enforce_latex_payload_limits(
+            files,
+            max_files=settings.MAX_LATEX_FILES,
+            max_file_chars=settings.MAX_LATEX_FILE_CHARS,
+            max_total_chars=settings.MAX_LATEX_TOTAL_CHARS,
+        )
+    except LatexFilePolicyError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid export filename: {exc}") from exc
+    except PayloadLimitError as exc:
+        raise HTTPException(status_code=413, detail=str(exc)) from exc
+
+
 def validate_export_entry_name(name: str) -> str:
     """Validate a ZIP entry name to prevent zip-slip/path traversal entries."""
-    if not name or name.startswith(("/", "\\")) or "\\" in name:
-        raise HTTPException(status_code=400, detail=f"Invalid export filename: {name}")
-
-    path = PurePosixPath(name)
-    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
-        raise HTTPException(status_code=400, detail=f"Invalid export filename: {name}")
-
-    return path.as_posix()
+    try:
+        return validate_latex_filename(
+            name,
+            allowed_extensions=parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS),
+        )
+    except LatexFilePolicyError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid export filename: {exc}") from exc
 
 
 @router.post("/pdf", response_model=ExportResponse)
@@ -53,6 +73,8 @@ async def export_pdf(
 
     if request.content:
         files.update(request.content)
+
+    enforce_export_payload_limits(files)
 
     main_content = files.get("main.tex", "")
     if not main_content:
@@ -94,6 +116,8 @@ async def export_html(
     if request.content:
         files.update(request.content)
 
+    enforce_export_payload_limits(files)
+
     main_content = files.get("main.tex", "")
     if not main_content:
         main_content = next(iter(files.values()), "")
@@ -102,6 +126,7 @@ async def export_html(
 
     output_dir = Path(settings.UPLOAD_DIR) / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
+    cleanup_old_files(output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf", ".html", ".zip"})
 
     filename = f"{project.id}_{project.name.replace(' ', '_')}.html"
     filepath = output_dir / filename
@@ -136,10 +161,13 @@ async def export_tex(
     if request.content:
         files.update(request.content)
 
+    enforce_export_payload_limits(files)
+
     from zipfile import ZipFile
 
     output_dir = Path(settings.UPLOAD_DIR) / "exports"
     output_dir.mkdir(parents=True, exist_ok=True)
+    cleanup_old_files(output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf", ".html", ".zip"})
 
     filename = f"{project.id}_{project.name.replace(' ', '_')}.zip"
     filepath = output_dir / filename

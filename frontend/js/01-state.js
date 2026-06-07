@@ -9,9 +9,19 @@
     let generationPresets = [];
     let lastGenerationPrompt = '';
     let lastGenerationRawOutput = '';
+    let lastGenerationRequest = null;
+    let lastGenerationResult = null;
     let suppressEditorChange = false;
     let contextMenuFileId = null;
     let selectedCommandIndex = 0;
+    let pdfPreviewDocument = null;
+    let pdfPreviewUrl = '';
+    let pdfPreviewPage = 1;
+    let pdfPreviewScale = 1;
+    let pdfPreviewFitMode = 'width';
+    let pdfPreviewResizeTimer = null;
+    let pdfPreviewRenderTask = null;
+    window.pdfPreviewRenderTask = null;
 
     const LOCAL_PROJECT_KEY = 'latexed_project_id';
     const API_BASE_URL = getApiBaseUrl();
