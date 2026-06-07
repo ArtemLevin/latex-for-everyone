@@ -7,6 +7,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import inspect, text
 
 from app.config import settings
 from app.database import Base, engine
@@ -19,12 +20,51 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
+GENERATION_HISTORY_COMPAT_COLUMNS = {
+    "input_tokens": "INTEGER",
+    "output_tokens": "INTEGER",
+    "total_tokens": "INTEGER",
+    "token_count_source": "VARCHAR(50)",
+}
+
+
+def ensure_generation_history_compat_columns() -> None:
+    """Patch local/dev SQLite-style schemas that predate token-usage migrations.
+
+    SQLAlchemy create_all() intentionally does not ALTER existing tables, so older
+    local databases can miss columns added by newer Alembic revisions. Production
+    should still run Alembic with AUTO_CREATE_TABLES=false; this helper only keeps
+    the default local/dev auto-create path from crashing on stale SQLite files.
+    """
+    inspector = inspect(engine)
+    if "generation_history" not in inspector.get_table_names():
+        return
+
+    existing_columns = {column["name"] for column in inspector.get_columns("generation_history")}
+    missing_columns = {
+        name: definition
+        for name, definition in GENERATION_HISTORY_COMPAT_COLUMNS.items()
+        if name not in existing_columns
+    }
+    if not missing_columns:
+        return
+
+    logger.warning(
+        "database auto-create found stale generation_history schema; adding missing columns=%s",
+        sorted(missing_columns),
+    )
+    with engine.begin() as connection:
+        for name, definition in missing_columns.items():
+            connection.execute(text(f"ALTER TABLE generation_history ADD COLUMN {name} {definition}"))
+
+
 def initialize_database() -> None:
     """Create tables for local/dev installs when migrations are not being run explicitly."""
     if not settings.AUTO_CREATE_TABLES:
         logger.info("database auto-create skipped; run Alembic migrations before serving traffic")
         return
     Base.metadata.create_all(bind=engine)
+    ensure_generation_history_compat_columns()
 
 
 @asynccontextmanager

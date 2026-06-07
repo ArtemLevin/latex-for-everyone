@@ -574,3 +574,27 @@
         request.fields.latex_mode = mode;
         await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
     }
+
+    async function generateLatexFromAi() {
+        lastGenerationResult = null;
+        lastGenerationRawOutput = '';
+        await runGenerationRequest(collectGenerationRequest(), 'generateLatexBtn');
+    }
+
+    async function retryLastGeneration() {
+        if (!lastGenerationRequest) {
+            setGenerationStatus('Нет сохранённого запроса для retry.', 'error');
+            showToast('Сначала выполните AI-генерацию', 'error');
+            return;
+        }
+        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+    }
+
+    async function regenerateWithLatexMode(mode) {
+        const modeInput = document.getElementById('generationLatexMode');
+        if (modeInput) modeInput.value = mode;
+        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
+        request.fields = request.fields || {};
+        request.fields.latex_mode = mode;
+        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
+    }

@@ -148,7 +148,7 @@ Use `make clean` to remove local SQLite databases and Python/test caches from th
 
 ## Database migrations
 
-Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, but production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
 
 Recommended workflow:
 

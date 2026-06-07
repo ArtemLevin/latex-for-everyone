@@ -55,6 +55,37 @@ def test_initialize_database_respects_auto_create_flag(monkeypatch):
     assert called is False
 
 
+def test_initialize_database_adds_generation_history_token_columns_for_stale_local_db(monkeypatch, tmp_path):
+    from sqlalchemy import inspect, text
+    from app import main as main_module
+    from app.config import settings
+
+    stale_engine = create_engine(f"sqlite:///{tmp_path / 'stale_latexed.db'}")
+    with stale_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE projects (id VARCHAR(36) PRIMARY KEY, name VARCHAR(255) NOT NULL)"))
+        connection.execute(
+            text(
+                "CREATE TABLE generation_history ("
+                "id VARCHAR(36) PRIMARY KEY, "
+                "project_id VARCHAR(36), "
+                "provider VARCHAR(100) NOT NULL, "
+                "model VARCHAR(255), "
+                "status VARCHAR(50) NOT NULL, "
+                "prompt_hash VARCHAR(64) NOT NULL, "
+                "fields JSON NOT NULL"
+                ")"
+            )
+        )
+
+    monkeypatch.setattr(settings, "AUTO_CREATE_TABLES", True)
+    monkeypatch.setattr(main_module, "engine", stale_engine)
+
+    main_module.initialize_database()
+
+    columns = {column["name"] for column in inspect(stale_engine).get_columns("generation_history")}
+    assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(columns)
+
+
 def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     from alembic import command
     from alembic.config import Config
