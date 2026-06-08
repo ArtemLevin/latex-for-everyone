@@ -21,6 +21,8 @@ frontend/css/       Frontend styles
 frontend/js/        Frontend state, API, editor, compile/export, AI UI scripts
 ```
 
+Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md). The current service-state analysis and development roadmap are maintained in [`PLAN.md`](PLAN.md).
+
 ## Quick start
 
 ### 1. Install Python dependencies with uv
@@ -56,8 +58,9 @@ Useful backend URLs:
 
 - API docs: http://localhost:8000/api/docs
 - Health check: http://localhost:8000/api/health
+- Readiness check: http://localhost:8000/api/ready
 
-> Server-side compilation and PDF export require `pdflatex` to be installed and available on `PATH` unless you override `LATEX_COMPILER`.
+> Server-side compilation and PDF export require `pdflatex` to be installed and available on `PATH` unless you override `LATEX_COMPILER`. Use `make latex-check` or `GET /api/ready` to verify compiler and Russian/T2A package readiness.
 
 ### 3. Start the frontend
 
@@ -82,6 +85,8 @@ make frontend PYTHON=python
 Open http://localhost:8080/main.html.
 
 The frontend will try to connect to `http://localhost:8000/api` when it is served from a local development port such as `8080`. If the backend is not reachable, the editor remains usable in local preview/export fallback mode.
+
+The active frontend entrypoint is the ordered script set declared in `frontend/main.html` (`01-state.js` through `09-ui-settings.js`). The old monolithic `frontend/js/main.js` legacy bundle has been removed; script ordering is protected by backend contract tests.
 
 ### 4. Docker backend
 
@@ -109,6 +114,7 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
+| `make frontend-e2e` | Run the optional Playwright browser smoke for the local frontend workflow. Skips when Playwright/browser binaries are unavailable. |
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
@@ -136,6 +142,15 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
 - `requirements.txt` remains available for Docker and pip-based workflows.
 
 
+## Health vs readiness
+
+Latexed exposes two operational status endpoints:
+
+- `GET /api/health` is a lightweight liveness check. It means the backend process is running and can answer HTTP requests.
+- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, and `artifact_dirs`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+
+When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. Run `make latex-check` in the target environment to verify the TeX Live runtime.
+
 ## Runtime artifacts and cleanup
 
 Latexed creates local runtime files during development and tests. These files are intentionally ignored by git:
@@ -143,6 +158,14 @@ Latexed creates local runtime files during development and tests. These files ar
 - SQLite databases such as `latexed.db`, `test_latexed.db`, `*.sqlite`, and `*.sqlite3`;
 - Python/test caches such as `__pycache__/` and `.pytest_cache/`;
 - generated compile/export/upload artifacts under the configured runtime directories, for example `/tmp/latexed_compiles` and `/tmp/latexed_uploads`.
+
+Generated artifact locations are intentionally separated by purpose:
+
+- compile PDF downloads are served only from `${COMPILE_WORK_DIR}/pdfs`;
+- export downloads are served only from `${UPLOAD_DIR}/exports`;
+- uploaded user files and temporary upload state live under `${UPLOAD_DIR}`.
+
+Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Automatic best-effort cleanup uses `ARTIFACT_TTL_SECONDS` and removes only old allowlisted artifact files from trusted runtime roots.
 
 Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
 
@@ -224,7 +247,8 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/health` | Health check |
+| GET | `/api/health` | Liveness check: backend process is responding |
+| GET | `/api/ready` | Readiness check: database, compiler, LaTeX packages, and runtime artifact directories |
 | GET | `/api/projects/` | List projects |
 | POST | `/api/projects/` | Create project |
 | GET | `/api/projects/{id}` | Get project details |
