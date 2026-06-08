@@ -119,6 +119,76 @@ def test_health_check():
     assert data["status"] == "healthy"
 
 
+def test_readiness_ready_when_all_checks_pass(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={"binary": "pdflatex", "path": "/usr/bin/pdflatex"}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={"russian_ldf": True, "t2aenc_def": True}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ready"
+    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs"}
+    assert data["checks"]["database"]["status"] == "ok"
+    assert data["checks"]["compiler"]["status"] == "ok"
+
+
+def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="missing", message="pdflatex was not found on PATH", details={"binary": "pdflatex", "path": None}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["compiler"]["status"] == "missing"
+    assert data["checks"]["latex_packages"]["status"] == "skipped"
+    assert data["checks"]["latex_packages"]["details"] == {"reason": "missing"}
+
+
 def test_root():
     response = client.get("/")
     assert response.status_code == 200
