@@ -1,11 +1,10 @@
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.models import File, Project
 from app.schemas import FileCreate, FileUpdate
 from app.services.latex_file_policy import LatexFilePolicyError, parse_allowed_extensions, validate_latex_filename
+from app.time_utils import utc_now
 
 
 class FileServiceError(Exception):
@@ -83,7 +82,7 @@ class FileService:
         for key, value in update_data.items():
             setattr(file, key, value)
 
-        file.updated_at = datetime.utcnow()
+        file.updated_at = utc_now()
         db.commit()
         db.refresh(file)
         return file
@@ -102,7 +101,7 @@ class FileService:
     def replace_file_content(self, db: Session, file_id: str, content: bytes) -> None:
         file = self.get_file(db, file_id)
         file.content = content.decode("utf-8")
-        file.updated_at = datetime.utcnow()
+        file.updated_at = utc_now()
         db.commit()
 
     def upload_project_files(self, db: Session, project: Project, uploads: list[tuple[str | None, bytes]]) -> int:
@@ -116,7 +115,7 @@ class FileService:
 
             if existing:
                 existing.content = content.decode("utf-8")
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = utc_now()
             else:
                 db.add(
                     File(

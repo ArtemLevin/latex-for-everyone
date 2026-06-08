@@ -169,6 +169,10 @@ Download endpoints validate artifact filenames through a shared safe-path resolv
 
 Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
 
+## Timestamp policy
+
+Backend application code uses a shared `utc_now()` helper from `backend/app/time_utils.py` for timestamp defaults and manual `updated_at` changes. Avoid direct `datetime.utcnow()` calls in new code; the test suite includes a regression check for this policy.
+
 ## Database migrations
 
 Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.

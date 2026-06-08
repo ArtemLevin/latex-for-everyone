@@ -64,6 +64,7 @@ References:
 
 - `backend/app/models.py`
 - `backend/app/database.py`
+- `backend/app/time_utils.py`
 - `backend/alembic/`
 
 Persisted entities:
@@ -76,6 +77,7 @@ Persisted entities:
 Guidelines:
 
 - Keep models persistence-focused.
+- Use `utc_now()` from `backend/app/time_utils.py` for new timestamp defaults and manual `updated_at` changes; do not call `datetime.utcnow()` directly in app code.
 - Use migrations for schema changes when practical.
 - Do not commit local SQLite databases.
 
