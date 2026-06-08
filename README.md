@@ -21,6 +21,8 @@ frontend/css/       Frontend styles
 frontend/js/        Frontend state, API, editor, compile/export, AI UI scripts
 ```
 
+Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md).
+
 ## Quick start
 
 ### 1. Install Python dependencies with uv
