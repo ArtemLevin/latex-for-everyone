@@ -31,5 +31,10 @@ dev = [
 package = false
 
 [tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "function"
 pythonpath = ["backend"]
 testpaths = ["backend/tests"]
+
+filterwarnings = [
+    "error::DeprecationWarning:app\\..*",
+]

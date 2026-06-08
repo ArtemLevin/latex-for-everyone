@@ -100,6 +100,10 @@ frontend-check: ## Run node --check for frontend JavaScript files.
 	@test -n "$(FRONTEND_JS_FILES)" || (echo "No frontend JavaScript files found" && exit 1)
 	node --check $(FRONTEND_JS_FILES)
 
+.PHONY: frontend-e2e
+frontend-e2e: ## Run optional Playwright smoke test for the local frontend workflow.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_frontend_e2e.py -q
+
 .PHONY: check
 check: compileall frontend-check test ## Run all local checks.
 

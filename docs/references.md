@@ -27,13 +27,15 @@ Use it for:
 - local CSS and JS load order;
 - visible UI text and controls.
 
-Script order matters:
+Script order matters and is covered by frontend contract tests:
 
 ```text
 01-state.js → 02-api.js → 03-init.js → 04-files.js →
 05-compile-preview.js → 06-toolbar-view.js → 07-generation.js →
 08-templates-export.js → 09-ui-settings.js
 ```
+
+The old monolithic `frontend/js/main.js` bundle has been removed; do not reintroduce it as a parallel entrypoint.
 
 ## Backend references
 
@@ -62,6 +64,7 @@ References:
 
 - `backend/app/models.py`
 - `backend/app/database.py`
+- `backend/app/time_utils.py`
 - `backend/alembic/`
 
 Persisted entities:
@@ -74,6 +77,7 @@ Persisted entities:
 Guidelines:
 
 - Keep models persistence-focused.
+- Use `utc_now()` from `backend/app/time_utils.py` for new timestamp defaults and manual `updated_at` changes; do not call `datetime.utcnow()` directly in app code.
 - Use migrations for schema changes when practical.
 - Do not commit local SQLite databases.
 

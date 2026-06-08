@@ -261,6 +261,18 @@ class SnapshotResponse(BaseModel):
     created_at: datetime
 
 
+# Readiness Schemas
+class ReadinessCheckResponse(BaseModel):
+    status: Literal["ok", "missing", "skipped", "error"]
+    message: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReadinessResponse(BaseModel):
+    status: Literal["ready", "degraded", "not_ready"]
+    checks: dict[str, ReadinessCheckResponse]
+
+
 # Generic
 class MessageResponse(BaseModel):
     message: str
