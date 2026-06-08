@@ -6,24 +6,23 @@ from app.config import settings
 from app.models import Project
 from app.schemas import ExportRequest, ExportResponse, PDFGenerationResult
 from app.services.artifact_cleanup import cleanup_old_files
+from app.services.artifact_paths import (
+    ArtifactPathError,
+    UnsupportedArtifactTypeError,
+    export_root,
+    resolve_artifact_download,
+)
 from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.pdf_generator import PDFGenerator
 from app.services.payload_limits import PayloadLimitError, enforce_latex_payload_limits
 from sqlalchemy.orm import Session
 from app.database import get_db
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 pdf_generator = PDFGenerator()
-
-EXPORT_MEDIA_TYPES = {
-    ".pdf": "application/pdf",
-    ".html": "text/html",
-    ".zip": "application/zip",
-}
 
 
 def enforce_export_payload_limits(files: dict[str, str]) -> None:
@@ -89,10 +88,16 @@ async def export_pdf(
         logger.error("export pdf succeeded without filename project_id=%s", request.project_id)
         raise HTTPException(status_code=500, detail="PDF export did not return a filename")
 
-    logger.info("export pdf completed project_id=%s filename=%s size=%s", request.project_id, result.filename, result.size)
+    try:
+        target = resolve_artifact_download("export", result.filename)
+    except ArtifactPathError as exc:
+        logger.error("export pdf produced unsafe filename project_id=%s filename=%s", request.project_id, result.filename)
+        raise HTTPException(status_code=500, detail="PDF export produced an invalid artifact filename") from exc
+
+    logger.info("export pdf completed project_id=%s filename=%s size=%s", request.project_id, target.filename, result.size)
     return ExportResponse(
-        url=f"/api/export/download/{result.filename}",
-        filename=result.filename,
+        url=f"/api/export/download/{target.filename}",
+        filename=target.filename,
         format="pdf",
         size=result.size,
     )
@@ -124,12 +129,17 @@ async def export_html(
 
     html_content = pdf_generator.generate_html(main_content)
 
-    output_dir = Path(settings.UPLOAD_DIR) / "exports"
+    output_dir = export_root()
     output_dir.mkdir(parents=True, exist_ok=True)
-    cleanup_old_files(output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf", ".html", ".zip"})
+    cleanup_old_files(
+        output_dir,
+        max_age_seconds=settings.ARTIFACT_TTL_SECONDS,
+        suffixes={".pdf", ".html", ".zip"},
+        trusted_roots=(output_dir,),
+    )
 
-    filename = f"{project.id}_{project.name.replace(' ', '_')}.html"
-    filepath = output_dir / filename
+    filename = f"{project.id}.html"
+    filepath = resolve_artifact_download("export", filename).path
 
     filepath.write_text(html_content, encoding="utf-8")
 
@@ -165,12 +175,17 @@ async def export_tex(
 
     from zipfile import ZipFile
 
-    output_dir = Path(settings.UPLOAD_DIR) / "exports"
+    output_dir = export_root()
     output_dir.mkdir(parents=True, exist_ok=True)
-    cleanup_old_files(output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf", ".html", ".zip"})
+    cleanup_old_files(
+        output_dir,
+        max_age_seconds=settings.ARTIFACT_TTL_SECONDS,
+        suffixes={".pdf", ".html", ".zip"},
+        trusted_roots=(output_dir,),
+    )
 
-    filename = f"{project.id}_{project.name.replace(' ', '_')}.zip"
-    filepath = output_dir / filename
+    filename = f"{project.id}.zip"
+    filepath = resolve_artifact_download("export", filename).path
 
     with ZipFile(filepath, "w") as zf:
         for name, content in files.items():
@@ -186,39 +201,23 @@ async def export_tex(
     )
 
 
-def resolve_export_download_path(filename: str) -> tuple[Path, str]:
-    """Return a safe export artifact path and media type for a download filename."""
-    if Path(filename).name != filename:
-        raise HTTPException(status_code=400, detail="Invalid export filename")
-
-    suffix = Path(filename).suffix.lower()
-    media_type = EXPORT_MEDIA_TYPES.get(suffix)
-    if media_type is None:
-        raise HTTPException(status_code=400, detail="Unsupported export file type")
-
-    export_dir = (Path(settings.UPLOAD_DIR) / "exports").resolve()
-    filepath = (export_dir / filename).resolve()
-
-    # Resolve both paths before the prefix check so symlinks or crafted filenames
-    # cannot escape the export directory configured for downloadable artifacts.
-    if export_dir not in filepath.parents:
-        raise HTTPException(status_code=400, detail="Invalid export filename")
-
-    return filepath, media_type
-
-
 @router.get("/download/{filename}")
 async def download_export(filename: str):
     logger.info("export download requested filename=%s", filename)
-    filepath, media_type = resolve_export_download_path(filename)
+    try:
+        target = resolve_artifact_download("export", filename)
+    except UnsupportedArtifactTypeError as exc:
+        raise HTTPException(status_code=400, detail="Unsupported export file type") from exc
+    except ArtifactPathError as exc:
+        raise HTTPException(status_code=400, detail="Invalid export filename") from exc
 
-    if not filepath.is_file():
-        logger.warning("export download missing filename=%s path=%s", filename, filepath)
+    if not target.path.is_file():
+        logger.warning("export download missing filename=%s path=%s", filename, target.path)
         raise HTTPException(status_code=404, detail="File not found")
 
-    logger.info("export download served filename=%s media_type=%s size=%s", filename, media_type, filepath.stat().st_size)
+    logger.info("export download served filename=%s media_type=%s size=%s", filename, target.media_type, target.path.stat().st_size)
     return FileResponse(
-        path=str(filepath),
-        filename=filename,
-        media_type=media_type,
+        path=str(target.path),
+        filename=target.filename,
+        media_type=target.media_type,
     )

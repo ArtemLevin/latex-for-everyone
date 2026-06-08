@@ -156,6 +156,14 @@ Latexed creates local runtime files during development and tests. These files ar
 - Python/test caches such as `__pycache__/` and `.pytest_cache/`;
 - generated compile/export/upload artifacts under the configured runtime directories, for example `/tmp/latexed_compiles` and `/tmp/latexed_uploads`.
 
+Generated artifact locations are intentionally separated by purpose:
+
+- compile PDF downloads are served only from `${COMPILE_WORK_DIR}/pdfs`;
+- export downloads are served only from `${UPLOAD_DIR}/exports`;
+- uploaded user files and temporary upload state live under `${UPLOAD_DIR}`.
+
+Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Automatic best-effort cleanup uses `ARTIFACT_TTL_SECONDS` and removes only old allowlisted artifact files from trusted runtime roots.
+
 Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
 
 ## Database migrations

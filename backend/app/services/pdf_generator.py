@@ -8,6 +8,7 @@ from typing import Optional
 from app.config import settings
 from app.schemas import PDFGenerationResult
 from app.services.artifact_cleanup import cleanup_old_files
+from app.services.artifact_paths import export_root
 from app.services.latex_file_policy import enforce_latex_file_policy, parse_allowed_extensions
 from app.services.latex_sanitizer import sanitize_latex_files, sanitize_latex_source
 
@@ -18,7 +19,7 @@ class PDFGenerator:
     def __init__(self):
         self.compiler = settings.LATEX_COMPILER
         self.timeout = settings.COMPILE_TIMEOUT
-        self.output_dir = Path(settings.UPLOAD_DIR) / "exports"
+        self.output_dir = export_root()
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
     def generate_pdf(
@@ -83,7 +84,12 @@ class PDFGenerator:
             # Save PDF
             pdf_file = work_dir / "main.pdf"
             if pdf_file.exists():
-                cleanup_old_files(self.output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf", ".html", ".zip"})
+                cleanup_old_files(
+                    self.output_dir,
+                    max_age_seconds=settings.ARTIFACT_TTL_SECONDS,
+                    suffixes={".pdf", ".html", ".zip"},
+                    trusted_roots=(self.output_dir,),
+                )
                 pdf_filename = f"{compile_id}.pdf"
                 pdf_dest = self.output_dir / pdf_filename
                 shutil.copy2(pdf_file, pdf_dest)

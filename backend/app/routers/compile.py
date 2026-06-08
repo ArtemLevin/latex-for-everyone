@@ -3,13 +3,17 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
 from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, LatexCompileResult, RawCompileRequest
+from app.services.artifact_paths import (
+    ArtifactPathError,
+    UnsupportedArtifactTypeError,
+    resolve_artifact_download,
+)
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.payload_limits import PayloadLimitError, enforce_latex_payload_limits
 from sqlalchemy.orm import Session
 from app.database import get_db
 from fastapi.responses import FileResponse
-from pathlib import Path
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -196,19 +200,23 @@ async def get_compile_history_detail(
 @router.get("/download/{filename}")
 async def download_compiled_pdf(filename: str):
     logger.info("compile pdf download requested filename=%s", filename)
-    if not filename.endswith(".pdf") or Path(filename).name != filename:
+    try:
+        target = resolve_artifact_download("compile_pdf", filename)
+    except UnsupportedArtifactTypeError as exc:
+        logger.warning("compile pdf download rejected unsupported filename=%s", filename)
+        raise HTTPException(status_code=400, detail="Unsupported compile artifact file type") from exc
+    except ArtifactPathError as exc:
         logger.warning("compile pdf download rejected invalid filename=%s", filename)
-        raise HTTPException(status_code=400, detail="Invalid PDF filename")
+        raise HTTPException(status_code=400, detail="Invalid PDF filename") from exc
 
-    filepath = Path(settings.COMPILE_WORK_DIR) / "pdfs" / filename
-    if not filepath.exists():
-        logger.warning("compile pdf download missing filename=%s path=%s", filename, filepath)
+    if not target.path.is_file():
+        logger.warning("compile pdf download missing filename=%s path=%s", filename, target.path)
         raise HTTPException(status_code=404, detail="PDF not found")
 
-    logger.info("compile pdf download served filename=%s size=%s", filename, filepath.stat().st_size)
+    logger.info("compile pdf download served filename=%s size=%s", filename, target.path.stat().st_size)
     return FileResponse(
-        path=str(filepath),
-        filename=filename,
-        media_type="application/pdf",
-        content_disposition_type="inline",
+        path=str(target.path),
+        filename=target.filename,
+        media_type=target.media_type,
+        content_disposition_type=target.content_disposition_type,
     )
