@@ -79,7 +79,7 @@ frontend/main.html
 Риски:
 
 - глобальные функции и состояние усложняют безопасные изменения;
-- `frontend/js/main.js` присутствует как крупный неиспользуемый/legacy bundle и может путать разработчиков, потому что `main.html` подключает numbered scripts;
+- legacy `frontend/js/main.js` удалён; риск теперь состоит в случайном повторном введении параллельного entrypoint вместо numbered scripts из `main.html`;
 - нет автоматических browser/E2E тестов для основных пользовательских сценариев;
 - CDN-зависимости не зафиксированы через lockfile/integrity-политику.
 
@@ -116,7 +116,7 @@ Persisted entities:
 |---|---:|---|
 | Layout verification | PASS | Ожидаемые backend/frontend/docs директории существуют. |
 | `make compileall` | PASS | Python-файлы backend компилируются без syntax errors. |
-| `make frontend-check` | PASS | Все `frontend/js/*.js`, включая legacy `main.js`, проходят `node --check`. |
+| `make frontend-check` | PASS | Актуальные numbered frontend scripts проходят `node --check`; legacy `main.js` удалён. |
 | `make test` | PASS | `88 passed`; есть `110 warnings`. |
 | `make latex-check` | FAIL из-за окружения | `pdflatex not found`; это блокирует реальную backend-компиляцию/PDF export в текущей среде, но не доказывает дефект кода. |
 
@@ -148,7 +148,7 @@ Persisted entities:
 
 1. **LaTeX sandboxing требует усиления.** Нужна явная политика `pdflatex` flags, shell escape, temp dirs, UID/container isolation, TTL cleanup и максимально разрешённые расширения.
 2. **Frontend без E2E покрытия.** Критичные пользовательские flows не проверяются автоматическим браузерным тестом.
-3. **Legacy `frontend/js/main.js`.** Файл не подключается в `main.html`, но проходит checks и дублирует логику; это риск расхождения поведения.
+3. **Frontend entrypoint drift.** Legacy `frontend/js/main.js` удалён; порядок numbered scripts нужно защищать contract-тестами, чтобы не появился параллельный entrypoint.
 4. **Большой `generation.py`.** Router содержит почти 500 строк и смешивает HTTP, orchestration, logging, repair flow и history handling; часть логики можно вынести в service layer.
 5. **Templates лежат в router.** При росте шаблонов лучше перейти к data file/service, чтобы router не был контейнером данных.
 
@@ -166,7 +166,7 @@ Persisted entities:
 **Цель:** зафиксировать текущее состояние и убрать неоднозначности.
 
 - Обновить README/docs: явно описать, что `pdflatex` обязателен для backend compile/export, а без него доступен frontend fallback.
-- Отметить `frontend/js/main.js` как legacy/reference или удалить после подтверждения, что он не нужен; до удаления добавить проверку, что `main.html` использует только numbered scripts.
+- Поддерживать contract test, подтверждающий, что `main.html` использует только numbered scripts и legacy `frontend/js/main.js` не возвращается.
 - Добавить в CI или локальный checklist команды: `make compileall`, `make frontend-check`, `make test`, `make latex-check` как optional environment check.
 - Завести простой release checklist: migrations, env vars, compiler check, artifact cleanup, smoke health.
 
@@ -256,7 +256,7 @@ Persisted entities:
 | P0 | Async compile job prototype | Убирает долгие HTTP requests | API + frontend polling smoke test |
 | P0 | Artifact cleanup policy | Не копить PDF/TEX/HTML и не отдавать лишнее | Unit tests cleanup + docs TTL |
 | P1 | E2E smoke tests | Защита frontend workflow | Playwright smoke в CI/local target |
-| P1 | Clarify/remove `frontend/js/main.js` | Уменьшает риск правки неиспользуемого файла | `main.html` script order test; файл удалён или помечен legacy |
+| P1 | Guard frontend script order | Уменьшает риск повторного появления неподключаемого entrypoint | `main.html` script order test; legacy `main.js` отсутствует |
 | P1 | Move AI orchestration to service | Поддерживаемость и unit testing | `generation.py` меньше, service tests больше |
 | P1 | Distributed rate limiting | Production multi-replica | Redis-backed limiter или documented single-process limitation |
 | P1 | Auth/ownership | Безопасность пользовательских данных | Cross-user denial tests |
@@ -536,9 +536,7 @@ make latex-check  # optional/environment check for real TeX runtime
 
 Задачи:
 
-- Решить судьбу `frontend/js/main.js`:
-  - либо удалить как неподключаемый legacy bundle;
-  - либо явно пометить как reference/legacy и исключить из путаницы разработки.
+- Зафиксировать, что legacy `frontend/js/main.js` удалён и не должен возвращаться как параллельный entrypoint.
 - Добавить contract test, который проверяет фактический script order в `frontend/main.html`:
   `01-state.js → 02-api.js → ... → 09-ui-settings.js`.
 - Добавить минимальный E2E smoke на Playwright или аналогичном инструменте:
@@ -559,23 +557,14 @@ Definition of Done:
 
 **Текущая точка старта:**
 
-- `frontend/main.html` подключает только numbered scripts `01-state.js` → `09-ui-settings.js`; `frontend/js/main.js` в HTML не подключён.
-- `make frontend-check` сейчас запускает `node --check` для всех `frontend/js/*.js`, включая неподключаемый `main.js`, поэтому syntax check может создавать ложное ощущение, что `main.js` участвует в runtime.
+- `frontend/main.html` подключает только numbered scripts `01-state.js` → `09-ui-settings.js`; legacy `frontend/js/main.js` удалён.
+- `make frontend-check` запускает `node --check` для актуальных файлов `frontend/js/*.js`, а contract tests защищают порядок подключения scripts.
 - Frontend не имеет browser/E2E тестов; текущая защита — syntax check и отдельные backend contract tests.
 - Backend для базового local preview не обязателен: frontend должен graceful fallback при недоступном backend или отсутствии `pdflatex`.
 
 **Решение по `frontend/js/main.js`:**
 
-Рекомендуемый вариант — **удалить `frontend/js/main.js` как неподключаемый legacy bundle**, если diff покажет, что вся актуальная логика уже разнесена по numbered scripts. Если удаление слишком рискованно для одного PR, альтернативный безопасный вариант:
-
-- переименовать файл в `frontend/js/legacy-main.reference.js` или перенести в `docs/legacy/`;
-- добавить верхний комментарий `// Legacy reference only. Not loaded by frontend/main.html.`;
-- исключить его из runtime ожиданий, но оставить syntax check только если он нужен как reference.
-
-Критерий выбора:
-
-- если файл не импортируется, не подключается и не используется тестами — удалять;
-- если есть уникальные куски поведения, которых нет в numbered scripts — сначала перенести их в правильный numbered module, затем удалить legacy bundle.
+Legacy bundle удалён как неподключаемый entrypoint. Дальнейшие изменения должны вноситься только в numbered scripts, подключённые из `frontend/main.html`. Если кто-то попытается вернуть `js/main.js`, contract test должен упасть и потребовать явного архитектурного решения.
 
 **Целевой contract test для script order:**
 
@@ -619,7 +608,7 @@ js/09-ui-settings.js
 
 **Изменяемые файлы:**
 
-- `frontend/js/main.js` — удалить, переименовать или пометить legacy/reference в зависимости от выбранного решения.
+- `frontend/js/main.js` — удалён; contract tests должны не дать вернуть его незаметно.
 - `frontend/main.html` — не менять script order без необходимости; если меняется, обновить contract test и docs.
 - `backend/tests/test_frontend_contract.py` или `backend/tests/test_api.py` — добавить script-order contract test.
 - `pyproject.toml` или отдельный frontend test config — добавить Playwright/pytest-playwright только если выбран Python E2E путь.
@@ -630,8 +619,7 @@ js/09-ui-settings.js
 **Порядок работ по дням:**
 
 1. **День 1 — legacy entrypoint и contract test.**
-   - Сравнить `frontend/js/main.js` с numbered scripts: найти уникальную runtime-логику или подтвердить дублирование.
-   - Принять решение: удалить legacy файл или явно пометить/перенести как reference.
+   - Подтвердить, что legacy `frontend/js/main.js` отсутствует.
    - Добавить script-order contract test для `frontend/main.html`.
    - Обновить `make frontend-check`, если удаление `main.js` меняет список JS files автоматически через wildcard.
    - Запустить `make frontend-check` и `make test`.
@@ -667,7 +655,7 @@ js/09-ui-settings.js
 
 **Acceptance checklist для PR итерации 3:**
 
-- [ ] Судьба `frontend/js/main.js` решена: удалён или явно помечен legacy/reference.
+- [ ] Legacy `frontend/js/main.js` отсутствует и защищён contract test-ом от незаметного возврата.
 - [ ] Есть automated contract test на script order в `frontend/main.html`.
 - [ ] Есть минимум один browser smoke для local editor/preview workflow.
 - [ ] E2E не требует `pdflatex` и не зависит от запущенного backend для базового сценария.

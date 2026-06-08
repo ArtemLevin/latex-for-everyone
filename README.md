@@ -86,6 +86,8 @@ Open http://localhost:8080/main.html.
 
 The frontend will try to connect to `http://localhost:8000/api` when it is served from a local development port such as `8080`. If the backend is not reachable, the editor remains usable in local preview/export fallback mode.
 
+The active frontend entrypoint is the ordered script set declared in `frontend/main.html` (`01-state.js` through `09-ui-settings.js`). The old monolithic `frontend/js/main.js` legacy bundle has been removed; script ordering is protected by backend contract tests.
+
 ### 4. Docker backend
 
 ```bash
@@ -112,6 +114,7 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
+| `make frontend-e2e` | Run the optional Playwright browser smoke for the local frontend workflow. Skips when Playwright/browser binaries are unavailable. |
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
