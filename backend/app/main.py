@@ -13,6 +13,8 @@ from app.config import settings
 from app.database import Base, engine
 from app.logging_config import configure_logging, reset_request_id, set_request_id
 from app.routers import compile, export, files, generation, projects, templates
+from app.schemas import ReadinessResponse
+from app.services import readiness
 
 
 # Logging
@@ -174,6 +176,11 @@ async def health_check():
         "version": settings.APP_VERSION,
         "compiler": settings.LATEX_COMPILER,
     }
+
+
+@app.get("/api/ready", response_model=ReadinessResponse)
+async def readiness_check():
+    return readiness.build_readiness_response(engine)
 
 
 @app.get("/")

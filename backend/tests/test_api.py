@@ -119,6 +119,76 @@ def test_health_check():
     assert data["status"] == "healthy"
 
 
+def test_readiness_ready_when_all_checks_pass(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={"binary": "pdflatex", "path": "/usr/bin/pdflatex"}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={"russian_ldf": True, "t2aenc_def": True}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ready"
+    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs"}
+    assert data["checks"]["database"]["status"] == "ok"
+    assert data["checks"]["compiler"]["status"] == "ok"
+
+
+def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="missing", message="pdflatex was not found on PATH", details={"binary": "pdflatex", "path": None}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["compiler"]["status"] == "missing"
+    assert data["checks"]["latex_packages"]["status"] == "skipped"
+    assert data["checks"]["latex_packages"]["details"] == {"reason": "missing"}
+
+
 def test_root():
     response = client.get("/")
     assert response.status_code == 200
@@ -452,6 +522,8 @@ def test_artifact_cleanup_removes_only_old_allowed_files(tmp_path):
     old_pdf = tmp_path / "old.pdf"
     new_pdf = tmp_path / "new.pdf"
     old_txt = tmp_path / "old.txt"
+    nested_dir = tmp_path / "nested"
+    nested_dir.mkdir()
     old_pdf.write_bytes(b"old")
     new_pdf.write_bytes(b"new")
     old_txt.write_text("old")
@@ -460,12 +532,27 @@ def test_artifact_cleanup_removes_only_old_allowed_files(tmp_path):
     os.utime(old_pdf, (old_time, old_time))
     os.utime(old_txt, (old_time, old_time))
 
-    removed = cleanup_old_files(tmp_path, max_age_seconds=60, suffixes={".pdf"})
+    removed = cleanup_old_files(tmp_path, max_age_seconds=60, suffixes={".pdf"}, trusted_roots=(tmp_path,))
 
     assert removed == 1
     assert not old_pdf.exists()
     assert new_pdf.exists()
     assert old_txt.exists()
+    assert nested_dir.exists()
+
+
+def test_artifact_cleanup_rejects_untrusted_root(tmp_path):
+    import pytest
+    from app.services.artifact_cleanup import cleanup_old_files
+    from app.services.artifact_paths import InvalidArtifactFilenameError
+
+    trusted_root = tmp_path / "trusted"
+    untrusted_root = tmp_path / "untrusted"
+    trusted_root.mkdir()
+    untrusted_root.mkdir()
+
+    with pytest.raises(InvalidArtifactFilenameError):
+        cleanup_old_files(untrusted_root, max_age_seconds=60, suffixes={".pdf"}, trusted_roots=(trusted_root,))
 
 
 def test_latex_compiler_truncates_compiler_output(monkeypatch, tmp_path):
@@ -839,6 +926,39 @@ def test_compile_pdf_download_rejects_invalid_filename():
     assert response.status_code == 400
 
 
+def test_artifact_download_resolver_rejects_traversal_and_unsupported_types(tmp_path, monkeypatch):
+    import pytest
+    from app.config import settings
+    from app.services.artifact_paths import (
+        InvalidArtifactFilenameError,
+        UnsupportedArtifactTypeError,
+        resolve_artifact_download,
+    )
+
+    monkeypatch.setattr(settings, "COMPILE_WORK_DIR", str(tmp_path / "compile"))
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path / "uploads"))
+
+    compile_target = resolve_artifact_download("compile_pdf", "compiled.pdf")
+    assert compile_target.path == (tmp_path / "compile" / "pdfs" / "compiled.pdf").resolve()
+    assert compile_target.media_type == "application/pdf"
+    assert compile_target.content_disposition_type == "inline"
+
+    export_target = resolve_artifact_download("export", "document.html")
+    assert export_target.path == (tmp_path / "uploads" / "exports" / "document.html").resolve()
+    assert export_target.media_type == "text/html"
+
+    for unsafe_name in ["../evil.pdf", "nested/evil.pdf", r"nested\evil.pdf", " evil.pdf", "evil.pdf\n"]:
+        with pytest.raises(InvalidArtifactFilenameError):
+            resolve_artifact_download("compile_pdf", unsafe_name)
+
+    with pytest.raises(UnsupportedArtifactTypeError):
+        resolve_artifact_download("compile_pdf", "compiled.html")
+    with pytest.raises(UnsupportedArtifactTypeError):
+        resolve_artifact_download("export", "payload.txt")
+    with pytest.raises(UnsupportedArtifactTypeError):
+        resolve_artifact_download("export", "source.tex")
+
+
 def test_frontend_bootstrap_contract_creates_template_project_and_updates_main_file():
     project_response = client.post(
         "/api/projects/",
@@ -1110,14 +1230,10 @@ def test_export_download_rejects_unsupported_file_type(tmp_path, monkeypatch):
 
 
 def test_export_download_rejects_path_traversal_filename():
-    from fastapi import HTTPException
-    from app.routers.export import resolve_export_download_path
+    response = client.get(r"/api/export/download/nested\evil.zip")
 
-    with pytest.raises(HTTPException) as exc_info:
-        resolve_export_download_path("../evil.zip")
-
-    assert exc_info.value.status_code == 400
-    assert exc_info.value.detail == "Invalid export filename"
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid export filename"
 
 
 def test_snapshot_endpoints_use_typed_contracts():
