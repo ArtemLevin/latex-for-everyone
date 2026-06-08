@@ -21,6 +21,8 @@ frontend/css/       Frontend styles
 frontend/js/        Frontend state, API, editor, compile/export, AI UI scripts
 ```
 
+Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md). The current service-state analysis and development roadmap are maintained in [`PLAN.md`](PLAN.md).
+
 ## Quick start
 
 ### 1. Install Python dependencies with uv
@@ -56,8 +58,9 @@ Useful backend URLs:
 
 - API docs: http://localhost:8000/api/docs
 - Health check: http://localhost:8000/api/health
+- Readiness check: http://localhost:8000/api/ready
 
-> Server-side compilation and PDF export require `pdflatex` to be installed and available on `PATH` unless you override `LATEX_COMPILER`.
+> Server-side compilation and PDF export require `pdflatex` to be installed and available on `PATH` unless you override `LATEX_COMPILER`. Use `make latex-check` or `GET /api/ready` to verify compiler and Russian/T2A package readiness.
 
 ### 3. Start the frontend
 
@@ -135,6 +138,15 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
 - Backend commands run from `backend/` so `app.main:app` imports resolve the same way they do with plain `uvicorn`.
 - `requirements.txt` remains available for Docker and pip-based workflows.
 
+
+## Health vs readiness
+
+Latexed exposes two operational status endpoints:
+
+- `GET /api/health` is a lightweight liveness check. It means the backend process is running and can answer HTTP requests.
+- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, and `artifact_dirs`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+
+When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. Run `make latex-check` in the target environment to verify the TeX Live runtime.
 
 ## Runtime artifacts and cleanup
 
@@ -224,7 +236,8 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/health` | Health check |
+| GET | `/api/health` | Liveness check: backend process is responding |
+| GET | `/api/ready` | Readiness check: database, compiler, LaTeX packages, and runtime artifact directories |
 | GET | `/api/projects/` | List projects |
 | POST | `/api/projects/` | Create project |
 | GET | `/api/projects/{id}` | Get project details |
