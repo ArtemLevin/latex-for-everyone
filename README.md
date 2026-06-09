@@ -173,9 +173,24 @@ Use `make clean` to remove local SQLite databases and Python/test caches from th
 
 Backend application code uses a shared `utc_now()` helper from `backend/app/time_utils.py` for timestamp defaults and manual `updated_at` changes. Avoid direct `datetime.utcnow()` calls in new code; the test suite includes a regression check for this policy.
 
+## Lesson/transcription preparation inventory
+
+The lesson workflow described in `PLAN.md` is not implemented yet. The current checkout contains only preparation artifacts for that future work:
+
+- `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
+- `check_list.txt` is source prompt material for a future lesson checklist document. It currently includes hardcoded student-like text (`[ФИО ученика: Николь, ЕГЭ]`) and must be parameterized before any production use.
+- `pupil_mistakes.txt` is source prompt material for a future personalized mistakes-review document. Treat it as draft prompt input, not as a production template.
+
+Boundary policy for the first lesson/transcription iteration:
+
+- Do not import or call `transcibe.py` from routers. The preferred backend boundary is a future `backend/app/services/transcription.py` adapter with a typed result and fake provider for tests.
+- Do not move or wire the prompt files directly into generation routes until a prompt loader parameterizes them and tests prove that hardcoded student data is not present.
+- The target backend-owned locations are `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, and `backend/app/prompts/lesson/pupil_mistakes.txt`.
+- The first real implementation PR should stay limited to `Pupil`/`Lesson` backend foundation; it must not include audio upload, transcription provider calls, AI document generation, or frontend UI.
+
 ## Database migrations
 
-Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
 
 Recommended workflow:
 
@@ -187,6 +202,12 @@ make migrate
 ```
 
 When changing `backend/app/models.py`, create or update an Alembic revision in the same PR and verify it against a disposable database. If you have an old local SQLite database that was created before Alembic tracking existed, either remove it with `make clean` before `make migrate` or stamp it manually only after confirming its schema matches the baseline.
+
+## Lesson backend foundation
+
+The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
+
+This foundation intentionally does **not** upload audio, run transcription, call AI providers, generate lesson documents, or change the frontend. Those later phases remain behind the boundaries documented in the lesson/transcription preparation inventory.
 
 ## Frontend/backend integration
 
@@ -258,6 +279,16 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | GET | `/api/projects/{id}` | Get project details |
 | PUT | `/api/projects/{id}` | Update project |
 | DELETE | `/api/projects/{id}` | Delete project |
+| GET | `/api/pupils/` | List pupils in the current placeholder teacher scope |
+| POST | `/api/pupils/` | Create a pupil |
+| GET | `/api/pupils/{id}` | Get a pupil |
+| PATCH | `/api/pupils/{id}` | Update a pupil |
+| DELETE | `/api/pupils/{id}` | Delete a pupil and its lessons |
+| GET | `/api/lessons/` | List lessons, optionally filtered by `pupil_id`, `date_from`, and `date_to` |
+| POST | `/api/lessons/` | Create a lesson for a pupil |
+| GET | `/api/lessons/{id}` | Get a lesson |
+| PATCH | `/api/lessons/{id}` | Update a lesson topic, date, or status |
+| DELETE | `/api/lessons/{id}` | Delete a lesson |
 | POST | `/api/projects/{id}/duplicate` | Duplicate project |
 | GET | `/api/files/project/{id}` | List files |
 | POST | `/api/files/project/{id}` | Create file |

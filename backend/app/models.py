@@ -22,6 +22,34 @@ class Project(Base):
     generation_history = relationship("GenerationHistory", back_populates="project", cascade="all, delete-orphan")
 
 
+class Pupil(Base):
+    __tablename__ = "pupils"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    teacher_id = Column(String(255), nullable=False, index=True)
+    display_name = Column(String(255), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lessons = relationship("Lesson", back_populates="pupil", cascade="all, delete-orphan")
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pupil_id = Column(String(36), ForeignKey("pupils.id"), nullable=False, index=True)
+    teacher_id = Column(String(255), nullable=False, index=True)
+    topic = Column(String(255), nullable=False)
+    lesson_date = Column(DateTime, nullable=False, default=utc_now, index=True)
+    status = Column(String(50), nullable=False, default="draft")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    pupil = relationship("Pupil", back_populates="lessons")
+
+
 class File(Base):
     __tablename__ = "files"
 
