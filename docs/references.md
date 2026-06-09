@@ -73,6 +73,9 @@ Persisted entities:
 - `File`
 - `CompileHistory`
 - `ProjectSnapshot`
+- `GenerationHistory`
+- `Pupil`
+- `Lesson`
 
 Guidelines:
 
@@ -80,6 +83,16 @@ Guidelines:
 - Use `utc_now()` from `backend/app/time_utils.py` for new timestamp defaults and manual `updated_at` changes; do not call `datetime.utcnow()` directly in app code.
 - Use migrations for schema changes when practical.
 - Do not commit local SQLite databases.
+
+### Pupils and lessons routers
+
+References:
+
+- `backend/app/routers/pupils.py`
+- `backend/app/routers/lessons.py`
+- `backend/app/services/lesson_service.py`
+
+Use them for the backend-only lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, and the placeholder teacher ownership boundary. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Do not add audio upload, transcription, AI document generation, or frontend concerns to these routers; those belong to later section 10 iterations and must go through service adapters.
 
 ### Projects and files routers
 
@@ -166,7 +179,7 @@ Current style:
 - dependency override for `get_db`;
 - test SQLite database;
 - `setup_db` fixture that creates/drops metadata;
-- direct API assertions for health, projects, files, templates, and selected LaTeX service helpers.
+- direct API assertions for health, projects, files, pupils, lessons, templates, and selected LaTeX service helpers.
 
 Add tests here or split into additional files under `backend/tests/` when a feature grows large.
 

@@ -104,10 +104,15 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
-    assert {"projects", "files", "compile_history", "project_snapshots", "generation_history", "alembic_version"}.issubset(tables)
+    assert {"projects", "files", "compile_history", "project_snapshots", "generation_history", "pupils", "lessons", "alembic_version"}.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
     assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
+    assert "ix_pupils_teacher_id" in {index["name"] for index in inspector.get_indexes("pupils")}
+    lesson_indexes = {index["name"] for index in inspector.get_indexes("lessons")}
+    assert {"ix_lessons_teacher_id", "ix_lessons_pupil_id", "ix_lessons_lesson_date"}.issubset(lesson_indexes)
+    lesson_columns = {column["name"] for column in inspector.get_columns("lessons")}
+    assert {"pupil_id", "teacher_id", "topic", "lesson_date", "status"}.issubset(lesson_columns)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
 
@@ -266,6 +271,123 @@ def test_delete_project():
     # Verify deletion
     response = client.get(f"/api/projects/{project_id}")
     assert response.status_code == 404
+
+
+def create_test_pupil(display_name: str = "Николь") -> dict:
+    response = client.post("/api/pupils/", json={"display_name": display_name, "notes": "ЕГЭ"})
+    assert response.status_code == 201
+    return response.json()
+
+
+def create_test_lesson(pupil_id: str, topic: str = "Показательные уравнения", lesson_date: str = "2026-06-09T10:00:00Z") -> dict:
+    response = client.post(
+        "/api/lessons/",
+        json={"pupil_id": pupil_id, "topic": topic, "lesson_date": lesson_date},
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_create_pupil():
+    response = client.post("/api/pupils/", json={"display_name": "Николь", "notes": "ЕГЭ"})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["display_name"] == "Николь"
+    assert data["notes"] == "ЕГЭ"
+    assert data["teacher_id"] == "local-teacher"
+    assert "id" in data
+
+
+def test_pupil_crud():
+    pupil = create_test_pupil("Анна")
+
+    list_response = client.get("/api/pupils/")
+    assert list_response.status_code == 200
+    assert [item["display_name"] for item in list_response.json()] == ["Анна"]
+
+    get_response = client.get(f"/api/pupils/{pupil['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["display_name"] == "Анна"
+
+    update_response = client.patch(f"/api/pupils/{pupil['id']}", json={"display_name": "Анна П."})
+    assert update_response.status_code == 200
+    assert update_response.json()["display_name"] == "Анна П."
+
+    delete_response = client.delete(f"/api/pupils/{pupil['id']}")
+    assert delete_response.status_code == 200
+    assert client.get(f"/api/pupils/{pupil['id']}").status_code == 404
+
+
+def test_create_lesson_for_pupil():
+    pupil = create_test_pupil()
+
+    lesson = create_test_lesson(pupil["id"])
+
+    assert lesson["pupil_id"] == pupil["id"]
+    assert lesson["teacher_id"] == "local-teacher"
+    assert lesson["topic"] == "Показательные уравнения"
+    assert lesson["status"] == "draft"
+    assert lesson["lesson_date"].startswith("2026-06-09T10:00:00")
+
+
+def test_create_lesson_rejects_unknown_pupil():
+    response = client.post(
+        "/api/lessons/",
+        json={"pupil_id": "missing", "topic": "Тригонометрия"},
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Pupil not found"
+
+
+def test_lesson_crud_and_filters():
+    pupil = create_test_pupil("Михаил")
+    other_pupil = create_test_pupil("Софья")
+    lesson = create_test_lesson(pupil["id"], topic="Логарифмы", lesson_date="2026-06-09T10:00:00Z")
+    create_test_lesson(other_pupil["id"], topic="Производная", lesson_date="2026-06-10T10:00:00Z")
+
+    list_response = client.get(f"/api/lessons/?pupil_id={pupil['id']}")
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()] == [lesson["id"]]
+
+    date_response = client.get("/api/lessons/?date_from=2026-06-09T00:00:00Z&date_to=2026-06-09T23:59:59Z")
+    assert date_response.status_code == 200
+    assert [item["topic"] for item in date_response.json()] == ["Логарифмы"]
+
+    get_response = client.get(f"/api/lessons/{lesson['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["topic"] == "Логарифмы"
+
+    update_response = client.patch(f"/api/lessons/{lesson['id']}", json={"topic": "Логарифмы и степени", "status": "completed"})
+    assert update_response.status_code == 200
+    assert update_response.json()["topic"] == "Логарифмы и степени"
+    assert update_response.json()["status"] == "completed"
+
+    delete_response = client.delete(f"/api/lessons/{lesson['id']}")
+    assert delete_response.status_code == 200
+    assert client.get(f"/api/lessons/{lesson['id']}").status_code == 404
+
+
+def test_lesson_teacher_scope_placeholder(monkeypatch):
+    from app.dependencies import get_current_teacher_id
+
+    pupil = create_test_pupil("Scoped Student")
+    lesson = create_test_lesson(pupil["id"], topic="Стереометрия")
+
+    app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
+    try:
+        assert client.get("/api/pupils/").json() == []
+        assert client.get("/api/lessons/").json() == []
+        assert client.get(f"/api/pupils/{pupil['id']}").status_code == 404
+        assert client.get(f"/api/lessons/{lesson['id']}").status_code == 404
+        cross_scope_response = client.post(
+            "/api/lessons/",
+            json={"pupil_id": pupil["id"], "topic": "Недоступное занятие"},
+        )
+        assert cross_scope_response.status_code == 404
+    finally:
+        app.dependency_overrides.pop(get_current_teacher_id, None)
 
 
 def test_create_file():

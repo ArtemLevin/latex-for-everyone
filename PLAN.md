@@ -1143,21 +1143,24 @@ pupil_mistakes:
 
 #### Итерация A. Backend domain foundation, 2–3 дня, P0
 
+**Статус:** реализовано как backend-only foundation.
+
 Цель: создать доменную основу без записи аудио и внешних AI calls.
 
-Задачи:
+Сделано:
 
-- добавить SQLAlchemy models и Alembic migration для `Pupil`, `Lesson`, `LessonGeneratedDocument` минимум;
-- добавить Pydantic schemas для pupil/lesson/document responses;
-- добавить `PupilService` и `LessonService`;
-- добавить routers `/api/pupils` и `/api/lessons`;
-- добавить tests на CRUD, фильтрацию lessons по pupil/date и ownership placeholder;
-- обновить README/API docs.
+- добавлены SQLAlchemy models и Alembic migration для `Pupil` и `Lesson`; `LessonGeneratedDocument` сознательно оставлен для итерации D, чтобы первый PR не тянул document storage/download decisions;
+- добавлены Pydantic schemas для pupil/lesson create/update/response contracts;
+- добавлены `PupilService` и `LessonService`;
+- добавлены routers `/api/pupils` и `/api/lessons`;
+- добавлены tests на CRUD, фильтрацию lessons по pupil/date и placeholder ownership boundary;
+- обновлены README/API docs и references.
 
 Definition of Done:
 
 - можно создать ученика, создать занятие с темой, получить список занятий ученика;
 - миграция соответствует models;
+- audio upload, transcription provider, AI document generation и frontend UI не входят в этот slice;
 - `make compileall` и `make test` проходят.
 
 #### Итерация B. Audio upload и безопасное lesson storage, 2–3 дня, P0
