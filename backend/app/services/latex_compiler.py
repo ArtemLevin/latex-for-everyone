@@ -8,6 +8,7 @@ from typing import Optional
 from app.config import settings
 from app.schemas import LatexCompileResult
 from app.services.artifact_cleanup import cleanup_old_files
+from app.services.artifact_paths import compile_pdf_root
 from app.services.latex_file_policy import enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.latex_sanitizer import sanitize_latex_files, sanitize_latex_source
 
@@ -112,9 +113,14 @@ class LatexCompiler:
 
             if pdf_file.exists():
                 # Save PDF for download
-                output_dir = self.work_dir / "pdfs"
+                output_dir = compile_pdf_root()
                 output_dir.mkdir(parents=True, exist_ok=True)
-                cleanup_old_files(output_dir, max_age_seconds=settings.ARTIFACT_TTL_SECONDS, suffixes={".pdf"})
+                cleanup_old_files(
+                    output_dir,
+                    max_age_seconds=settings.ARTIFACT_TTL_SECONDS,
+                    suffixes={".pdf"},
+                    trusted_roots=(output_dir,),
+                )
 
                 pdf_filename = f"{compile_id}.pdf"
                 pdf_dest = output_dir / pdf_filename

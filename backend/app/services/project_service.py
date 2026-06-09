@@ -1,10 +1,9 @@
 from collections.abc import Callable
-from datetime import datetime
-
 from sqlalchemy.orm import Session
 
 from app.models import File, Project, ProjectSnapshot
 from app.schemas import ProjectCreate, ProjectUpdate, SnapshotCreate
+from app.time_utils import utc_now
 
 
 class ProjectServiceError(Exception):
@@ -68,7 +67,7 @@ class ProjectService:
         for key, value in update_data.items():
             setattr(project, key, value)
 
-        project.updated_at = datetime.utcnow()
+        project.updated_at = utc_now()
         db.commit()
         db.refresh(project)
         return project
@@ -126,7 +125,7 @@ class ProjectService:
                 )
             )
 
-        project.updated_at = datetime.utcnow()
+        project.updated_at = utc_now()
         db.commit()
 
     def duplicate_project(self, db: Session, project: Project) -> Project:

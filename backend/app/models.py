@@ -1,8 +1,8 @@
 import uuid
-from datetime import datetime
 from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON
 from sqlalchemy.orm import relationship
 from app.database import Base
+from app.time_utils import utc_now
 
 
 class Project(Base):
@@ -11,8 +11,8 @@ class Project(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(255), nullable=False, default="Безымянный проект")
     owner_id = Column(String(255), nullable=True, index=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     is_public = Column(Boolean, default=False)
     settings = Column(JSON, default=lambda: {"theme": "monokai", "fontSize": 14, "autoCompile": False})
 
@@ -30,8 +30,8 @@ class File(Base):
     name = Column(String(255), nullable=False)
     content = Column(Text, default="")
     is_main = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     project = relationship("Project", back_populates="files")
 
@@ -45,7 +45,7 @@ class CompileHistory(Base):
     output = Column(Text, nullable=True)
     error = Column(Text, nullable=True)
     compile_time = Column(String(50), nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     project = relationship("Project", back_populates="compile_history")
 
@@ -57,7 +57,7 @@ class ProjectSnapshot(Base):
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=False)
     name = Column(String(255), default="Автосохранение")
     data = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     project = relationship("Project", back_populates="snapshots")
 
@@ -83,6 +83,6 @@ class GenerationHistory(Base):
     total_tokens = Column(Integer, nullable=True)
     token_count_source = Column(String(50), nullable=True)
     error = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=utc_now)
 
     project = relationship("Project", back_populates="generation_history")
