@@ -808,3 +808,463 @@ make test
 - новые крупные шаблоны/редакционные возможности, не связанные со стабилизацией runtime.
 
 Эти задачи важны, но они должны идти после readiness, artifact safety и базового E2E smoke.
+
+## 10. План встраивания фичи «занятие → запись → транскрипт → AI-документы ученика»
+
+### 10.1 Цель и продуктовый сценарий
+
+Новая фича расширяет Latexed от редактора/генератора LaTeX до учебного workflow для преподавателя:
+
+1. преподаватель выбирает ученика из своего списка и начинает занятие по конкретной теме;
+2. по явной опции сервис записывает звук занятия;
+3. backend передаёт запись в transcription pipeline; черновой скрипт `transcribe.py` должен быть адаптирован в service layer;
+4. AI pipeline обрабатывает транскрипт по промптам `check_list.txt` и `pupil_mistakes.txt`;
+5. backend генерирует PDF-документы: чек-лист и ревью ошибок, названные по теме занятия;
+6. документы сохраняются в папку ученика внутри директории соответствующей даты и доступны для просмотра/скачивания.
+
+Целевая ценность: после урока преподаватель получает структурированные материалы без ручного переписывания аудио и без ручной сборки LaTeX/PDF.
+
+### 10.2 Важное наблюдение по текущему репозиторию
+
+На момент анализа команды поиска по репозиторию не нашли `transcribe.py`, `check_list.txt` и `pupil_mistakes.txt` в текущем checkout. Поэтому план закладывает два параллельных результата:
+
+- интеграционный контракт и места подключения этих артефактов;
+- безопасный fallback/заглушки для тестов, чтобы backend-домен можно было разработать до появления production-скрипта и финальных prompt-файлов.
+
+Когда файлы будут добавлены, их следует разместить в предсказуемых директориях:
+
+```text
+backend/app/services/transcription.py       # адаптер вокруг transcribe.py
+backend/app/prompts/lesson/check_list.txt
+backend/app/prompts/lesson/pupil_mistakes.txt
+```
+
+Если `transcribe.py` должен остаться standalone-скриптом, backend всё равно должен обращаться к нему через service adapter, а не вызывать из router напрямую.
+
+### 10.3 Архитектурные принципы встраивания
+
+Фичу следует встраивать в текущую архитектуру Latexed без смешивания HTTP, storage, AI и PDF-логики:
+
+```text
+Router layer
+  → lesson/pupil schemas
+  → LessonService / PupilService
+  → AudioStorageService / TranscriptionService
+  → LessonDocumentGenerationService
+  → existing AI generation and LaTeX/PDF services
+  → SQLAlchemy models + runtime artifact directories
+```
+
+Ключевые правила:
+
+- routers отвечают только за HTTP-контракты, upload/download, status codes и dependency wiring;
+- services отвечают за выбор директорий, валидацию имён, запуск transcription/AI/PDF workflows и транзакции;
+- models хранят состояние, но не запускают subprocess, AI calls или файловые операции;
+- все download paths должны использовать уже введённый safe artifact mechanism, а не ручную сборку путей;
+- prompt text, transcript и аудио не должны попадать в логи целиком;
+- запись аудио запускается только явным действием пользователя и должна иметь понятный consent/status UX.
+
+### 10.4 Доменная модель данных
+
+Минимальный набор сущностей для первой production-ready версии:
+
+| Entity | Назначение | Основные поля |
+|---|---|---|
+| `Pupil` | Ученик преподавателя | `id`, `teacher_id`, `display_name`, `notes`, `created_at`, `updated_at` |
+| `Lesson` | Конкретное занятие с учеником | `id`, `pupil_id`, `teacher_id`, `topic`, `lesson_date`, `status`, `created_at`, `updated_at` |
+| `LessonAudioRecording` | Метаданные аудиозаписи | `id`, `lesson_id`, `filename`, `content_type`, `size_bytes`, `duration_seconds`, `storage_path`, `status` |
+| `LessonTranscript` | Результат транскрибации | `id`, `lesson_id`, `recording_id`, `provider`, `language`, `text`, `status`, `error_message`, `created_at` |
+| `LessonGeneratedDocument` | Чек-лист / ревью ошибок / будущие документы | `id`, `lesson_id`, `document_type`, `title`, `filename`, `storage_path`, `status`, `error_message`, `created_at` |
+| `LessonProcessingJob` | Асинхронное состояние pipeline | `id`, `lesson_id`, `job_type`, `status`, `started_at`, `finished_at`, `error_message` |
+
+На первом этапе можно использовать `teacher_id` как строковый внешний идентификатор или placeholder, потому что полноценная auth/multi-user модель ещё не внедрена. При последующей auth-итерации это поле связывается с реальным пользователем.
+
+Рекомендуемые статусы:
+
+```text
+Lesson.status:
+  draft → recording_uploaded → transcribing → transcript_ready → generating_documents → completed
+                                                ↘ failed
+
+LessonAudioRecording.status:
+  uploaded → accepted → rejected
+
+LessonTranscript.status:
+  pending → running → ready | failed
+
+LessonGeneratedDocument.status:
+  pending → generating → ready | failed
+```
+
+### 10.5 Storage layout для аудио, транскриптов и документов
+
+Все runtime-файлы уроков должны находиться внутри отдельного trusted root, например `${UPLOAD_DIR}/lessons` или `${ARTIFACT_ROOT}/lessons`.
+
+Рекомендуемая структура:
+
+```text
+runtime/lessons/
+  teacher_<teacher_id>/
+    pupil_<pupil_id>/
+      2026-06-09/
+        lesson_<lesson_id>/
+          audio/
+            recording.webm
+          transcripts/
+            transcript.txt
+            transcript.json
+          documents/
+            tema-zanyatiya-check-list.pdf
+            tema-zanyatiya-pupil-mistakes.pdf
+            tema-zanyatiya-check-list.tex
+            tema-zanyatiya-pupil-mistakes.tex
+```
+
+Правила безопасности:
+
+- пользовательские `topic`, имена учеников и исходные имена файлов нельзя напрямую использовать как paths;
+- все части путей должны проходить slug/safe filename helper;
+- download endpoints должны отдавать только документы, связанные с `LessonGeneratedDocument`, а не любой файл по имени;
+- cleanup должен принимать только trusted lesson root и не удалять файлы вне runtime directories;
+- для аудио следует ограничить `content_type`, размер и длительность.
+
+### 10.6 API-контракты
+
+#### Pupil API
+
+```text
+GET    /api/pupils
+POST   /api/pupils
+GET    /api/pupils/{pupil_id}
+PATCH  /api/pupils/{pupil_id}
+DELETE /api/pupils/{pupil_id}
+```
+
+Минимальные schemas:
+
+```text
+PupilCreate: display_name, notes?
+PupilUpdate: display_name?, notes?
+PupilResponse: id, teacher_id, display_name, notes, created_at, updated_at
+```
+
+#### Lesson API
+
+```text
+POST   /api/lessons
+GET    /api/lessons?pupil_id=&date_from=&date_to=
+GET    /api/lessons/{lesson_id}
+PATCH  /api/lessons/{lesson_id}
+DELETE /api/lessons/{lesson_id}
+```
+
+Минимальные schemas:
+
+```text
+LessonCreate: pupil_id, topic, lesson_date?
+LessonUpdate: topic?, lesson_date?, status?
+LessonResponse: id, pupil_id, teacher_id, topic, lesson_date, status, documents[], transcript?
+```
+
+#### Audio upload / transcription / document generation API
+
+```text
+POST /api/lessons/{lesson_id}/recordings
+POST /api/lessons/{lesson_id}/transcribe
+POST /api/lessons/{lesson_id}/documents/generate
+GET  /api/lessons/{lesson_id}/documents
+GET  /api/lessons/{lesson_id}/documents/{document_id}/download
+GET  /api/lessons/{lesson_id}/processing-status
+```
+
+Переходный синхронный вариант допустим только для MVP и тестов. Production-направление — job-based pipeline:
+
+```text
+POST /api/lessons/{lesson_id}/processing-jobs
+GET  /api/lessons/{lesson_id}/processing-jobs/{job_id}
+```
+
+### 10.7 Transcription pipeline
+
+`transcribe.py` нужно превратить в адаптер с явным контрактом:
+
+```text
+TranscriptionService.transcribe(recording_path, language="ru") -> TranscriptResult
+
+TranscriptResult:
+  text: str
+  language: str
+  provider: str
+  duration_seconds?: float
+  confidence?: float
+  segments?: list
+```
+
+Порядок реализации:
+
+1. перенести reusable-часть `transcribe.py` в `backend/app/services/transcription.py`;
+2. оставить CLI wrapper, если скрипт нужен для ручного запуска;
+3. добавить настройки provider/model/API keys через `backend/app/config.py`;
+4. добавить size/duration/content-type validation до запуска транскрибации;
+5. сохранять raw transcript и normalized transcript отдельно;
+6. тестировать service через fake transcription provider, чтобы CI не зависел от внешней нейросети.
+
+Failure behavior:
+
+- если provider недоступен, lesson остаётся в статусе `recording_uploaded`, transcript получает `failed`;
+- повторный запуск transcription разрешён, но должен создавать новую попытку или обновлять статус явно;
+- текст ошибки в API должен быть кратким и не содержать ключи/provider payload.
+
+### 10.8 AI processing pipeline для чек-листа и ревью ошибок
+
+Промпты `check_list.txt` и `pupil_mistakes.txt` нужно подключить через отдельный prompt loader:
+
+```text
+LessonPromptService.load("check_list")
+LessonPromptService.load("pupil_mistakes")
+LessonDocumentGenerationService.generate_documents(lesson_id)
+```
+
+Входные данные prompt-а:
+
+- тема занятия;
+- дата занятия;
+- имя/идентификатор ученика;
+- transcript text;
+- optional teacher notes;
+- формат результата: структурированный JSON или строго ограниченный LaTeX fragment.
+
+Рекомендуемый формат AI output: structured JSON, из которого backend строит LaTeX сам. Это безопаснее, чем разрешать модели возвращать полный `.tex` без контроля.
+
+Пример целевого результата:
+
+```text
+check_list:
+  title
+  objectives[]
+  completed[]
+  homework[]
+  next_steps[]
+
+pupil_mistakes:
+  title
+  mistakes[]:
+    topic
+    quote_or_context
+    explanation
+    correction
+    practice_task
+```
+
+Далее backend:
+
+1. валидирует JSON schema;
+2. экранирует LaTeX-special characters;
+3. строит `.tex` через отдельный lesson document builder;
+4. компилирует PDF через существующий `pdf_generator`/`latex_compiler` boundary;
+5. сохраняет `LessonGeneratedDocument` metadata и безопасные filenames.
+
+### 10.9 Frontend UX
+
+Фронтенд-расширение лучше делать после backend foundation, не ломая существующий ordered script contract.
+
+Новые UI-блоки:
+
+- список учеников преподавателя;
+- карточка ученика с историей занятий;
+- форма создания занятия: тема, дата, заметки;
+- блок записи аудио с состояниями `idle`, `recording`, `stopped`, `uploading`, `uploaded`, `transcribing`, `generating`, `completed`, `failed`;
+- вкладка transcript preview;
+- список generated documents с download buttons.
+
+Технический подход:
+
+- использовать браузерный `MediaRecorder`;
+- хранить запись как `audio/webm` или другой поддерживаемый формат;
+- добавить новый ordered script, например `frontend/js/10-lessons.js`;
+- обновить `frontend/main.html` и contract test на порядок scripts;
+- не вводить bundler/framework на этой итерации;
+- если backend недоступен, UI должен показать degraded state и не терять уже введённые тему/заметки.
+
+### 10.10 Итерационный roadmap внедрения
+
+#### Итерация A. Backend domain foundation, 2–3 дня, P0
+
+Цель: создать доменную основу без записи аудио и внешних AI calls.
+
+Задачи:
+
+- добавить SQLAlchemy models и Alembic migration для `Pupil`, `Lesson`, `LessonGeneratedDocument` минимум;
+- добавить Pydantic schemas для pupil/lesson/document responses;
+- добавить `PupilService` и `LessonService`;
+- добавить routers `/api/pupils` и `/api/lessons`;
+- добавить tests на CRUD, фильтрацию lessons по pupil/date и ownership placeholder;
+- обновить README/API docs.
+
+Definition of Done:
+
+- можно создать ученика, создать занятие с темой, получить список занятий ученика;
+- миграция соответствует models;
+- `make compileall` и `make test` проходят.
+
+#### Итерация B. Audio upload и безопасное lesson storage, 2–3 дня, P0
+
+Цель: принимать аудио и сохранять его в trusted runtime root.
+
+Задачи:
+
+- добавить `LessonAudioRecording` model/migration;
+- добавить `AudioStorageService` с safe path policy;
+- добавить endpoint `POST /api/lessons/{lesson_id}/recordings`;
+- ограничить content-type, размер, расширение и filename;
+- добавить cleanup policy для lesson artifacts;
+- добавить tests на path traversal, unsupported media type, oversized upload, сохранение валидного файла.
+
+Definition of Done:
+
+- запись аудио сохраняется только внутри trusted lesson root;
+- API возвращает recording metadata;
+- unsafe filename/content-type не проходят.
+
+#### Итерация C. Transcription integration, 2–4 дня, P0/P1
+
+Цель: подключить `transcribe.py` через service adapter.
+
+Задачи:
+
+- добавить `TranscriptionService` и fake provider для тестов;
+- адаптировать `transcribe.py` к reusable function/API;
+- добавить `LessonTranscript` model/migration;
+- добавить endpoint `POST /api/lessons/{lesson_id}/transcribe`;
+- сохранять transcript text и provider metadata;
+- добавить tests на успешную транскрибацию и provider failure.
+
+Definition of Done:
+
+- по загруженной записи можно получить transcript record;
+- failure provider-а не ломает lesson и отражается статусом `failed`;
+- CI tests не требуют реального внешнего AI/transcription provider.
+
+#### Итерация D. AI documents generation, 3–5 дней, P0/P1
+
+Цель: генерировать чек-лист и ревью ошибок из transcript-а.
+
+Задачи:
+
+- добавить prompt files `check_list.txt`, `pupil_mistakes.txt` в `backend/app/prompts/lesson/`;
+- добавить prompt loader и structured output contract;
+- добавить `LessonDocumentGenerationService`;
+- добавить LaTeX builder для lesson documents;
+- использовать safe artifact paths и compile/export hardening;
+- добавить endpoint `POST /api/lessons/{lesson_id}/documents/generate`;
+- добавить download endpoint для generated documents;
+- добавить tests на prompt loading, AI fake response, LaTeX escaping, PDF/document metadata persistence.
+
+Definition of Done:
+
+- из transcript-а создаются минимум два документа: чек-лист и ревью ошибок;
+- filenames соответствуют теме занятия через slug, но не содержат unsafe path chars;
+- download доступен только для documents, связанных с lesson.
+
+#### Итерация E. Job-based orchestration, 3–5 дней, P1
+
+Цель: не держать HTTP request во время транскрибации, AI и PDF compilation.
+
+Задачи:
+
+- добавить `LessonProcessingJob` model/migration;
+- реализовать job statuses и polling endpoint;
+- вынести transcription/generation pipeline в worker-friendly service;
+- добавить retry/cancel policy;
+- добавить tests на переходы статусов.
+
+Definition of Done:
+
+- frontend может запустить processing job и опрашивать статус;
+- повторный запуск не создаёт неконтролируемые дубль-документы;
+- ошибка одного этапа видна пользователю и не скрывает предыдущие результаты.
+
+#### Итерация F. Frontend lesson workflow, 4–6 дней, P1
+
+Цель: дать преподавателю UI для полного сценария.
+
+Задачи:
+
+- добавить UI списка учеников и занятий;
+- добавить создание занятия и выбор темы;
+- добавить MediaRecorder flow;
+- добавить upload/progress/status UI;
+- добавить transcript preview;
+- добавить список и скачивание documents;
+- добавить frontend contract test для нового script order;
+- добавить E2E smoke: создать ученика → создать занятие → загрузить fake audio → увидеть статус и documents fallback.
+
+Definition of Done:
+
+- преподаватель проходит сценарий от выбора ученика до скачивания generated documents;
+- graceful fallback работает при недоступном backend/provider;
+- `make frontend-check`, `make test` и frontend smoke проходят или limitation явно описана.
+
+### 10.11 Тестовая стратегия
+
+| Уровень | Что покрыть | Инструмент |
+|---|---|---|
+| Unit/service | safe storage, slug filenames, prompt loading, transcription adapter, document builder | pytest |
+| API/TestClient | pupils/lessons CRUD, audio upload, transcribe, generate, download | pytest + TestClient |
+| Security regression | path traversal, absolute paths, unsupported extensions, symlink escape, oversized audio | pytest |
+| AI/provider | fake transcription provider, fake generation provider, provider failure | pytest monkeypatch/fakes |
+| Frontend contract | порядок scripts, наличие `10-lessons.js`, отсутствие legacy entrypoint | pytest static checks |
+| E2E smoke | создать lesson workflow и проверить graceful statuses | Playwright или аналог |
+
+Минимальный набор acceptance tests для первого релиза фичи:
+
+- `test_create_pupil_and_lesson`;
+- `test_audio_upload_rejects_path_traversal_filename`;
+- `test_audio_upload_rejects_unsupported_content_type`;
+- `test_transcription_success_with_fake_provider`;
+- `test_document_generation_creates_checklist_and_mistakes_documents`;
+- `test_lesson_document_download_rejects_cross_lesson_access`;
+- `test_lesson_artifact_cleanup_does_not_escape_runtime_root`.
+
+### 10.12 Observability и operational readiness
+
+Readiness endpoint нужно расширять постепенно, не смешивая с liveness:
+
+- `health` остаётся проверкой, что процесс отвечает HTTP;
+- `ready` дополнительно может показывать:
+  - доступность lesson artifact root на запись;
+  - наличие transcription provider credentials/config;
+  - доступность AI provider-а для lesson document generation;
+  - доступность `pdflatex` для PDF-документов.
+
+Логи и метрики:
+
+- логировать `lesson_id`, `pupil_id`, `job_id`, stage, status, duration;
+- не логировать полный transcript, audio path с персональными данными, prompt целиком или generated document text;
+- собирать duration по этапам: upload, transcription, AI generation, PDF compile;
+- фиксировать количество failed/retried jobs.
+
+### 10.13 Основные риски и решения
+
+| Риск | Почему важно | Митигация |
+|---|---|---|
+| Персональные данные в аудио/транскриптах | Высокая чувствительность данных учеников | consent UX, ограничение логов, lifecycle/cleanup, access control roadmap |
+| Долгие AI/transcription операции | HTTP timeout и плохой UX | job pipeline и polling |
+| Path traversal в именах тем/файлов | Риск чтения/записи вне runtime root | slug helper, trusted roots, download by DB id |
+| Галлюцинации AI в документах | Неверные рекомендации ученику | structured output, validation, teacher review before final download |
+| Отсутствие `pdflatex` | PDF generation может быть degraded | readiness, fallback `.tex`/HTML, docs по `make latex-check` |
+| Нет auth модели | Нельзя безопасно разделять преподавателей | временный `teacher_id`, затем auth/ownership iteration |
+
+### 10.14 Рекомендуемый первый PR
+
+Первый PR должен быть узким и не должен одновременно включать запись аудио, transcription provider и frontend UI.
+
+Рекомендуемый scope:
+
+- models/migration/schemas/services/routers для `Pupil` и `Lesson`;
+- базовые endpoints CRUD;
+- tests на создание ученика, создание занятия, получение списка занятий ученика;
+- README секция с описанием будущего lesson workflow и текущего backend foundation;
+- без изменений в frontend и без внешних AI calls.
+
+Такой scope снижает риск, даёт основу для хранения документов и позволит следующими PR подключать audio storage, transcription и generation по одному безопасному boundary за раз.
