@@ -173,6 +173,21 @@ Use `make clean` to remove local SQLite databases and Python/test caches from th
 
 Backend application code uses a shared `utc_now()` helper from `backend/app/time_utils.py` for timestamp defaults and manual `updated_at` changes. Avoid direct `datetime.utcnow()` calls in new code; the test suite includes a regression check for this policy.
 
+## Lesson/transcription preparation inventory
+
+The lesson workflow described in `PLAN.md` is not implemented yet. The current checkout contains only preparation artifacts for that future work:
+
+- `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
+- `check_list.txt` is source prompt material for a future lesson checklist document. It currently includes hardcoded student-like text (`[ФИО ученика: Николь, ЕГЭ]`) and must be parameterized before any production use.
+- `pupil_mistakes.txt` is source prompt material for a future personalized mistakes-review document. Treat it as draft prompt input, not as a production template.
+
+Boundary policy for the first lesson/transcription iteration:
+
+- Do not import or call `transcibe.py` from routers. The preferred backend boundary is a future `backend/app/services/transcription.py` adapter with a typed result and fake provider for tests.
+- Do not move or wire the prompt files directly into generation routes until a prompt loader parameterizes them and tests prove that hardcoded student data is not present.
+- The target backend-owned locations are `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, and `backend/app/prompts/lesson/pupil_mistakes.txt`.
+- The first real implementation PR should stay limited to `Pupil`/`Lesson` backend foundation; it must not include audio upload, transcription provider calls, AI document generation, or frontend UI.
+
 ## Database migrations
 
 Alembic is the source of truth for schema changes. The repository now includes an initial baseline revision for the current `projects`, `files`, `compile_history`, and `project_snapshots` tables. Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.

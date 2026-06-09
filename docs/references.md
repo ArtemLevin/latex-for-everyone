@@ -133,6 +133,29 @@ Good patterns:
 - validate generated LaTeX structure;
 - log metadata, hashes, counts, and status instead of full user content.
 
+### Lesson/transcription preparation artifacts
+
+References:
+
+- `PLAN.md` section 10
+- `transcibe.py`
+- `check_list.txt`
+- `pupil_mistakes.txt`
+
+Current status:
+
+- The lesson workflow is planned but not implemented in backend models, schemas, routers, or services.
+- `transcibe.py` is a legacy-named standalone CLI script, not a backend service. It should either become a thin wrapper around a future `backend/app/services/transcription.py` module or be renamed in a dedicated follow-up. Do not import it from routers.
+- `check_list.txt` and `pupil_mistakes.txt` are draft prompt source files in the repository root. They must be moved to `backend/app/prompts/lesson/`, parameterized, and loaded through a prompt service before production use.
+- `check_list.txt` currently contains hardcoded student-like text, so tests for the future prompt loader must guard against committing real or example pupil data in production templates.
+
+Required boundaries for future work:
+
+1. `Pupil`/`Lesson` backend foundation comes first and must not call audio, transcription, or AI providers.
+2. Transcription must go through a typed service adapter with a fake provider for tests.
+3. Lesson document generation should prefer structured AI output that the backend validates before building LaTeX.
+4. Downloads must resolve by persisted lesson/document metadata and trusted roots, not by arbitrary user-provided filenames.
+
 ### Tests
 
 Reference: `backend/tests/test_api.py`
