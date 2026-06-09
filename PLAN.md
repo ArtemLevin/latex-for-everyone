@@ -840,13 +840,34 @@ make test
 
 ## 10. План встраивания фичи «занятие → запись → транскрипт → AI-документы ученика»
 
+### 10.0 Итерация 0 — инвентаризация и фиксация границ
+
+**Статус:** выполнено документально, без подключения к runtime-коду.
+
+Цель этой подготовительной итерации — убрать неоднозначности перед началом реализации lesson workflow: что уже лежит в репозитории, что нельзя подключать напрямую и какие boundaries обязательны для следующих PR.
+
+Зафиксированные артефакты:
+
+- `transcibe.py` — standalone Whisper/ffmpeg-oriented CLI script с legacy-опечаткой в имени. Он не является backend service, не должен импортироваться из routers и не должен определять публичные API names. Предпочтительный путь — будущий `backend/app/services/transcription.py` с typed result, provider abstraction и fake provider для tests; CLI можно оставить тонкой wrapper-командой или переименовать отдельным PR.
+- `check_list.txt` — draft prompt source для будущего чек-листа. Сейчас содержит hardcoded student-like строку `[ФИО ученика: Николь, ЕГЭ]`, поэтому до production-подключения файл нужно перенести в `backend/app/prompts/lesson/`, параметризовать и покрыть tests на отсутствие hardcoded pupil data.
+- `pupil_mistakes.txt` — draft prompt source для будущего personalized mistakes-review document. Его также нужно переносить только через prompt loader, а не подключать напрямую из generation/lesson routers.
+
+Boundary decisions для следующих итераций:
+
+1. Первый implementation PR ограничивается `Pupil`/`Lesson` backend foundation и не включает audio upload, transcription provider, AI document generation или frontend UI.
+2. Audio/transcription logic не вызывается из routers напрямую; routers работают через services и typed schemas.
+3. Prompt-файлы считаются исходными материалами, а не production-ready templates.
+4. Целевые backend-owned locations остаются: `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, `backend/app/prompts/lesson/pupil_mistakes.txt`.
+
+Проверка для этой итерации: достаточно `git diff --check`, потому что изменения только документальные.
+
 ### 10.1 Цель и продуктовый сценарий
 
 Новая фича расширяет Latexed от редактора/генератора LaTeX до учебного workflow для преподавателя:
 
 1. преподаватель выбирает ученика из своего списка и начинает занятие по конкретной теме;
 2. по явной опции сервис записывает звук занятия;
-3. backend передаёт запись в transcription pipeline; черновой скрипт `transcribe.py` должен быть адаптирован в service layer;
+3. backend передаёт запись в transcription pipeline; текущий standalone-скрипт `transcibe.py` с legacy-опечаткой должен быть адаптирован в service layer, а публичные имена будущего adapter-а должны использовать корректное `transcription`/`transcribe`;
 4. AI pipeline обрабатывает транскрипт по промптам `check_list.txt` и `pupil_mistakes.txt`;
 5. backend генерирует PDF-документы: чек-лист и ревью ошибок, названные по теме занятия;
 6. документы сохраняются в папку ученика внутри директории соответствующей даты и доступны для просмотра/скачивания.
