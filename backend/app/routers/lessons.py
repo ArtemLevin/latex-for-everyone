@@ -1,15 +1,23 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_teacher_id
-from app.schemas import LessonCreate, LessonResponse, LessonUpdate, MessageResponse
+from app.schemas import LessonAudioRecordingResponse, LessonCreate, LessonResponse, LessonUpdate, MessageResponse
+from app.services.audio_storage import (
+    AudioPayloadTooLargeError,
+    AudioStorageService,
+    InvalidAudioFilenameError,
+    UnsupportedAudioTypeError,
+)
 from app.services.lesson_service import LessonNotFoundError, LessonService, PupilNotFoundError
 
 router = APIRouter()
 lesson_service = LessonService()
+audio_storage_service = AudioStorageService()
 
 
 def map_lesson_service_error(exc: Exception) -> HTTPException:
@@ -18,6 +26,16 @@ def map_lesson_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LessonNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected lesson service error")
+
+
+def map_audio_storage_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, InvalidAudioFilenameError):
+        return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    if isinstance(exc, UnsupportedAudioTypeError):
+        return HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc))
+    if isinstance(exc, AudioPayloadTooLargeError):
+        return HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected audio storage error")
 
 
 @router.get("/", response_model=list[LessonResponse])
@@ -92,3 +110,31 @@ async def delete_lesson(
     except LessonNotFoundError as exc:
         raise map_lesson_service_error(exc) from exc
     return {"message": f"Lesson '{topic}' deleted"}
+
+
+@router.post(
+    "/{lesson_id}/recordings",
+    response_model=LessonAudioRecordingResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def upload_lesson_recording(
+    lesson_id: str,
+    file: UploadFile = FastAPIFile(...),
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        payload = await file.read(settings.MAX_LESSON_AUDIO_SIZE + 1)
+        return audio_storage_service.create_recording(
+            db,
+            lesson=lesson,
+            teacher_id=teacher_id,
+            filename=file.filename or "",
+            content_type=file.content_type,
+            payload=payload,
+        )
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except (InvalidAudioFilenameError, UnsupportedAudioTypeError, AudioPayloadTooLargeError) as exc:
+        raise map_audio_storage_error(exc) from exc

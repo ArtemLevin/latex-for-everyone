@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON, Float
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.time_utils import utc_now
@@ -48,6 +48,24 @@ class Lesson(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     pupil = relationship("Pupil", back_populates="lessons")
+    recordings = relationship("LessonAudioRecording", back_populates="lesson", cascade="all, delete-orphan")
+
+
+class LessonAudioRecording(Base):
+    __tablename__ = "lesson_audio_recordings"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    duration_seconds = Column(Float, nullable=True)
+    storage_path = Column(Text, nullable=False)
+    status = Column(String(50), nullable=False, default="uploaded")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="recordings")
 
 
 class File(Base):

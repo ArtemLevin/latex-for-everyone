@@ -106,6 +106,20 @@ class LessonResponse(BaseModel):
     updated_at: datetime
 
 
+class LessonAudioRecordingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    lesson_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    duration_seconds: Optional[float] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str

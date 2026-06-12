@@ -1165,22 +1165,27 @@ Definition of Done:
 
 #### Итерация B. Audio upload и безопасное lesson storage, 2–3 дня, P0
 
+**Статус:** реализовано как backend-only safe upload/storage slice.
+
 Цель: принимать аудио и сохранять его в trusted runtime root.
 
-Задачи:
+Сделано:
 
-- добавить `LessonAudioRecording` model/migration;
-- добавить `AudioStorageService` с safe path policy;
-- добавить endpoint `POST /api/lessons/{lesson_id}/recordings`;
-- ограничить content-type, размер, расширение и filename;
-- добавить cleanup policy для lesson artifacts;
-- добавить tests на path traversal, unsupported media type, oversized upload, сохранение валидного файла.
+- добавлены `LessonAudioRecording` model/migration;
+- добавлен `AudioStorageService` с safe path policy, generated storage filenames и root containment check;
+- добавлен endpoint `POST /api/lessons/{lesson_id}/recordings`;
+- добавлены настройки `LESSON_ARTIFACT_ROOT`, `MAX_LESSON_AUDIO_SIZE`, `LESSON_AUDIO_ALLOWED_CONTENT_TYPES`, `LESSON_AUDIO_ALLOWED_EXTENSIONS`;
+- ограничены content-type, размер, расширение и filename;
+- добавлены tests на path traversal, unsupported media type, oversized upload, cross-teacher access, unknown lesson и сохранение валидного файла.
+
+Остаток для отдельного retention PR: TTL/recursive cleanup для custom `LESSON_ARTIFACT_ROOT`; локальный default-root остаётся под `${UPLOAD_DIR}/lessons`, поэтому `make clean-artifacts` удаляет его вместе с `/tmp/latexed_uploads`.
 
 Definition of Done:
 
 - запись аудио сохраняется только внутри trusted lesson root;
 - API возвращает recording metadata;
-- unsafe filename/content-type не проходят.
+- unsafe filename/content-type/size не проходят;
+- transcription provider, AI document generation и frontend UI не входят в этот slice.
 
 #### Итерация C. Transcription integration, 2–4 дня, P0/P1
 

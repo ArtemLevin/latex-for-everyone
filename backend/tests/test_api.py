@@ -104,7 +104,7 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
-    assert {"projects", "files", "compile_history", "project_snapshots", "generation_history", "pupils", "lessons", "alembic_version"}.issubset(tables)
+    assert {"projects", "files", "compile_history", "project_snapshots", "generation_history", "pupils", "lessons", "lesson_audio_recordings", "alembic_version"}.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
     assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
@@ -113,6 +113,9 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     assert {"ix_lessons_teacher_id", "ix_lessons_pupil_id", "ix_lessons_lesson_date"}.issubset(lesson_indexes)
     lesson_columns = {column["name"] for column in inspector.get_columns("lessons")}
     assert {"pupil_id", "teacher_id", "topic", "lesson_date", "status"}.issubset(lesson_columns)
+    recording_columns = {column["name"] for column in inspector.get_columns("lesson_audio_recordings")}
+    assert {"lesson_id", "filename", "content_type", "size_bytes", "storage_path", "status"}.issubset(recording_columns)
+    assert "ix_lesson_audio_recordings_lesson_id" in {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
 
@@ -388,6 +391,118 @@ def test_lesson_teacher_scope_placeholder(monkeypatch):
         assert cross_scope_response.status_code == 404
     finally:
         app.dependency_overrides.pop(get_current_teacher_id, None)
+
+
+def upload_test_recording(
+    lesson_id: str,
+    *,
+    filename: str = "recording.webm",
+    content_type: str = "audio/webm",
+    data: bytes = b"audio",
+):
+    return client.post(
+        f"/api/lessons/{lesson_id}/recordings",
+        files={"file": (filename, data, content_type)},
+    )
+
+
+def test_lesson_audio_upload_success(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    pupil = create_test_pupil("Audio Student")
+    lesson = create_test_lesson(pupil["id"], lesson_date="2026-06-09T10:00:00Z")
+
+    response = upload_test_recording(lesson["id"], data=b"webm-data")
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["lesson_id"] == lesson["id"]
+    assert data["filename"] == "recording.webm"
+    assert data["content_type"] == "audio/webm"
+    assert data["size_bytes"] == len(b"webm-data")
+    assert data["status"] == "uploaded"
+
+    stored_files = list((tmp_path / "lesson_artifacts").rglob("*.webm"))
+    assert len(stored_files) == 1
+    assert stored_files[0].read_bytes() == b"webm-data"
+    assert "recording.webm" not in str(stored_files[0].relative_to(tmp_path / "lesson_artifacts"))
+
+    lesson_response = client.get(f"/api/lessons/{lesson['id']}")
+    assert lesson_response.status_code == 200
+    assert lesson_response.json()["status"] == "recording_uploaded"
+
+
+def test_lesson_audio_upload_rejects_path_traversal_filename(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    pupil = create_test_pupil("Unsafe Audio Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = upload_test_recording(lesson["id"], filename="../recording.webm")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid audio filename"
+    assert not (tmp_path / "lesson_artifacts").exists()
+
+
+def test_lesson_audio_upload_rejects_unsupported_content_type(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    pupil = create_test_pupil("Unsupported Audio Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = upload_test_recording(lesson["id"], filename="recording.txt", content_type="text/plain")
+
+    assert response.status_code == 415
+    assert response.json()["detail"] in {"Unsupported audio file extension", "Unsupported audio content type"}
+    assert not (tmp_path / "lesson_artifacts").exists()
+
+
+def test_lesson_audio_upload_rejects_oversized_payload(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(settings, "MAX_LESSON_AUDIO_SIZE", 4)
+    pupil = create_test_pupil("Oversized Audio Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = upload_test_recording(lesson["id"], data=b"12345")
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Audio payload exceeds configured size limit"
+    assert not (tmp_path / "lesson_artifacts").exists()
+
+
+def test_lesson_audio_upload_respects_teacher_scope(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.dependencies import get_current_teacher_id
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    pupil = create_test_pupil("Scoped Audio Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
+    try:
+        response = upload_test_recording(lesson["id"])
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Lesson not found"
+        assert not (tmp_path / "lesson_artifacts").exists()
+    finally:
+        app.dependency_overrides.pop(get_current_teacher_id, None)
+
+
+def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+
+    response = upload_test_recording("missing-lesson")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Lesson not found"
 
 
 def test_create_file():

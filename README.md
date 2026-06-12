@@ -163,9 +163,10 @@ Generated artifact locations are intentionally separated by purpose:
 
 - compile PDF downloads are served only from `${COMPILE_WORK_DIR}/pdfs`;
 - export downloads are served only from `${UPLOAD_DIR}/exports`;
-- uploaded user files and temporary upload state live under `${UPLOAD_DIR}`.
+- uploaded user files and temporary upload state live under `${UPLOAD_DIR}`;
+- lesson audio recordings live under `${LESSON_ARTIFACT_ROOT}` when set, otherwise under `${UPLOAD_DIR}/lessons`.
 
-Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Automatic best-effort cleanup uses `ARTIFACT_TTL_SECONDS` and removes only old allowlisted artifact files from trusted runtime roots.
+Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Automatic best-effort cleanup uses `ARTIFACT_TTL_SECONDS` and removes only old allowlisted compile/export artifact files from trusted runtime roots; custom lesson-audio retention remains an explicit follow-up, while the default lesson root is removed by `make clean-artifacts` because it is under `/tmp/latexed_uploads`.
 
 Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
 
@@ -175,22 +176,22 @@ Backend application code uses a shared `utc_now()` helper from `backend/app/time
 
 ## Lesson/transcription preparation inventory
 
-The lesson workflow described in `PLAN.md` is not implemented yet. The current checkout contains only preparation artifacts for that future work:
+The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD and a safe lesson-audio upload/storage slice, while transcription and document generation remain future work. The current checkout also contains preparation artifacts for those later phases:
 
 - `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
 - `check_list.txt` is source prompt material for a future lesson checklist document. It currently includes hardcoded student-like text (`[ФИО ученика: Николь, ЕГЭ]`) and must be parameterized before any production use.
 - `pupil_mistakes.txt` is source prompt material for a future personalized mistakes-review document. Treat it as draft prompt input, not as a production template.
 
-Boundary policy for the first lesson/transcription iteration:
+Boundary policy for the remaining transcription/document-generation iterations:
 
 - Do not import or call `transcibe.py` from routers. The preferred backend boundary is a future `backend/app/services/transcription.py` adapter with a typed result and fake provider for tests.
 - Do not move or wire the prompt files directly into generation routes until a prompt loader parameterizes them and tests prove that hardcoded student data is not present.
 - The target backend-owned locations are `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, and `backend/app/prompts/lesson/pupil_mistakes.txt`.
-- The first real implementation PR should stay limited to `Pupil`/`Lesson` backend foundation; it must not include audio upload, transcription provider calls, AI document generation, or frontend UI.
+- Audio upload is limited to validated storage metadata under `POST /api/lessons/{lesson_id}/recordings`; it must not invoke transcription providers, AI document generation, or frontend UI flows.
 
 ## Database migrations
 
-Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
 
 Recommended workflow:
 
@@ -207,7 +208,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 
 The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
 
-This foundation intentionally does **not** upload audio, run transcription, call AI providers, generate lesson documents, or change the frontend. Those later phases remain behind the boundaries documented in the lesson/transcription preparation inventory.
+This foundation now includes safe audio upload metadata and storage under `POST /api/lessons/{lesson_id}/recordings`, but it still does **not** run transcription, call AI providers, generate lesson documents, or change the frontend. Those later phases remain behind the boundaries documented in the lesson/transcription preparation inventory.
 
 ## Frontend/backend integration
 
@@ -289,6 +290,7 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | GET | `/api/lessons/{id}` | Get a lesson |
 | PATCH | `/api/lessons/{id}` | Update a lesson topic, date, or status |
 | DELETE | `/api/lessons/{id}` | Delete a lesson |
+| POST | `/api/lessons/{id}/recordings` | Upload a validated audio recording for a lesson into the trusted lesson artifact root |
 | POST | `/api/projects/{id}/duplicate` | Duplicate project |
 | GET | `/api/files/project/{id}` | List files |
 | POST | `/api/files/project/{id}` | Create file |
@@ -335,6 +337,10 @@ Deprecated compatibility routes are still available for compile history:
 | `LATEX_ALLOWED_EXTENSIONS` | `.tex,.bib,.cls,.sty` | Comma-separated allowlist for user-provided LaTeX project files accepted by compile/export payloads |
 | `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for generated compile/export artifacts; set `0` to disable automatic cleanup |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
+| `LESSON_ARTIFACT_ROOT` | empty (`${UPLOAD_DIR}/lessons`) | Trusted root for lesson audio artifacts; leave empty to derive from `UPLOAD_DIR` |
+| `MAX_LESSON_AUDIO_SIZE` | `104857600` | Maximum lesson audio upload size in bytes |
+| `LESSON_AUDIO_ALLOWED_CONTENT_TYPES` | `audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a` | Comma-separated allowlist for lesson audio upload media types |
+| `LESSON_AUDIO_ALLOWED_EXTENSIONS` | `.webm,.wav,.mp3,.m4a,.ogg` | Comma-separated allowlist for lesson audio upload filename extensions |
 | `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
