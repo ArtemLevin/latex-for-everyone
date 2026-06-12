@@ -1260,18 +1260,21 @@ Definition of Done:
 
 #### Итерация F. Frontend lesson workflow, 4–6 дней, P1
 
-Цель: дать преподавателю UI для полного сценария.
+**Статус:** реализовано как lightweight frontend workflow panel без изменения основного editor contract.
 
-Задачи:
+Цель: дать преподавателю UI для backend lesson workflow и polling/status сценария.
 
-- добавить UI списка учеников и занятий;
-- добавить создание занятия и выбор темы;
-- добавить MediaRecorder flow;
-- добавить upload/progress/status UI;
-- добавить transcript preview;
-- добавить список и скачивание documents;
-- добавить frontend contract test для нового script order;
-- добавить E2E smoke: создать ученика → создать занятие → загрузить fake audio → увидеть статус и documents fallback.
+Сделано:
+
+- добавлен sidebar tab `Уроки` и script `frontend/js/10-lessons.js` после existing numbered scripts;
+- добавлен UI списка учеников/занятий, создание ученика и занятия;
+- добавлен MediaRecorder flow с fallback на manual audio file upload;
+- добавлены upload/status controls, explicit transcription, document generation и full pipeline job action;
+- добавлены transcript/job status previews и список download links для generated documents;
+- graceful fallback показывает offline state при недоступном backend;
+- обновлён frontend contract test для script order и lesson DOM/entrypoint contract.
+
+Остаток для следующих PR: production UX polish, progress polling timer, browser E2E с реальным backend fixture, visual states для long-running external worker jobs.
 
 Definition of Done:
 

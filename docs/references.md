@@ -101,8 +101,9 @@ References:
 - `backend/app/services/lesson_jobs.py`
 - `backend/app/prompts/lesson/check_list.txt`
 - `backend/app/prompts/lesson/pupil_mistakes.txt`
+- `frontend/js/10-lessons.js`
 
-Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService`, explicit transcription through `TranscriptionService`, checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Do not add frontend concerns to these routers; UI belongs to later section 10 iterations.
+Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService`, explicit transcription through `TranscriptionService`, checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Frontend lesson concerns live in `frontend/js/10-lessons.js`; routers should remain service-bound HTTP adapters.
 
 ### Projects and files routers
 
@@ -164,6 +165,7 @@ References:
 - `transcibe.py`
 - `backend/app/prompts/lesson/check_list.txt`
 - `backend/app/prompts/lesson/pupil_mistakes.txt`
+- `frontend/js/10-lessons.js`
 
 Current status:
 

@@ -195,7 +195,14 @@
         const tree = document.getElementById('fileTree');
         const footer = document.querySelector('.sidebar-footer');
 
-        if (tab === 'snippets') {
+        if (tab === 'lessons') {
+            if (typeof refreshLessonsWorkflow === 'function') {
+                refreshLessonsWorkflow();
+            } else {
+                tree.innerHTML = '<div class="lesson-panel"><div class="lesson-message">Lesson UI загружается…</div></div>';
+                footer.style.display = 'none';
+            }
+        } else if (tab === 'snippets') {
             tree.innerHTML = `
                 <div class="file-item" onclick="insertLatex('\\alpha', 0)"><span style="font-size:14px">α</span> <span class="file-name">\\alpha</span></div>
                 <div class="file-item" onclick="insertLatex('\\beta', 0)"><span style="font-size:14px">β</span> <span class="file-name">\\beta</span></div>

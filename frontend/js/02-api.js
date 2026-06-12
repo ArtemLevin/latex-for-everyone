@@ -326,6 +326,7 @@
         { name: 'Найти и заменить', shortcut: 'Ctrl+H', action: () => toggleFindReplace() },
         { name: 'Показать шаблоны', shortcut: '', action: () => showTemplates() },
         { name: 'AI-генерация LaTeX', shortcut: '', action: () => showGenerationModal() },
+        { name: 'Уроки: обновить workflow', shortcut: '', action: () => refreshLessonsWorkflow() },
         { name: 'Экспорт в PDF', shortcut: '', action: () => exportPDF() },
         { name: 'Экспорт в HTML', shortcut: '', action: () => exportHTML() },
         { name: 'Экспорт в .tex', shortcut: '', action: () => exportLatex() },
