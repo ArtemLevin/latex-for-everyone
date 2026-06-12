@@ -140,6 +140,28 @@ class LessonTranscriptResponse(BaseModel):
     updated_at: datetime
 
 
+class LessonDocumentGenerateRequest(BaseModel):
+    transcript_id: Optional[str] = None
+    document_types: list[Literal["check_list", "pupil_mistakes"]] = Field(default_factory=list)
+
+
+class LessonGeneratedDocumentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    lesson_id: str
+    transcript_id: str
+    document_type: str
+    title: str
+    filename: str
+    content_type: str
+    status: str
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+    download_url: Optional[str] = None
+
+
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str

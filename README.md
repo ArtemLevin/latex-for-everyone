@@ -176,22 +176,22 @@ Backend application code uses a shared `utc_now()` helper from `backend/app/time
 
 ## Lesson/transcription preparation inventory
 
-The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD, safe lesson-audio upload/storage, and a synchronous transcription adapter slice with fake-provider test coverage; document generation remains future work. The current checkout also contains preparation artifacts for those later phases:
+The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD, safe lesson-audio upload/storage, synchronous transcription, and deterministic lesson-document generation for backend tests; frontend workflow and production AI/provider orchestration remain future work. The current checkout also contains the legacy transcription CLI and backend-owned lesson prompt templates:
 
 - `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
-- `check_list.txt` is source prompt material for a future lesson checklist document. It currently includes hardcoded student-like text (`[ФИО ученика: Николь, ЕГЭ]`) and must be parameterized before any production use.
-- `pupil_mistakes.txt` is source prompt material for a future personalized mistakes-review document. Treat it as draft prompt input, not as a production template.
+- `backend/app/prompts/lesson/check_list.txt` is the parameterized prompt template for a lesson checklist document. The former hardcoded student-like text has been replaced with template placeholders.
+- `backend/app/prompts/lesson/pupil_mistakes.txt` is the parameterized prompt template for a personalized mistakes-review document.
 
 Boundary policy for the remaining transcription/document-generation iterations:
 
 - Do not import or call `transcibe.py` from routers. The backend boundary is `backend/app/services/transcription.py`, which exposes a typed provider contract and fake provider for tests while containing the legacy CLI typo behind an optional adapter.
-- Do not move or wire the prompt files directly into generation routes until a prompt loader parameterizes them and tests prove that hardcoded student data is not present.
-- The target backend-owned locations are `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, and `backend/app/prompts/lesson/pupil_mistakes.txt`.
-- Audio upload is limited to validated storage metadata under `POST /api/lessons/{lesson_id}/recordings`; transcription is started explicitly through `POST /api/lessons/{lesson_id}/transcribe` and must not invoke AI document generation or frontend UI flows.
+- Prompt templates must be loaded through `LessonPromptService`; routers must not read prompt files directly.
+- The backend-owned locations are `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, and `backend/app/prompts/lesson/pupil_mistakes.txt`.
+- Audio upload is limited to validated storage metadata under `POST /api/lessons/{lesson_id}/recordings`; transcription is started explicitly through `POST /api/lessons/{lesson_id}/transcribe`; document generation is started explicitly through `POST /api/lessons/{lesson_id}/documents/generate` and currently persists safe `.tex` artifacts only.
 
 ## Database migrations
 
-Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`, `lesson_transcripts`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`, `lesson_transcripts`, `lesson_generated_documents`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
 
 Recommended workflow:
 
@@ -208,7 +208,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 
 The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
 
-This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings` and a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`. The default provider is disabled, CI uses a fake provider, and the optional legacy Whisper adapter is contained in the service layer; this still does **not** call AI document-generation providers, generate lesson documents, or change the frontend.
+This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings`, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, and lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts. The transcription default provider is disabled, document generation defaults to a deterministic fake provider for backend coverage, and frontend UI/job orchestration remain future work.
 
 ## Frontend/backend integration
 
@@ -292,6 +292,9 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | DELETE | `/api/lessons/{id}` | Delete a lesson |
 | POST | `/api/lessons/{id}/recordings` | Upload a validated audio recording for a lesson into the trusted lesson artifact root |
 | POST | `/api/lessons/{id}/transcribe` | Create a transcript record for a lesson recording through the configured transcription provider |
+| POST | `/api/lessons/{id}/documents/generate` | Generate checklist and mistakes-review `.tex` artifacts from a completed transcript |
+| GET | `/api/lessons/{id}/documents` | List generated lesson documents |
+| GET | `/api/lessons/{id}/documents/{document_id}/download` | Download a generated document that belongs to the scoped lesson |
 | POST | `/api/projects/{id}/duplicate` | Duplicate project |
 | GET | `/api/files/project/{id}` | List files |
 | POST | `/api/files/project/{id}` | Create file |
@@ -346,6 +349,8 @@ Deprecated compatibility routes are still available for compile history:
 | `TRANSCRIPTION_LANGUAGE` | `ru` | Default transcription language |
 | `TRANSCRIPTION_MODEL` | `small` | Legacy Whisper model name when the optional adapter is enabled |
 | `TRANSCRIPTION_BEAM_SIZE` | `5` | Legacy Whisper beam size when the optional adapter is enabled |
+| `LESSON_DOCUMENT_PROVIDER` | `fake` | Lesson document provider selector; currently `fake` or disabled fallback |
+| `LESSON_DOCUMENT_ALLOWED_TYPES` | `check_list,pupil_mistakes` | Comma-separated document types planned for lesson generation |
 | `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |

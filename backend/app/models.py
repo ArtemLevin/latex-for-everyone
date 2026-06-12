@@ -50,6 +50,7 @@ class Lesson(Base):
     pupil = relationship("Pupil", back_populates="lessons")
     recordings = relationship("LessonAudioRecording", back_populates="lesson", cascade="all, delete-orphan")
     transcripts = relationship("LessonTranscript", back_populates="lesson", cascade="all, delete-orphan")
+    generated_documents = relationship("LessonGeneratedDocument", back_populates="lesson", cascade="all, delete-orphan")
 
 
 class LessonAudioRecording(Base):
@@ -86,6 +87,27 @@ class LessonTranscript(Base):
 
     lesson = relationship("Lesson", back_populates="transcripts")
     recording = relationship("LessonAudioRecording", back_populates="transcripts")
+    generated_documents = relationship("LessonGeneratedDocument", back_populates="transcript", cascade="all, delete-orphan")
+
+
+class LessonGeneratedDocument(Base):
+    __tablename__ = "lesson_generated_documents"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    transcript_id = Column(String(36), ForeignKey("lesson_transcripts.id"), nullable=False, index=True)
+    document_type = Column(String(50), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False, default="application/x-tex")
+    storage_path = Column(Text, nullable=False)
+    status = Column(String(50), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="generated_documents")
+    transcript = relationship("LessonTranscript", back_populates="generated_documents")
 
 
 class File(Base):

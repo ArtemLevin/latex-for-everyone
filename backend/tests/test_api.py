@@ -114,6 +114,7 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "lessons",
         "lesson_audio_recordings",
         "lesson_transcripts",
+        "lesson_generated_documents",
         "alembic_version",
     }.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
@@ -131,6 +132,14 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     assert {"lesson_id", "recording_id", "provider", "language", "text", "status", "error_message"}.issubset(transcript_columns)
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
     assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id"}.issubset(transcript_indexes)
+    document_columns = {column["name"] for column in inspector.get_columns("lesson_generated_documents")}
+    assert {"lesson_id", "transcript_id", "document_type", "title", "filename", "storage_path", "status"}.issubset(document_columns)
+    document_indexes = {index["name"] for index in inspector.get_indexes("lesson_generated_documents")}
+    assert {
+        "ix_lesson_generated_documents_lesson_id",
+        "ix_lesson_generated_documents_transcript_id",
+        "ix_lesson_generated_documents_document_type",
+    }.issubset(document_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
 
@@ -620,6 +629,103 @@ def test_lesson_transcription_respects_teacher_scope(monkeypatch, tmp_path):
     app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
     try:
         response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Lesson not found"
+    finally:
+        app.dependency_overrides.pop(get_current_teacher_id, None)
+
+
+def create_transcribed_lesson(monkeypatch, tmp_path, *, topic: str = "Quadratic & roots_1", transcript_text: str = "x_1 & 50% done"):
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=FakeTranscriptionProvider(text=transcript_text)),
+    )
+    pupil = create_test_pupil("Document Student")
+    lesson = create_test_lesson(pupil["id"], topic=topic)
+    recording = upload_test_recording(lesson["id"], data=b"webm-data").json()
+    transcript_response = client.post(
+        f"/api/lessons/{lesson['id']}/transcribe",
+        json={"recording_id": recording["id"], "language": "ru"},
+    )
+    assert transcript_response.status_code == 201
+    return lesson, transcript_response.json()
+
+
+def test_lesson_prompt_templates_are_parameterized():
+    from app.services.lesson_documents import LessonPromptService
+
+    prompt_service = LessonPromptService()
+
+    check_list = prompt_service.load("check_list")
+    mistakes = prompt_service.load("pupil_mistakes")
+
+    assert "Николь" not in check_list
+    assert "Николь" not in mistakes
+    assert "{{ pupil_display_name }}" in check_list
+    assert "{{ transcript_text }}" in check_list
+
+
+def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
+    lesson, transcript = create_transcribed_lesson(monkeypatch, tmp_path)
+
+    response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={})
+
+    assert response.status_code == 201
+    documents = response.json()
+    assert {document["document_type"] for document in documents} == {"check_list", "pupil_mistakes"}
+    assert all(document["status"] == "completed" for document in documents)
+    assert all(document["transcript_id"] == transcript["id"] for document in documents)
+    assert all(document["download_url"].endswith(f"/documents/{document['id']}/download") for document in documents)
+    assert all("/" not in document["filename"] and ".." not in document["filename"] for document in documents)
+
+    stored_files = list((tmp_path / "lesson_artifacts").rglob("*.tex"))
+    assert len(stored_files) == 2
+    combined_latex = "\n".join(path.read_text(encoding="utf-8") for path in stored_files)
+    assert r"Quadratic \& roots\_1" in combined_latex
+    assert r"x\_1 \& 50\% done" in combined_latex
+
+    list_response = client.get(f"/api/lessons/{lesson['id']}/documents")
+    assert list_response.status_code == 200
+    assert len(list_response.json()) == 2
+
+    download_response = client.get(documents[0]["download_url"])
+    assert download_response.status_code == 200
+    assert r"\documentclass" in download_response.text
+    assert documents[0]["filename"] in download_response.headers["content-disposition"]
+
+    lesson_response = client.get(f"/api/lessons/{lesson['id']}")
+    assert lesson_response.status_code == 200
+    assert lesson_response.json()["status"] == "completed"
+
+
+def test_lesson_document_generation_requires_completed_transcript(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    pupil = create_test_pupil("No Document Transcript Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Completed lesson transcript not found"
+
+
+def test_lesson_document_download_respects_teacher_scope(monkeypatch, tmp_path):
+    from app.dependencies import get_current_teacher_id
+
+    lesson, _ = create_transcribed_lesson(monkeypatch, tmp_path)
+    documents = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={}).json()
+
+    app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
+    try:
+        response = client.get(documents[0]["download_url"])
         assert response.status_code == 404
         assert response.json()["detail"] == "Lesson not found"
     finally:

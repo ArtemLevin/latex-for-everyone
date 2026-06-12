@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     TRANSCRIPTION_MODEL: str = "small"
     TRANSCRIPTION_BEAM_SIZE: int = 5
 
+    # Lesson document generation foundation
+    LESSON_DOCUMENT_PROVIDER: str = "fake"
+    LESSON_DOCUMENT_ALLOWED_TYPES: str = "check_list,pupil_mistakes"
+
     # AI Generation
     AI_PROVIDER: str = "ollama"
     AI_GENERATION_TIMEOUT: int = 120_000

@@ -78,6 +78,7 @@ Persisted entities:
 - `Lesson`
 - `LessonAudioRecording`
 - `LessonTranscript`
+- `LessonGeneratedDocument`
 
 Guidelines:
 
@@ -95,8 +96,11 @@ References:
 - `backend/app/services/lesson_service.py`
 - `backend/app/services/audio_storage.py`
 - `backend/app/services/transcription.py`
+- `backend/app/services/lesson_documents.py`
+- `backend/app/prompts/lesson/check_list.txt`
+- `backend/app/prompts/lesson/pupil_mistakes.txt`
 
-Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService`, and explicit transcription through `TranscriptionService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Do not add AI document generation or frontend concerns to these routers; those belong to later section 10 iterations and must go through service adapters.
+Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService`, explicit transcription through `TranscriptionService`, and checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Do not add frontend concerns to these routers; UI and job orchestration belong to later section 10 iterations.
 
 ### Projects and files routers
 
@@ -156,21 +160,21 @@ References:
 
 - `PLAN.md` section 10
 - `transcibe.py`
-- `check_list.txt`
-- `pupil_mistakes.txt`
+- `backend/app/prompts/lesson/check_list.txt`
+- `backend/app/prompts/lesson/pupil_mistakes.txt`
 
 Current status:
 
-- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD, safe audio upload metadata/storage, and `LessonTranscript` persistence through a typed transcription service adapter.
-- `transcibe.py` is a legacy-named standalone CLI script, not a backend service. It should either become a thin wrapper around a future `backend/app/services/transcription.py` module or be renamed in a dedicated follow-up. Do not import it from routers.
-- `check_list.txt` and `pupil_mistakes.txt` are draft prompt source files in the repository root. They must be moved to `backend/app/prompts/lesson/`, parameterized, and loaded through a prompt service before production use.
-- `check_list.txt` currently contains hardcoded student-like text, so tests for the future prompt loader must guard against committing real or example pupil data in production templates.
+- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD, safe audio upload metadata/storage, `LessonTranscript` persistence, and `LessonGeneratedDocument` metadata/artifacts through typed service adapters.
+- `transcibe.py` is a legacy-named standalone CLI script, not a backend service. It is contained behind the optional legacy adapter and must not be imported from routers.
+- `backend/app/prompts/lesson/check_list.txt` and `backend/app/prompts/lesson/pupil_mistakes.txt` are parameterized prompt templates loaded through `LessonPromptService`.
+- Prompt-loader tests guard against the removed hardcoded student-like `Николь` example returning to production templates.
 
 Required boundaries for future work:
 
 1. `Pupil`/`Lesson` CRUD, lesson-audio upload/storage, and transcription are backend-only foundations; transcription must stay behind `TranscriptionService` and must not call AI document-generation providers.
 2. Transcription must go through the typed service adapter with a fake provider for tests; routers must not import the legacy `transcibe.py` script.
-3. Lesson document generation should prefer structured AI output that the backend validates before building LaTeX.
+3. Lesson document generation must prefer structured provider output that the backend validates before building escaped LaTeX.
 4. Downloads must resolve by persisted lesson/document metadata and trusted roots, not by arbitrary user-provided filenames.
 
 ### Tests

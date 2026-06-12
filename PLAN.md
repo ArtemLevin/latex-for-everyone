@@ -25,7 +25,7 @@ Latexed находится на стадии **рабочего full-stack MVP /
 - frontend shell и порядок подключения `frontend/js/*.js`;
 - тесты `backend/tests/test_api.py`, `backend/tests/test_frontend_contract.py`, `backend/tests/test_backend_confidence.py`, optional frontend E2E и fixtures AI outputs;
 - ранее добавленные архитектурные диаграммы `docs/uml-diagrams.md`;
-- наличие `transcibe.py`, `check_list.txt`, `pupil_mistakes.txt` для будущего lesson/transcription workflow.
+- legacy `transcibe.py` и backend-owned prompt templates `backend/app/prompts/lesson/*.txt` для lesson/transcription/document workflow.
 
 ## 3. Текущая карта сервиса
 
@@ -842,21 +842,21 @@ make test
 
 ### 10.0 Итерация 0 — инвентаризация и фиксация границ
 
-**Статус:** выполнено документально, без подключения к runtime-коду.
+**Статус:** выполнено; последующие PR подключили backend foundation, audio storage, transcription и document-generation service boundaries.
 
 Цель этой подготовительной итерации — убрать неоднозначности перед началом реализации lesson workflow: что уже лежит в репозитории, что нельзя подключать напрямую и какие boundaries обязательны для следующих PR.
 
 Зафиксированные артефакты:
 
-- `transcibe.py` — standalone Whisper/ffmpeg-oriented CLI script с legacy-опечаткой в имени. Он не является backend service, не должен импортироваться из routers и не должен определять публичные API names. Предпочтительный путь — будущий `backend/app/services/transcription.py` с typed result, provider abstraction и fake provider для tests; CLI можно оставить тонкой wrapper-командой или переименовать отдельным PR.
-- `check_list.txt` — draft prompt source для будущего чек-листа. Сейчас содержит hardcoded student-like строку `[ФИО ученика: Николь, ЕГЭ]`, поэтому до production-подключения файл нужно перенести в `backend/app/prompts/lesson/`, параметризовать и покрыть tests на отсутствие hardcoded pupil data.
-- `pupil_mistakes.txt` — draft prompt source для будущего personalized mistakes-review document. Его также нужно переносить только через prompt loader, а не подключать напрямую из generation/lesson routers.
+- `transcibe.py` — standalone Whisper/ffmpeg-oriented CLI script с legacy-опечаткой в имени. Он не является backend service, не должен импортироваться из routers и не должен определять публичные API names; optional legacy adapter теперь изолирован в `backend/app/services/transcription.py`.
+- `backend/app/prompts/lesson/check_list.txt` — parameterized prompt template для чек-листа; прежний hardcoded student-like пример `[ФИО ученика: Николь, ЕГЭ]` удалён и покрыт tests на отсутствие `Николь`.
+- `backend/app/prompts/lesson/pupil_mistakes.txt` — parameterized prompt template для personalized mistakes-review document; подключается через `LessonPromptService`, а не напрямую из routers.
 
 Boundary decisions для следующих итераций:
 
 1. Первый implementation PR ограничивается `Pupil`/`Lesson` backend foundation и не включает audio upload, transcription provider, AI document generation или frontend UI.
 2. Audio/transcription logic не вызывается из routers напрямую; routers работают через services и typed schemas.
-3. Prompt-файлы считаются исходными материалами, а не production-ready templates.
+3. Prompt-файлы подключаются только через `LessonPromptService`; routers не читают prompt files напрямую.
 4. Целевые backend-owned locations остаются: `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, `backend/app/prompts/lesson/pupil_mistakes.txt`.
 
 Проверка для этой итерации: достаточно `git diff --check`, потому что изменения только документальные.
@@ -868,7 +868,7 @@ Boundary decisions для следующих итераций:
 1. преподаватель выбирает ученика из своего списка и начинает занятие по конкретной теме;
 2. по явной опции сервис записывает звук занятия;
 3. backend передаёт запись в transcription pipeline; текущий standalone-скрипт `transcibe.py` с legacy-опечаткой должен быть адаптирован в service layer, а публичные имена будущего adapter-а должны использовать корректное `transcription`/`transcribe`;
-4. AI pipeline обрабатывает транскрипт по промптам `check_list.txt` и `pupil_mistakes.txt`;
+4. document pipeline обрабатывает транскрипт по prompt templates `backend/app/prompts/lesson/check_list.txt` и `backend/app/prompts/lesson/pupil_mistakes.txt`;
 5. backend генерирует PDF-документы: чек-лист и ревью ошибок, названные по теме занятия;
 6. документы сохраняются в папку ученика внутри директории соответствующей даты и доступны для просмотра/скачивания.
 
@@ -876,13 +876,13 @@ Boundary decisions для следующих итераций:
 
 ### 10.2 Важное наблюдение по текущему репозиторию
 
-При актуализации 2026-06-09 в checkout уже есть корневые файлы `check_list.txt`, `pupil_mistakes.txt` и скрипт `transcibe.py` с опечаткой в имени. Это меняет план: больше не нужно проектировать полностью абстрактные placeholders, но нужно аккуратно перенести эти артефакты в backend-owned структуру и не подключать их напрямую из router layer.
+При актуализации 2026-06-12 prompt-файлы уже перенесены в backend-owned структуру, а в корне остаётся только legacy CLI `transcibe.py` с опечаткой в имени. Важно сохранять это разделение: reusable logic живёт в services, prompt templates загружаются prompt loader-ом, routers не подключают файлы напрямую.
 
 Текущее состояние:
 
-- `transcibe.py` — standalone Whisper/ffmpeg-oriented script; перед использованием в backend его нужно переименовать или обернуть adapter-ом, сохранив CLI совместимость при необходимости;
-- `check_list.txt` и `pupil_mistakes.txt` — реальные prompt-файлы, но лежат в корне репозитория и могут содержать product-specific формулировки/PII-like примеры; перед production use их нужно перенести, параметризовать и покрыть prompt-loader tests;
-- для CI всё равно нужны fake transcription/generation providers, чтобы tests не зависели от Whisper, ffmpeg, API keys или внешних моделей.
+- `transcibe.py` — standalone Whisper/ffmpeg-oriented script; optional adapter есть в `TranscriptionService`, но routers его не импортируют;
+- `backend/app/prompts/lesson/check_list.txt` и `backend/app/prompts/lesson/pupil_mistakes.txt` — реальные parameterized prompt templates без hardcoded `Николь`;
+- для CI используются fake transcription/generation providers, чтобы tests не зависели от Whisper, ffmpeg, API keys или внешних моделей.
 
 Целевое расположение:
 
@@ -1070,7 +1070,7 @@ Failure behavior:
 
 ### 10.8 AI processing pipeline для чек-листа и ревью ошибок
 
-Промпты `check_list.txt` и `pupil_mistakes.txt` нужно подключить через отдельный prompt loader:
+Промпты `backend/app/prompts/lesson/check_list.txt` и `backend/app/prompts/lesson/pupil_mistakes.txt` подключены через отдельный prompt loader:
 
 ```text
 LessonPromptService.load("check_list")
@@ -1212,18 +1212,21 @@ Definition of Done:
 
 #### Итерация D. AI documents generation, 3–5 дней, P0/P1
 
-Цель: генерировать чек-лист и ревью ошибок из transcript-а.
+**Статус:** реализовано как backend-only document generation/storage slice для `.tex` artifacts.
 
-Задачи:
+Цель: генерировать чек-лист и ревью ошибок из completed transcript-а через service layer.
 
-- перенести существующие prompt files `check_list.txt`, `pupil_mistakes.txt` из корня в `backend/app/prompts/lesson/` и параметризовать hardcoded данные;
-- добавить prompt loader и structured output contract;
-- добавить `LessonDocumentGenerationService`;
-- добавить LaTeX builder для lesson documents;
-- использовать safe artifact paths и compile/export hardening;
-- добавить endpoint `POST /api/lessons/{lesson_id}/documents/generate`;
-- добавить download endpoint для generated documents;
-- добавить tests на prompt loading, отсутствие hardcoded PII в prompt templates, AI fake response, LaTeX escaping, PDF/document metadata persistence.
+Сделано:
+
+- prompt files `check_list.txt`, `pupil_mistakes.txt` перенесены из корня в `backend/app/prompts/lesson/` и параметризованы; hardcoded `Николь` удалена и покрыта tests;
+- добавлены `LessonPromptService`, structured `LessonDocumentDraft` contract, fake provider для CI и `LessonDocumentGenerationService`;
+- добавлены `LessonGeneratedDocument` model/migration и response/request schemas;
+- добавлен LaTeX builder с escaping для lesson documents;
+- generated `.tex` artifacts сохраняются через trusted lesson root и generated filenames;
+- добавлены endpoints `POST /api/lessons/{lesson_id}/documents/generate`, `GET /api/lessons/{lesson_id}/documents`, `GET /api/lessons/{lesson_id}/documents/{document_id}/download`;
+- добавлены tests на prompt loading, отсутствие hardcoded PII в prompt templates, fake document generation, LaTeX escaping, metadata persistence/download и teacher-scope boundary.
+
+Остаток для следующих PR: production AI/provider adapter, PDF compilation для lesson documents, async job orchestration и frontend UI.
 
 Definition of Done:
 
@@ -1322,15 +1325,15 @@ Readiness endpoint нужно расширять постепенно, не см
 
 ### 10.14 Рекомендуемый первый PR
 
-Первый PR должен быть узким и не должен одновременно включать запись аудио, transcription provider и frontend UI.
+Исторически первый PR был запланирован узким и не должен был одновременно включать запись аудио, transcription provider и frontend UI. Этот принцип поэтапности сохранён: audio, transcription и document generation подключены отдельными backend slices.
 
-Рекомендуемый scope:
+Реализованный начальный scope:
 
 - models/migration/schemas/services/routers для `Pupil` и `Lesson`;
 - базовые endpoints CRUD;
 - tests на создание ученика, создание занятия, получение списка занятий ученика и placeholder ownership boundary;
 - README секция с описанием будущего lesson workflow и текущего backend foundation;
-- inventory note по существующим `transcibe.py`, `check_list.txt`, `pupil_mistakes.txt` без их production-подключения;
-- без изменений в frontend, без audio upload и без внешних AI/transcription calls.
+- inventory note по legacy `transcibe.py` и prompt templates;
+- без изменений в frontend на backend-foundation этапах.
 
-Такой scope снижает риск, даёт основу для хранения документов и позволит следующими PR подключать audio storage, transcription и generation по одному безопасному boundary за раз.
+Такой scope снизил риск и позволил подключить audio storage, transcription и document generation по одному безопасному boundary за раз.

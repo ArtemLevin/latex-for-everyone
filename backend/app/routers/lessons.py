@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -9,6 +10,8 @@ from app.dependencies import get_current_teacher_id
 from app.schemas import (
     LessonAudioRecordingResponse,
     LessonCreate,
+    LessonDocumentGenerateRequest,
+    LessonGeneratedDocumentResponse,
     LessonResponse,
     LessonTranscribeRequest,
     LessonTranscriptResponse,
@@ -21,6 +24,13 @@ from app.services.audio_storage import (
     InvalidAudioFilenameError,
     UnsupportedAudioTypeError,
 )
+from app.services.lesson_documents import (
+    LessonDocumentGenerationService,
+    LessonDocumentNotFoundError,
+    LessonDocumentProviderError,
+    LessonPromptError,
+    LessonTranscriptNotFoundError,
+)
 from app.services.lesson_service import LessonNotFoundError, LessonService, PupilNotFoundError
 from app.services.transcription import RecordingNotFoundError, TranscriptionService
 
@@ -28,6 +38,7 @@ router = APIRouter()
 lesson_service = LessonService()
 audio_storage_service = AudioStorageService()
 transcription_service = TranscriptionService()
+lesson_document_service = LessonDocumentGenerationService()
 
 
 def map_lesson_service_error(exc: Exception) -> HTTPException:
@@ -42,6 +53,16 @@ def map_transcription_error(exc: Exception) -> HTTPException:
     if isinstance(exc, RecordingNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected transcription error")
+
+
+def map_lesson_document_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, (LessonTranscriptNotFoundError, LessonDocumentNotFoundError)):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, LessonPromptError):
+        return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Lesson prompt template is not available")
+    if isinstance(exc, LessonDocumentProviderError):
+        return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected lesson document error")
 
 
 def map_audio_storage_error(exc: Exception) -> HTTPException:
@@ -180,3 +201,70 @@ async def transcribe_lesson(
         raise map_lesson_service_error(exc) from exc
     except RecordingNotFoundError as exc:
         raise map_transcription_error(exc) from exc
+
+
+def document_response(document) -> LessonGeneratedDocumentResponse:
+    response = LessonGeneratedDocumentResponse.model_validate(document)
+    response.download_url = f"/api/lessons/{document.lesson_id}/documents/{document.id}/download"
+    return response
+
+
+@router.post(
+    "/{lesson_id}/documents/generate",
+    response_model=list[LessonGeneratedDocumentResponse],
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_lesson_documents(
+    lesson_id: str,
+    request: LessonDocumentGenerateRequest | None = None,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        request_data = request or LessonDocumentGenerateRequest()
+        documents = await lesson_document_service.generate_documents(
+            db,
+            lesson=lesson,
+            document_types=request_data.document_types or None,
+            transcript_id=request_data.transcript_id,
+        )
+        return [document_response(document) for document in documents]
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except (LessonTranscriptNotFoundError, LessonPromptError, LessonDocumentProviderError) as exc:
+        raise map_lesson_document_error(exc) from exc
+
+
+@router.get("/{lesson_id}/documents", response_model=list[LessonGeneratedDocumentResponse])
+async def list_lesson_documents(
+    lesson_id: str,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        documents = lesson_document_service.list_documents(db, lesson=lesson)
+        return [document_response(document) for document in documents]
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+
+
+@router.get("/{lesson_id}/documents/{document_id}/download")
+async def download_lesson_document(
+    lesson_id: str,
+    document_id: str,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        document = lesson_document_service.get_document(db, lesson=lesson, document_id=document_id)
+        path = lesson_document_service.resolve_document_path(document)
+        if not path.is_file():
+            raise LessonDocumentNotFoundError("Lesson document artifact not found")
+        return FileResponse(path, media_type=document.content_type, filename=document.filename)
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except LessonDocumentNotFoundError as exc:
+        raise map_lesson_document_error(exc) from exc
