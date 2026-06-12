@@ -59,6 +59,67 @@ class ProjectDetailResponse(ProjectResponse):
     files: list[FileResponse] = Field(default_factory=list)
 
 
+# Lesson/Pupil Schemas
+class PupilCreate(BaseModel):
+    display_name: str = Field(..., min_length=1, max_length=255)
+    notes: Optional[str] = None
+
+
+class PupilUpdate(BaseModel):
+    display_name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    notes: Optional[str] = None
+
+
+class PupilResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    teacher_id: str
+    display_name: str
+    notes: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class LessonCreate(BaseModel):
+    pupil_id: str
+    topic: str = Field(..., min_length=1, max_length=255)
+    lesson_date: Optional[datetime] = None
+
+
+class LessonUpdate(BaseModel):
+    topic: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    lesson_date: Optional[datetime] = None
+    status: Optional[Literal["draft", "recording_uploaded", "transcribing", "transcript_ready", "generating_documents", "completed", "failed"]] = None
+
+
+class LessonResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    pupil_id: str
+    teacher_id: str
+    topic: str
+    lesson_date: datetime
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class LessonAudioRecordingResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    lesson_id: str
+    filename: str
+    content_type: str
+    size_bytes: int
+    duration_seconds: Optional[float] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+
+
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str
