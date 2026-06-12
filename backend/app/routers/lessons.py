@@ -12,6 +12,8 @@ from app.schemas import (
     LessonCreate,
     LessonDocumentGenerateRequest,
     LessonGeneratedDocumentResponse,
+    LessonProcessingJobCreate,
+    LessonProcessingJobResponse,
     LessonResponse,
     LessonTranscribeRequest,
     LessonTranscriptResponse,
@@ -31,6 +33,7 @@ from app.services.lesson_documents import (
     LessonPromptError,
     LessonTranscriptNotFoundError,
 )
+from app.services.lesson_jobs import LessonJobConflictError, LessonJobNotFoundError, LessonProcessingJobService
 from app.services.lesson_service import LessonNotFoundError, LessonService, PupilNotFoundError
 from app.services.transcription import RecordingNotFoundError, TranscriptionService
 
@@ -39,6 +42,10 @@ lesson_service = LessonService()
 audio_storage_service = AudioStorageService()
 transcription_service = TranscriptionService()
 lesson_document_service = LessonDocumentGenerationService()
+lesson_job_service = LessonProcessingJobService(
+    transcription_service=transcription_service,
+    document_service=lesson_document_service,
+)
 
 
 def map_lesson_service_error(exc: Exception) -> HTTPException:
@@ -63,6 +70,14 @@ def map_lesson_document_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LessonDocumentProviderError):
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected lesson document error")
+
+
+def map_lesson_job_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, LessonJobNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, LessonJobConflictError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected lesson processing job error")
 
 
 def map_audio_storage_error(exc: Exception) -> HTTPException:
@@ -268,3 +283,53 @@ async def download_lesson_document(
         raise map_lesson_service_error(exc) from exc
     except LessonDocumentNotFoundError as exc:
         raise map_lesson_document_error(exc) from exc
+
+
+@router.post(
+    "/{lesson_id}/processing-jobs",
+    response_model=LessonProcessingJobResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def create_lesson_processing_job(
+    lesson_id: str,
+    request: LessonProcessingJobCreate | None = None,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        request_data = request or LessonProcessingJobCreate()
+        return await lesson_job_service.create_and_run_job(db, lesson=lesson, request=request_data)
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except LessonJobConflictError as exc:
+        raise map_lesson_job_error(exc) from exc
+
+
+@router.get("/{lesson_id}/processing-jobs", response_model=list[LessonProcessingJobResponse])
+async def list_lesson_processing_jobs(
+    lesson_id: str,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        return lesson_job_service.list_jobs(db, lesson=lesson)
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+
+
+@router.get("/{lesson_id}/processing-jobs/{job_id}", response_model=LessonProcessingJobResponse)
+async def get_lesson_processing_job(
+    lesson_id: str,
+    job_id: str,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        return lesson_job_service.get_job(db, lesson=lesson, job_id=job_id)
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except LessonJobNotFoundError as exc:
+        raise map_lesson_job_error(exc) from exc

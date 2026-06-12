@@ -115,6 +115,7 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "lesson_audio_recordings",
         "lesson_transcripts",
         "lesson_generated_documents",
+        "lesson_processing_jobs",
         "alembic_version",
     }.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
@@ -140,6 +141,15 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_generated_documents_transcript_id",
         "ix_lesson_generated_documents_document_type",
     }.issubset(document_indexes)
+    job_columns = {column["name"] for column in inspector.get_columns("lesson_processing_jobs")}
+    assert {"lesson_id", "teacher_id", "job_type", "status", "stage", "document_ids", "error_message"}.issubset(job_columns)
+    job_indexes = {index["name"] for index in inspector.get_indexes("lesson_processing_jobs")}
+    assert {
+        "ix_lesson_processing_jobs_lesson_id",
+        "ix_lesson_processing_jobs_teacher_id",
+        "ix_lesson_processing_jobs_job_type",
+        "ix_lesson_processing_jobs_status",
+    }.issubset(job_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
 
@@ -726,6 +736,98 @@ def test_lesson_document_download_respects_teacher_scope(monkeypatch, tmp_path):
     app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
     try:
         response = client.get(documents[0]["download_url"])
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Lesson not found"
+    finally:
+        app.dependency_overrides.pop(get_current_teacher_id, None)
+
+
+def install_fake_job_service(monkeypatch, *, transcript_text: str = "Pipeline transcript", fail: bool = False):
+    from app.routers import lessons as lessons_router
+    from app.services.lesson_documents import LessonDocumentGenerationService
+    from app.services.lesson_jobs import LessonProcessingJobService
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    service = LessonProcessingJobService(
+        transcription_service=TranscriptionService(provider=FakeTranscriptionProvider(text=transcript_text, fail=fail)),
+        document_service=LessonDocumentGenerationService(),
+    )
+    monkeypatch.setattr(lessons_router, "lesson_job_service", service)
+
+
+def test_lesson_processing_job_full_pipeline_and_polling(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    install_fake_job_service(monkeypatch, transcript_text="Pipeline x_1 & 50%")
+    pupil = create_test_pupil("Job Student")
+    lesson = create_test_lesson(pupil["id"], topic="Job & topic")
+    recording = upload_test_recording(lesson["id"], data=b"webm-data").json()
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/processing-jobs",
+        json={"job_type": "full_pipeline", "recording_id": recording["id"]},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "completed"
+    assert job["stage"] == "completed"
+    assert job["recording_id"] == recording["id"]
+    assert job["transcript_id"]
+    assert len(job["document_ids"]) == 2
+    assert job["attempts"] == 1
+
+    poll_response = client.get(f"/api/lessons/{lesson['id']}/processing-jobs/{job['id']}")
+    assert poll_response.status_code == 200
+    assert poll_response.json()["id"] == job["id"]
+
+    list_response = client.get(f"/api/lessons/{lesson['id']}/processing-jobs")
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()] == [job["id"]]
+
+    documents_before = client.get(f"/api/lessons/{lesson['id']}/documents").json()
+    second_response = client.post(f"/api/lessons/{lesson['id']}/processing-jobs", json={"job_type": "full_pipeline"})
+    assert second_response.status_code == 202
+    documents_after = client.get(f"/api/lessons/{lesson['id']}/documents").json()
+    assert len(documents_before) == 2
+    assert len(documents_after) == 2
+
+
+def test_lesson_processing_job_records_failure(monkeypatch, tmp_path):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    install_fake_job_service(monkeypatch, fail=True)
+    pupil = create_test_pupil("Failed Job Student")
+    lesson = create_test_lesson(pupil["id"])
+    recording = upload_test_recording(lesson["id"], data=b"webm-data").json()
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/processing-jobs",
+        json={"job_type": "full_pipeline", "recording_id": recording["id"]},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["error_message"] == "Fake transcription provider failed"
+    assert job["document_ids"] == []
+
+
+def test_lesson_processing_job_respects_teacher_scope(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.dependencies import get_current_teacher_id
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    install_fake_job_service(monkeypatch)
+    pupil = create_test_pupil("Scoped Job Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
+    try:
+        response = client.post(f"/api/lessons/{lesson['id']}/processing-jobs", json={"job_type": "full_pipeline"})
         assert response.status_code == 404
         assert response.json()["detail"] == "Lesson not found"
     finally:

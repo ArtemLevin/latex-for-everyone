@@ -162,6 +162,33 @@ class LessonGeneratedDocumentResponse(BaseModel):
     download_url: Optional[str] = None
 
 
+class LessonProcessingJobCreate(BaseModel):
+    job_type: Literal["full_pipeline", "transcribe", "generate_documents"] = "full_pipeline"
+    recording_id: Optional[str] = None
+    transcript_id: Optional[str] = None
+    document_types: list[Literal["check_list", "pupil_mistakes"]] = Field(default_factory=list)
+
+
+class LessonProcessingJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    lesson_id: str
+    teacher_id: str
+    job_type: str
+    status: str
+    stage: str
+    recording_id: Optional[str] = None
+    transcript_id: Optional[str] = None
+    document_ids: list[str] = Field(default_factory=list)
+    error_message: Optional[str] = None
+    attempts: int
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str

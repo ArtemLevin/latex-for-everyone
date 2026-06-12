@@ -191,7 +191,7 @@ Boundary policy for the remaining transcription/document-generation iterations:
 
 ## Database migrations
 
-Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`, `lesson_transcripts`, `lesson_generated_documents`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`, `lesson_transcripts`, `lesson_generated_documents`, `lesson_processing_jobs`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
 
 Recommended workflow:
 
@@ -208,7 +208,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 
 The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
 
-This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings`, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, and lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts. The transcription default provider is disabled, document generation defaults to a deterministic fake provider for backend coverage, and frontend UI/job orchestration remain future work.
+This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings`, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts, and processing-job endpoints for start/list/poll status. The transcription default provider is disabled, document generation defaults to a deterministic fake provider for backend coverage, and frontend UI plus production external-worker orchestration remain future work.
 
 ## Frontend/backend integration
 
@@ -295,6 +295,9 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | POST | `/api/lessons/{id}/documents/generate` | Generate checklist and mistakes-review `.tex` artifacts from a completed transcript |
 | GET | `/api/lessons/{id}/documents` | List generated lesson documents |
 | GET | `/api/lessons/{id}/documents/{document_id}/download` | Download a generated document that belongs to the scoped lesson |
+| POST | `/api/lessons/{id}/processing-jobs` | Start a lesson processing job (`full_pipeline`, `transcribe`, or `generate_documents`) and persist status |
+| GET | `/api/lessons/{id}/processing-jobs` | List processing jobs for a lesson |
+| GET | `/api/lessons/{id}/processing-jobs/{job_id}` | Poll a processing job status |
 | POST | `/api/projects/{id}/duplicate` | Duplicate project |
 | GET | `/api/files/project/{id}` | List files |
 | POST | `/api/files/project/{id}` | Create file |

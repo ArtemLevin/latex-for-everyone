@@ -1226,7 +1226,7 @@ Definition of Done:
 - добавлены endpoints `POST /api/lessons/{lesson_id}/documents/generate`, `GET /api/lessons/{lesson_id}/documents`, `GET /api/lessons/{lesson_id}/documents/{document_id}/download`;
 - добавлены tests на prompt loading, отсутствие hardcoded PII в prompt templates, fake document generation, LaTeX escaping, metadata persistence/download и teacher-scope boundary.
 
-Остаток для следующих PR: production AI/provider adapter, PDF compilation для lesson documents, async job orchestration и frontend UI.
+Остаток для следующих PR: production AI/provider adapter, PDF compilation для lesson documents, external worker/background execution и frontend UI.
 
 Definition of Done:
 
@@ -1236,15 +1236,21 @@ Definition of Done:
 
 #### Итерация E. Job-based orchestration, 3–5 дней, P1
 
-Цель: не держать HTTP request во время транскрибации, AI и PDF compilation.
+**Статус:** реализовано как backend job status/polling foundation с in-process execution MVP.
 
-Задачи:
+Цель: дать frontend стабильный job contract для запуска и polling-а тяжёлого lesson pipeline, сохранив возможность вынести execution во внешний worker позже.
 
-- добавить `LessonProcessingJob` model/migration;
-- реализовать job statuses и polling endpoint;
-- вынести transcription/generation pipeline в worker-friendly service;
-- добавить retry/cancel policy;
-- добавить tests на переходы статусов.
+Сделано:
+
+- добавлены `LessonProcessingJob` model/migration и response/create schemas;
+- реализованы statuses `queued`, `running`, `completed`, `failed`, stage tracking, attempts, started/finished timestamps, `transcript_id`, `document_ids`, sanitized error message;
+- добавлен `LessonProcessingJobService`, который оркестрирует `transcribe`, `generate_documents`, `full_pipeline` через существующие service boundaries;
+- добавлены endpoints `POST /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs/{job_id}`;
+- повторный `full_pipeline` переиспользует completed transcript/documents и не создаёт неконтролируемые дубль-документы;
+- provider failure сохраняется в `failed` job и не удаляет предыдущие transcript/document результаты;
+- добавлены tests на миграцию, successful full pipeline, polling/list, duplicate prevention, provider failure и teacher-scope boundary.
+
+Остаток для следующих PR: настоящий background worker/queue, retry/cancel endpoints, job backlog/readiness metrics и frontend polling UI.
 
 Definition of Done:
 
