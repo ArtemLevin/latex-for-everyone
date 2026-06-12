@@ -1189,22 +1189,26 @@ Definition of Done:
 
 #### Итерация C. Transcription integration, 2–4 дня, P0/P1
 
-Цель: подключить `transcribe.py` через service adapter.
+**Статус:** реализовано как synchronous backend-only transcription adapter slice.
 
-Задачи:
+Цель: подключить transcription workflow через service adapter, не импортируя legacy `transcibe.py` из routers.
 
-- добавить `TranscriptionService` и fake provider для тестов;
-- адаптировать `transcribe.py` к reusable function/API;
-- добавить `LessonTranscript` model/migration;
-- добавить endpoint `POST /api/lessons/{lesson_id}/transcribe`;
-- сохранять transcript text и provider metadata;
-- добавить tests на успешную транскрибацию и provider failure.
+Сделано:
+
+- добавлены `TranscriptionService`, typed `TranscriptResult`/`TranscriptSegment` contracts, `FakeTranscriptionProvider` для CI и optional `LegacyWhisperTranscriptionProvider`, который содержит legacy-опечатку `transcibe.py` внутри service layer;
+- добавлены настройки `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_BEAM_SIZE`;
+- добавлены `LessonTranscript` model/migration и response/request schemas;
+- добавлен endpoint `POST /api/lessons/{lesson_id}/transcribe`;
+- сохраняются transcript text, provider, language, status и sanitized provider error;
+- provider failure создаёт `failed` transcript и не переводит lesson из `recording_uploaded`;
+- добавлены tests на successful fake transcription, provider failure, отсутствие recording и teacher-scope boundary.
 
 Definition of Done:
 
 - по загруженной записи можно получить transcript record;
 - failure provider-а не ломает lesson и отражается статусом `failed`;
-- CI tests не требуют реального внешнего AI/transcription provider.
+- CI tests не требуют реального внешнего AI/transcription provider;
+- AI document generation и frontend UI не входят в этот slice.
 
 #### Итерация D. AI documents generation, 3–5 дней, P0/P1
 

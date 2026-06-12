@@ -49,6 +49,7 @@ class Lesson(Base):
 
     pupil = relationship("Pupil", back_populates="lessons")
     recordings = relationship("LessonAudioRecording", back_populates="lesson", cascade="all, delete-orphan")
+    transcripts = relationship("LessonTranscript", back_populates="lesson", cascade="all, delete-orphan")
 
 
 class LessonAudioRecording(Base):
@@ -66,6 +67,25 @@ class LessonAudioRecording(Base):
     updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
 
     lesson = relationship("Lesson", back_populates="recordings")
+    transcripts = relationship("LessonTranscript", back_populates="recording", cascade="all, delete-orphan")
+
+
+class LessonTranscript(Base):
+    __tablename__ = "lesson_transcripts"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    recording_id = Column(String(36), ForeignKey("lesson_audio_recordings.id"), nullable=False, index=True)
+    provider = Column(String(100), nullable=False)
+    language = Column(String(20), nullable=False)
+    text = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="transcripts")
+    recording = relationship("LessonAudioRecording", back_populates="transcripts")
 
 
 class File(Base):

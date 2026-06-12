@@ -6,7 +6,15 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_teacher_id
-from app.schemas import LessonAudioRecordingResponse, LessonCreate, LessonResponse, LessonUpdate, MessageResponse
+from app.schemas import (
+    LessonAudioRecordingResponse,
+    LessonCreate,
+    LessonResponse,
+    LessonTranscribeRequest,
+    LessonTranscriptResponse,
+    LessonUpdate,
+    MessageResponse,
+)
 from app.services.audio_storage import (
     AudioPayloadTooLargeError,
     AudioStorageService,
@@ -14,10 +22,12 @@ from app.services.audio_storage import (
     UnsupportedAudioTypeError,
 )
 from app.services.lesson_service import LessonNotFoundError, LessonService, PupilNotFoundError
+from app.services.transcription import RecordingNotFoundError, TranscriptionService
 
 router = APIRouter()
 lesson_service = LessonService()
 audio_storage_service = AudioStorageService()
+transcription_service = TranscriptionService()
 
 
 def map_lesson_service_error(exc: Exception) -> HTTPException:
@@ -26,6 +36,12 @@ def map_lesson_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, LessonNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected lesson service error")
+
+
+def map_transcription_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, RecordingNotFoundError):
+        return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected transcription error")
 
 
 def map_audio_storage_error(exc: Exception) -> HTTPException:
@@ -138,3 +154,29 @@ async def upload_lesson_recording(
         raise map_lesson_service_error(exc) from exc
     except (InvalidAudioFilenameError, UnsupportedAudioTypeError, AudioPayloadTooLargeError) as exc:
         raise map_audio_storage_error(exc) from exc
+
+
+@router.post(
+    "/{lesson_id}/transcribe",
+    response_model=LessonTranscriptResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def transcribe_lesson(
+    lesson_id: str,
+    request: LessonTranscribeRequest | None = None,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        request_data = request or LessonTranscribeRequest()
+        return transcription_service.transcribe_lesson(
+            db,
+            lesson=lesson,
+            recording_id=request_data.recording_id,
+            language=request_data.language,
+        )
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except RecordingNotFoundError as exc:
+        raise map_transcription_error(exc) from exc

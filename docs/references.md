@@ -77,6 +77,7 @@ Persisted entities:
 - `Pupil`
 - `Lesson`
 - `LessonAudioRecording`
+- `LessonTranscript`
 
 Guidelines:
 
@@ -93,8 +94,9 @@ References:
 - `backend/app/routers/lessons.py`
 - `backend/app/services/lesson_service.py`
 - `backend/app/services/audio_storage.py`
+- `backend/app/services/transcription.py`
 
-Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, and safe audio recording upload through `AudioStorageService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Do not add transcription, AI document generation, or frontend concerns to these routers; those belong to later section 10 iterations and must go through service adapters.
+Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService`, and explicit transcription through `TranscriptionService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Do not add AI document generation or frontend concerns to these routers; those belong to later section 10 iterations and must go through service adapters.
 
 ### Projects and files routers
 
@@ -159,15 +161,15 @@ References:
 
 Current status:
 
-- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD plus safe audio upload metadata/storage for lesson recordings.
+- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD, safe audio upload metadata/storage, and `LessonTranscript` persistence through a typed transcription service adapter.
 - `transcibe.py` is a legacy-named standalone CLI script, not a backend service. It should either become a thin wrapper around a future `backend/app/services/transcription.py` module or be renamed in a dedicated follow-up. Do not import it from routers.
 - `check_list.txt` and `pupil_mistakes.txt` are draft prompt source files in the repository root. They must be moved to `backend/app/prompts/lesson/`, parameterized, and loaded through a prompt service before production use.
 - `check_list.txt` currently contains hardcoded student-like text, so tests for the future prompt loader must guard against committing real or example pupil data in production templates.
 
 Required boundaries for future work:
 
-1. `Pupil`/`Lesson` CRUD and lesson-audio upload/storage are backend-only foundations; they must not call transcription or AI providers.
-2. Transcription must go through a typed service adapter with a fake provider for tests.
+1. `Pupil`/`Lesson` CRUD, lesson-audio upload/storage, and transcription are backend-only foundations; transcription must stay behind `TranscriptionService` and must not call AI document-generation providers.
+2. Transcription must go through the typed service adapter with a fake provider for tests; routers must not import the legacy `transcibe.py` script.
 3. Lesson document generation should prefer structured AI output that the backend validates before building LaTeX.
 4. Downloads must resolve by persisted lesson/document metadata and trusted roots, not by arbitrary user-provided filenames.
 

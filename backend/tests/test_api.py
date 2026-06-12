@@ -104,7 +104,18 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     inspector = inspect(engine)
     tables = set(inspector.get_table_names())
 
-    assert {"projects", "files", "compile_history", "project_snapshots", "generation_history", "pupils", "lessons", "lesson_audio_recordings", "alembic_version"}.issubset(tables)
+    assert {
+        "projects",
+        "files",
+        "compile_history",
+        "project_snapshots",
+        "generation_history",
+        "pupils",
+        "lessons",
+        "lesson_audio_recordings",
+        "lesson_transcripts",
+        "alembic_version",
+    }.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
     assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
@@ -116,6 +127,10 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     recording_columns = {column["name"] for column in inspector.get_columns("lesson_audio_recordings")}
     assert {"lesson_id", "filename", "content_type", "size_bytes", "storage_path", "status"}.issubset(recording_columns)
     assert "ix_lesson_audio_recordings_lesson_id" in {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
+    transcript_columns = {column["name"] for column in inspector.get_columns("lesson_transcripts")}
+    assert {"lesson_id", "recording_id", "provider", "language", "text", "status", "error_message"}.issubset(transcript_columns)
+    transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
+    assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id"}.issubset(transcript_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
 
@@ -503,6 +518,112 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Lesson not found"
+
+
+def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=FakeTranscriptionProvider(text="Ученик решил квадратное уравнение")),
+    )
+    pupil = create_test_pupil("Transcript Student")
+    lesson = create_test_lesson(pupil["id"])
+    recording = upload_test_recording(lesson["id"], data=b"webm-data").json()
+
+    response = client.post(
+        f"/api/lessons/{lesson['id']}/transcribe",
+        json={"recording_id": recording["id"], "language": "ru"},
+    )
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["lesson_id"] == lesson["id"]
+    assert data["recording_id"] == recording["id"]
+    assert data["provider"] == "fake"
+    assert data["language"] == "ru"
+    assert data["text"] == "Ученик решил квадратное уравнение"
+    assert data["status"] == "completed"
+    assert data["error_message"] is None
+
+    lesson_response = client.get(f"/api/lessons/{lesson['id']}")
+    assert lesson_response.status_code == 200
+    assert lesson_response.json()["status"] == "transcript_ready"
+
+
+def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=FakeTranscriptionProvider(fail=True)),
+    )
+    pupil = create_test_pupil("Failed Transcript Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], data=b"webm-data")
+
+    response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "failed"
+    assert data["text"] is None
+    assert data["error_message"] == "Fake transcription provider failed"
+
+    lesson_response = client.get(f"/api/lessons/{lesson['id']}")
+    assert lesson_response.status_code == 200
+    assert lesson_response.json()["status"] == "recording_uploaded"
+
+
+def test_lesson_transcription_rejects_lesson_without_recording(monkeypatch):
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=FakeTranscriptionProvider()),
+    )
+    pupil = create_test_pupil("No Recording Transcript Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Recording not found"
+
+
+def test_lesson_transcription_respects_teacher_scope(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.dependencies import get_current_teacher_id
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=FakeTranscriptionProvider()),
+    )
+    pupil = create_test_pupil("Scoped Transcript Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], data=b"webm-data")
+
+    app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
+    try:
+        response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+        assert response.status_code == 404
+        assert response.json()["detail"] == "Lesson not found"
+    finally:
+        app.dependency_overrides.pop(get_current_teacher_id, None)
 
 
 def test_create_file():

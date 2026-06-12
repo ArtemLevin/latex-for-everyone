@@ -57,6 +57,12 @@ class Settings(BaseSettings):
     LESSON_AUDIO_ALLOWED_CONTENT_TYPES: str = "audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a"
     LESSON_AUDIO_ALLOWED_EXTENSIONS: str = ".webm,.wav,.mp3,.m4a,.ogg"
 
+    # Lesson transcription foundation
+    TRANSCRIPTION_PROVIDER: str = "disabled"
+    TRANSCRIPTION_LANGUAGE: str = "ru"
+    TRANSCRIPTION_MODEL: str = "small"
+    TRANSCRIPTION_BEAM_SIZE: int = 5
+
     # AI Generation
     AI_PROVIDER: str = "ollama"
     AI_GENERATION_TIMEOUT: int = 120_000

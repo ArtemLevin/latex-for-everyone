@@ -120,6 +120,26 @@ class LessonAudioRecordingResponse(BaseModel):
     updated_at: datetime
 
 
+class LessonTranscribeRequest(BaseModel):
+    recording_id: Optional[str] = None
+    language: Optional[str] = Field(default=None, min_length=2, max_length=20)
+
+
+class LessonTranscriptResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    lesson_id: str
+    recording_id: str
+    provider: str
+    language: str
+    text: Optional[str] = None
+    status: str
+    error_message: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 # Compile Schemas
 class CompileRequest(BaseModel):
     project_id: str
