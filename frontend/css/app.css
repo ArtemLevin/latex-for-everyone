@@ -1469,3 +1469,200 @@
         .preview-container { padding: 0 !important; }
     }
 
+
+    /* Lesson workflow sidebar */
+    .lesson-panel {
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 10px;
+    }
+
+    .lesson-status,
+    .lesson-message,
+    .lesson-card {
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        padding: 9px 10px;
+        color: var(--text-secondary);
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    .lesson-status.online { border-color: rgba(16, 185, 129, 0.45); color: var(--accent-success); }
+    .lesson-status.offline { border-color: rgba(239, 68, 68, 0.45); color: var(--accent-danger); }
+
+    .lesson-label {
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    .lesson-input {
+        width: 100%;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        color: var(--text-primary);
+        padding: 8px 9px;
+        font: inherit;
+        min-width: 0;
+    }
+
+    .lesson-inline-form,
+    .lesson-actions {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+    }
+
+    .lesson-inline-form .lesson-input { flex: 1; }
+
+    .lesson-small-btn,
+    .lesson-action-btn {
+        border: 1px solid var(--border-color);
+        background: var(--bg-hover);
+        color: var(--text-primary);
+        border-radius: var(--radius-sm);
+        padding: 8px 10px;
+        font: inherit;
+        cursor: pointer;
+        transition: var(--transition);
+    }
+
+    .lesson-small-btn:hover,
+    .lesson-action-btn:hover {
+        border-color: var(--accent-primary);
+        color: white;
+    }
+
+    .lesson-action-btn { flex: 1; font-size: 12px; }
+
+    .lesson-transcript,
+    .lesson-muted {
+        margin-top: 6px;
+        color: var(--text-muted);
+        font-size: 12px;
+    }
+
+    .lesson-docs {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 8px;
+    }
+
+    .lesson-doc-link {
+        color: var(--accent-info);
+        text-decoration: none;
+        font-size: 12px;
+        word-break: break-word;
+    }
+
+    .lesson-doc-link:hover { text-decoration: underline; }
+
+    .lesson-recording-card[data-recording-state="recording"] {
+        border-color: rgba(239, 68, 68, 0.5);
+    }
+
+    .lesson-recording-state,
+    .lesson-recording-metrics,
+    .lesson-consent {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 8px;
+        color: var(--text-secondary);
+        font-size: 12px;
+    }
+
+    .lesson-recording-state {
+        font-weight: 600;
+    }
+
+    .lesson-recording-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--text-muted);
+        box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+    }
+
+    .lesson-recording-card[data-recording-state="recording"] .lesson-recording-dot {
+        background: var(--accent-danger);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16);
+    }
+
+    .lesson-recording-card[data-recording-state="ready_to_upload"] .lesson-recording-dot,
+    .lesson-recording-card[data-recording-state="uploaded"] .lesson-recording-dot {
+        background: var(--accent-success);
+        box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16);
+    }
+
+    .lesson-recording-metrics {
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .lesson-consent {
+        align-items: flex-start;
+        line-height: 1.35;
+    }
+
+    .lesson-consent input {
+        margin-top: 2px;
+    }
+
+    .lesson-audio-preview {
+        width: 100%;
+        margin-top: 8px;
+    }
+
+    .lesson-recording-error {
+        margin-top: 8px;
+        color: var(--accent-danger);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .lesson-action-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
+
+.lesson-transcript-review-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lesson-transcript-editor {
+    width: 100%;
+    min-height: 140px;
+    resize: vertical;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.lesson-transcript-editor:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18);
+}
+
+.lesson-transcript-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+}

@@ -1,4 +1,10 @@
-[ФИО ученика: Николь, ЕГЭ]
+Контекст занятия:
+- ученик: {{ pupil_display_name }}
+- тема: {{ lesson_topic }}
+- дата: {{ lesson_date }}
+- транскрипт: {{ transcript_text }}
+
+[ФИО ученика: {{ pupil_display_name }}; тема: {{ lesson_topic }}]
 
 
 

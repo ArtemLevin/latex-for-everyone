@@ -12,7 +12,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine
 from app.logging_config import configure_logging, reset_request_id, set_request_id
-from app.routers import compile, export, files, generation, projects, templates
+from app.routers import compile, export, files, generation, lessons, projects, pupils, templates
 from app.schemas import ReadinessResponse
 from app.services import readiness
 
@@ -21,6 +21,32 @@ from app.services import readiness
 configure_logging()
 logger = logging.getLogger(__name__)
 
+
+
+
+LESSON_WORKFLOW_COMPAT_TABLE_COLUMNS = {
+    "lesson_audio_recordings": {
+        "duration_seconds": "FLOAT",
+        "sha256_checksum": "VARCHAR(64)",
+    },
+    "lesson_transcripts": {
+        "edited_text": "TEXT",
+        "review_status": "VARCHAR(50) DEFAULT 'unreviewed'",
+        "reviewed_at": "DATETIME",
+    },
+    "lesson_processing_jobs": {
+        "document_types": "JSON DEFAULT '[]'",
+    },
+}
+
+LESSON_WORKFLOW_COMPAT_INDEXES = {
+    "lesson_audio_recordings": {
+        "ix_lesson_audio_recordings_sha256_checksum": "sha256_checksum",
+    },
+    "lesson_transcripts": {
+        "ix_lesson_transcripts_review_status": "review_status",
+    },
+}
 
 GENERATION_HISTORY_COMPAT_COLUMNS = {
     "input_tokens": "INTEGER",
@@ -60,6 +86,51 @@ def ensure_generation_history_compat_columns() -> None:
             connection.execute(text(f"ALTER TABLE generation_history ADD COLUMN {name} {definition}"))
 
 
+def ensure_lesson_workflow_compat_columns() -> None:
+    """Patch stale local/dev lesson workflow tables when AUTO_CREATE_TABLES is enabled.
+
+    This keeps existing SQLite databases usable after incremental lesson-workflow
+    slices add columns. Production should still run Alembic migrations instead of
+    depending on startup compatibility patches.
+    """
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    pending_columns: dict[str, dict[str, str]] = {}
+
+    for table_name, expected_columns in LESSON_WORKFLOW_COMPAT_TABLE_COLUMNS.items():
+        if table_name not in table_names:
+            continue
+        existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        missing_columns = {
+            name: definition
+            for name, definition in expected_columns.items()
+            if name not in existing_columns
+        }
+        if missing_columns:
+            pending_columns[table_name] = missing_columns
+
+    if pending_columns:
+        logger.warning(
+            "database auto-create found stale lesson workflow schema; adding missing columns=%s",
+            {table: sorted(columns) for table, columns in pending_columns.items()},
+        )
+        with engine.begin() as connection:
+            for table_name, missing_columns in pending_columns.items():
+                for name, definition in missing_columns.items():
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}"))
+
+    refreshed_inspector = inspect(engine)
+    with engine.begin() as connection:
+        for table_name, index_columns in LESSON_WORKFLOW_COMPAT_INDEXES.items():
+            if table_name not in table_names:
+                continue
+            existing_columns = {column["name"] for column in refreshed_inspector.get_columns(table_name)}
+            existing_indexes = {index["name"] for index in refreshed_inspector.get_indexes(table_name)}
+            for index_name, column_name in index_columns.items():
+                if column_name in existing_columns and index_name not in existing_indexes:
+                    connection.execute(text(f"CREATE INDEX {index_name} ON {table_name} ({column_name})"))
+
+
 def initialize_database() -> None:
     """Create tables for local/dev installs when migrations are not being run explicitly."""
     if not settings.AUTO_CREATE_TABLES:
@@ -67,6 +138,7 @@ def initialize_database() -> None:
         return
     Base.metadata.create_all(bind=engine)
     ensure_generation_history_compat_columns()
+    ensure_lesson_workflow_compat_columns()
 
 
 @asynccontextmanager
@@ -161,6 +233,8 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 # Routers
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+app.include_router(pupils.router, prefix="/api/pupils", tags=["pupils"])
+app.include_router(lessons.router, prefix="/api/lessons", tags=["lessons"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(compile.router, prefix="/api/compile", tags=["compile"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
