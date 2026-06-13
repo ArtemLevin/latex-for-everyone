@@ -1,4 +1,8 @@
+import hashlib
+import json
 import re
+import shutil
+import subprocess
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,12 +30,17 @@ class AudioPayloadTooLargeError(AudioStorageError):
     """Raised when an uploaded audio payload exceeds configured limits."""
 
 
+class AudioDurationTooLongError(AudioStorageError):
+    """Raised when a probed audio duration exceeds configured limits."""
+
+
 @dataclass(frozen=True)
 class ValidatedAudioUpload:
     original_filename: str
     suffix: str
     content_type: str
     size_bytes: int
+    sha256_checksum: str
 
 
 def lesson_artifact_root() -> Path:
@@ -85,6 +94,7 @@ def validate_audio_upload(filename: str, content_type: str | None, payload: byte
         suffix=suffix,
         content_type=normalized_content_type,
         size_bytes=size_bytes,
+        sha256_checksum=hashlib.sha256(payload).hexdigest(),
     )
 
 
@@ -94,6 +104,51 @@ def resolve_inside_root(root: Path, *parts: str) -> Path:
     if target == resolved_root or resolved_root in target.parents:
         return target
     raise InvalidAudioFilenameError("Audio storage path escapes lesson artifact root")
+
+
+def probe_audio_duration_seconds(audio_path: Path) -> float | None:
+    """Best-effort ffprobe duration extraction for already trusted local audio."""
+
+    if not settings.LESSON_AUDIO_DURATION_PROBE_ENABLED:
+        return None
+    if shutil.which("ffprobe") is None:
+        return None
+
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-show_entries",
+            "format=duration",
+            "-of",
+            "json",
+            str(audio_path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    try:
+        raw_duration = json.loads(result.stdout or "{}").get("format", {}).get("duration")
+        duration = float(raw_duration)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    if duration <= 0:
+        return None
+    return duration
+
+
+def validate_audio_duration(duration_seconds: float | None) -> None:
+    max_duration = settings.MAX_LESSON_AUDIO_DURATION_SECONDS
+    if duration_seconds is None or max_duration <= 0:
+        return
+    if duration_seconds > max_duration:
+        raise AudioDurationTooLongError("Audio duration exceeds configured limit")
 
 
 class AudioStorageService:
@@ -124,6 +179,12 @@ class AudioStorageService:
         target_path = resolve_inside_root(root, *relative_parts)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_bytes(payload)
+        duration_seconds = probe_audio_duration_seconds(target_path)
+        try:
+            validate_audio_duration(duration_seconds)
+        except AudioDurationTooLongError:
+            target_path.unlink(missing_ok=True)
+            raise
 
         recording = LessonAudioRecording(
             id=recording_id,
@@ -131,6 +192,8 @@ class AudioStorageService:
             filename=validated.original_filename,
             content_type=validated.content_type,
             size_bytes=validated.size_bytes,
+            duration_seconds=duration_seconds,
+            sha256_checksum=validated.sha256_checksum,
             storage_path=str(Path(*relative_parts).as_posix()),
             status="uploaded",
         )

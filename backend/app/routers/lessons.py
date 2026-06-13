@@ -21,6 +21,7 @@ from app.schemas import (
     MessageResponse,
 )
 from app.services.audio_storage import (
+    AudioDurationTooLongError,
     AudioPayloadTooLargeError,
     AudioStorageService,
     InvalidAudioFilenameError,
@@ -85,7 +86,7 @@ def map_audio_storage_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if isinstance(exc, UnsupportedAudioTypeError):
         return HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail=str(exc))
-    if isinstance(exc, AudioPayloadTooLargeError):
+    if isinstance(exc, (AudioPayloadTooLargeError, AudioDurationTooLongError)):
         return HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected audio storage error")
 
@@ -188,7 +189,7 @@ async def upload_lesson_recording(
         )
     except LessonNotFoundError as exc:
         raise map_lesson_service_error(exc) from exc
-    except (InvalidAudioFilenameError, UnsupportedAudioTypeError, AudioPayloadTooLargeError) as exc:
+    except (InvalidAudioFilenameError, UnsupportedAudioTypeError, AudioPayloadTooLargeError, AudioDurationTooLongError) as exc:
         raise map_audio_storage_error(exc) from exc
 
 

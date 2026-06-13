@@ -63,6 +63,7 @@ class LessonAudioRecording(Base):
     content_type = Column(String(100), nullable=False)
     size_bytes = Column(Integer, nullable=False)
     duration_seconds = Column(Float, nullable=True)
+    sha256_checksum = Column(String(64), nullable=True)
     storage_path = Column(Text, nullable=False)
     status = Column(String(50), nullable=False, default="uploaded")
     created_at = Column(DateTime, default=utc_now)

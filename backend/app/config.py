@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     MAX_LESSON_AUDIO_SIZE: int = 100 * 1024 * 1024  # 100MB
     LESSON_AUDIO_ALLOWED_CONTENT_TYPES: str = "audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a"
     LESSON_AUDIO_ALLOWED_EXTENSIONS: str = ".webm,.wav,.mp3,.m4a,.ogg"
+    LESSON_AUDIO_DURATION_PROBE_ENABLED: bool = True
+    MAX_LESSON_AUDIO_DURATION_SECONDS: int = 0  # 0 disables duration rejection
 
     # Lesson transcription foundation
     TRANSCRIPTION_PROVIDER: str = "disabled"

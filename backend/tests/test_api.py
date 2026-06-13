@@ -1,6 +1,7 @@
 """
 Tests for the Latexed API.
 """
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -127,8 +128,9 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     lesson_columns = {column["name"] for column in inspector.get_columns("lessons")}
     assert {"pupil_id", "teacher_id", "topic", "lesson_date", "status"}.issubset(lesson_columns)
     recording_columns = {column["name"] for column in inspector.get_columns("lesson_audio_recordings")}
-    assert {"lesson_id", "filename", "content_type", "size_bytes", "storage_path", "status"}.issubset(recording_columns)
-    assert "ix_lesson_audio_recordings_lesson_id" in {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
+    assert {"lesson_id", "filename", "content_type", "size_bytes", "duration_seconds", "sha256_checksum", "storage_path", "status"}.issubset(recording_columns)
+    recording_indexes = {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
+    assert {"ix_lesson_audio_recordings_lesson_id", "ix_lesson_audio_recordings_sha256_checksum"}.issubset(recording_indexes)
     transcript_columns = {column["name"] for column in inspector.get_columns("lesson_transcripts")}
     assert {"lesson_id", "recording_id", "provider", "language", "text", "status", "error_message"}.issubset(transcript_columns)
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
@@ -455,6 +457,7 @@ def test_lesson_audio_upload_success(monkeypatch, tmp_path):
     assert data["filename"] == "recording.webm"
     assert data["content_type"] == "audio/webm"
     assert data["size_bytes"] == len(b"webm-data")
+    assert data["sha256_checksum"] == hashlib.sha256(b"webm-data").hexdigest()
     assert data["status"] == "uploaded"
 
     stored_files = list((tmp_path / "lesson_artifacts").rglob("*.webm"))
@@ -465,6 +468,40 @@ def test_lesson_audio_upload_success(monkeypatch, tmp_path):
     lesson_response = client.get(f"/api/lessons/{lesson['id']}")
     assert lesson_response.status_code == 200
     assert lesson_response.json()["status"] == "recording_uploaded"
+
+
+def test_lesson_audio_upload_persists_probed_duration(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services import audio_storage
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(audio_storage, "probe_audio_duration_seconds", lambda path: 42.5)
+    pupil = create_test_pupil("Duration Audio Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = upload_test_recording(lesson["id"], data=b"duration-webm")
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["duration_seconds"] == 42.5
+    assert data["sha256_checksum"] == hashlib.sha256(b"duration-webm").hexdigest()
+
+
+def test_lesson_audio_upload_rejects_duration_over_limit(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services import audio_storage
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(settings, "MAX_LESSON_AUDIO_DURATION_SECONDS", 60)
+    monkeypatch.setattr(audio_storage, "probe_audio_duration_seconds", lambda path: 61.0)
+    pupil = create_test_pupil("Too Long Audio Student")
+    lesson = create_test_lesson(pupil["id"])
+
+    response = upload_test_recording(lesson["id"], data=b"too-long-webm")
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Audio duration exceeds configured limit"
+    assert not list((tmp_path / "lesson_artifacts").rglob("*.webm"))
 
 
 def test_lesson_audio_upload_rejects_path_traversal_filename(monkeypatch, tmp_path):

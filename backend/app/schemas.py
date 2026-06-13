@@ -115,6 +115,7 @@ class LessonAudioRecordingResponse(BaseModel):
     content_type: str
     size_bytes: int
     duration_seconds: Optional[float] = None
+    sha256_checksum: Optional[str] = None
     status: str
     created_at: datetime
     updated_at: datetime

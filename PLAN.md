@@ -925,7 +925,7 @@ Router layer
 |---|---|---|
 | `Pupil` | Ученик преподавателя | `id`, `teacher_id`, `display_name`, `notes`, `created_at`, `updated_at` |
 | `Lesson` | Конкретное занятие с учеником | `id`, `pupil_id`, `teacher_id`, `topic`, `lesson_date`, `status`, `created_at`, `updated_at` |
-| `LessonAudioRecording` | Метаданные аудиозаписи | `id`, `lesson_id`, `filename`, `content_type`, `size_bytes`, `duration_seconds`, `storage_path`, `status` |
+| `LessonAudioRecording` | Метаданные аудиозаписи | `id`, `lesson_id`, `filename`, `content_type`, `size_bytes`, `duration_seconds`, `sha256_checksum`, `storage_path`, `status` |
 | `LessonTranscript` | Результат транскрибации | `id`, `lesson_id`, `recording_id`, `provider`, `language`, `text`, `status`, `error_message`, `created_at` |
 | `LessonGeneratedDocument` | Чек-лист / ревью ошибок / будущие документы | `id`, `lesson_id`, `document_type`, `title`, `filename`, `storage_path`, `status`, `error_message`, `created_at` |
 | `LessonProcessingJob` | Асинхронное состояние pipeline | `id`, `lesson_id`, `job_type`, `status`, `started_at`, `finished_at`, `error_message` |
@@ -1174,16 +1174,17 @@ Definition of Done:
 - добавлены `LessonAudioRecording` model/migration;
 - добавлен `AudioStorageService` с safe path policy, generated storage filenames и root containment check;
 - добавлен endpoint `POST /api/lessons/{lesson_id}/recordings`;
-- добавлены настройки `LESSON_ARTIFACT_ROOT`, `MAX_LESSON_AUDIO_SIZE`, `LESSON_AUDIO_ALLOWED_CONTENT_TYPES`, `LESSON_AUDIO_ALLOWED_EXTENSIONS`;
-- ограничены content-type, размер, расширение и filename;
-- добавлены tests на path traversal, unsupported media type, oversized upload, cross-teacher access, unknown lesson и сохранение валидного файла.
+- добавлены настройки `LESSON_ARTIFACT_ROOT`, `MAX_LESSON_AUDIO_SIZE`, `LESSON_AUDIO_ALLOWED_CONTENT_TYPES`, `LESSON_AUDIO_ALLOWED_EXTENSIONS`, `LESSON_AUDIO_DURATION_PROBE_ENABLED`, `MAX_LESSON_AUDIO_DURATION_SECONDS`;
+- ограничены content-type, размер, расширение, filename и опционально probed duration;
+- добавлены checksum metadata и best-effort `ffprobe` duration probing;
+- добавлены tests на path traversal, unsupported media type, oversized upload, duration limit, cross-teacher access, unknown lesson и сохранение валидного файла.
 
-Остаток для отдельного retention PR: TTL/recursive cleanup для custom `LESSON_ARTIFACT_ROOT`; локальный default-root остаётся под `${UPLOAD_DIR}/lessons`, поэтому `make clean-artifacts` удаляет его вместе с `/tmp/latexed_uploads`.
+Остаток для отдельного retention PR: TTL/recursive cleanup для custom `LESSON_ARTIFACT_ROOT`, idempotency key для повторных upload после сетевого сбоя; локальный default-root остаётся под `${UPLOAD_DIR}/lessons`, поэтому `make clean-artifacts` удаляет его вместе с `/tmp/latexed_uploads`.
 
 Definition of Done:
 
 - запись аудио сохраняется только внутри trusted lesson root;
-- API возвращает recording metadata;
+- API возвращает recording metadata, включая `sha256_checksum` и best-effort `duration_seconds` при доступном `ffprobe`;
 - unsafe filename/content-type/size не проходят;
 - transcription provider, AI document generation и frontend UI не входят в этот slice.
 

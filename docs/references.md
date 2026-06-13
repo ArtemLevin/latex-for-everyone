@@ -103,7 +103,7 @@ References:
 - `backend/app/prompts/lesson/pupil_mistakes.txt`
 - `frontend/js/10-lessons.js`
 
-Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService`, explicit transcription through `TranscriptionService`, checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Frontend lesson concerns live in `frontend/js/10-lessons.js`; routers should remain service-bound HTTP adapters.
+Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService` (filename/type/size checks, generated storage paths, checksum metadata, best-effort duration probing), explicit transcription through `TranscriptionService`, checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Frontend lesson concerns live in `frontend/js/10-lessons.js`; routers should remain service-bound HTTP adapters.
 
 ### Projects and files routers
 
@@ -169,7 +169,7 @@ References:
 
 Current status:
 
-- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD, safe audio upload metadata/storage, `LessonTranscript` persistence, `LessonGeneratedDocument` metadata/artifacts, and `LessonProcessingJob` polling/status records through typed service adapters.
+- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD, safe audio upload metadata/storage with checksums and optional duration metadata, `LessonTranscript` persistence, `LessonGeneratedDocument` metadata/artifacts, and `LessonProcessingJob` polling/status records through typed service adapters.
 - `transcibe.py` is a legacy-named standalone CLI script, not a backend service. It is contained behind the optional legacy adapter and must not be imported from routers.
 - `backend/app/prompts/lesson/check_list.txt` and `backend/app/prompts/lesson/pupil_mistakes.txt` are parameterized prompt templates loaded through `LessonPromptService`.
 - Prompt-loader tests guard against the removed hardcoded student-like `Николь` example returning to production templates.
