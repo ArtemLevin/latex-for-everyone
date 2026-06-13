@@ -51,6 +51,22 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "/tmp/latexed_uploads"
     MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
 
+    # Lesson audio/storage foundation
+    LESSON_ARTIFACT_ROOT: Optional[str] = None
+    MAX_LESSON_AUDIO_SIZE: int = 100 * 1024 * 1024  # 100MB
+    LESSON_AUDIO_ALLOWED_CONTENT_TYPES: str = "audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a"
+    LESSON_AUDIO_ALLOWED_EXTENSIONS: str = ".webm,.wav,.mp3,.m4a,.ogg"
+
+    # Lesson transcription foundation
+    TRANSCRIPTION_PROVIDER: str = "disabled"
+    TRANSCRIPTION_LANGUAGE: str = "ru"
+    TRANSCRIPTION_MODEL: str = "small"
+    TRANSCRIPTION_BEAM_SIZE: int = 5
+
+    # Lesson document generation foundation
+    LESSON_DOCUMENT_PROVIDER: str = "fake"
+    LESSON_DOCUMENT_ALLOWED_TYPES: str = "check_list,pupil_mistakes"
+
     # AI Generation
     AI_PROVIDER: str = "ollama"
     AI_GENERATION_TIMEOUT: int = 120_000
