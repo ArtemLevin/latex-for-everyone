@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON, Float
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.time_utils import utc_now
@@ -20,6 +20,118 @@ class Project(Base):
     compile_history = relationship("CompileHistory", back_populates="project", cascade="all, delete-orphan")
     snapshots = relationship("ProjectSnapshot", back_populates="project", cascade="all, delete-orphan")
     generation_history = relationship("GenerationHistory", back_populates="project", cascade="all, delete-orphan")
+
+
+class Pupil(Base):
+    __tablename__ = "pupils"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    teacher_id = Column(String(255), nullable=False, index=True)
+    display_name = Column(String(255), nullable=False)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lessons = relationship("Lesson", back_populates="pupil", cascade="all, delete-orphan")
+
+
+class Lesson(Base):
+    __tablename__ = "lessons"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    pupil_id = Column(String(36), ForeignKey("pupils.id"), nullable=False, index=True)
+    teacher_id = Column(String(255), nullable=False, index=True)
+    topic = Column(String(255), nullable=False)
+    lesson_date = Column(DateTime, nullable=False, default=utc_now, index=True)
+    status = Column(String(50), nullable=False, default="draft")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    pupil = relationship("Pupil", back_populates="lessons")
+    recordings = relationship("LessonAudioRecording", back_populates="lesson", cascade="all, delete-orphan")
+    transcripts = relationship("LessonTranscript", back_populates="lesson", cascade="all, delete-orphan")
+    generated_documents = relationship("LessonGeneratedDocument", back_populates="lesson", cascade="all, delete-orphan")
+    processing_jobs = relationship("LessonProcessingJob", back_populates="lesson", cascade="all, delete-orphan")
+
+
+class LessonAudioRecording(Base):
+    __tablename__ = "lesson_audio_recordings"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False)
+    size_bytes = Column(Integer, nullable=False)
+    duration_seconds = Column(Float, nullable=True)
+    sha256_checksum = Column(String(64), nullable=True)
+    storage_path = Column(Text, nullable=False)
+    status = Column(String(50), nullable=False, default="uploaded")
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="recordings")
+    transcripts = relationship("LessonTranscript", back_populates="recording", cascade="all, delete-orphan")
+
+
+class LessonTranscript(Base):
+    __tablename__ = "lesson_transcripts"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    recording_id = Column(String(36), ForeignKey("lesson_audio_recordings.id"), nullable=False, index=True)
+    provider = Column(String(100), nullable=False)
+    language = Column(String(20), nullable=False)
+    text = Column(Text, nullable=True)
+    status = Column(String(50), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="transcripts")
+    recording = relationship("LessonAudioRecording", back_populates="transcripts")
+    generated_documents = relationship("LessonGeneratedDocument", back_populates="transcript", cascade="all, delete-orphan")
+
+
+class LessonGeneratedDocument(Base):
+    __tablename__ = "lesson_generated_documents"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    transcript_id = Column(String(36), ForeignKey("lesson_transcripts.id"), nullable=False, index=True)
+    document_type = Column(String(50), nullable=False, index=True)
+    title = Column(String(255), nullable=False)
+    filename = Column(String(255), nullable=False)
+    content_type = Column(String(100), nullable=False, default="application/x-tex")
+    storage_path = Column(Text, nullable=False)
+    status = Column(String(50), nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="generated_documents")
+    transcript = relationship("LessonTranscript", back_populates="generated_documents")
+
+
+class LessonProcessingJob(Base):
+    __tablename__ = "lesson_processing_jobs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    lesson_id = Column(String(36), ForeignKey("lessons.id"), nullable=False, index=True)
+    teacher_id = Column(String(255), nullable=False, index=True)
+    job_type = Column(String(50), nullable=False, index=True)
+    status = Column(String(50), nullable=False, default="queued", index=True)
+    stage = Column(String(50), nullable=False, default="queued")
+    recording_id = Column(String(36), nullable=True)
+    transcript_id = Column(String(36), nullable=True)
+    document_ids = Column(JSON, nullable=False, default=list)
+    error_message = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    lesson = relationship("Lesson", back_populates="processing_jobs")
 
 
 class File(Base):

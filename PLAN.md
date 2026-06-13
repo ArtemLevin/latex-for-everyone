@@ -1,6 +1,6 @@
 # Анализ состояния сервиса Latexed и план дальнейшей разработки
 
-Дата анализа: 2026-06-08. Репозиторий проверен по фактической структуре, Makefile-командам, backend/frontend коду, тестам, миграциям и документации.
+Дата первичного анализа: 2026-06-08. Актуализация: 2026-06-09. Репозиторий повторно сверён по фактической структуре, Makefile-командам, backend/frontend коду, тестам, миграциям, документации и текущим runtime-hardening изменениям.
 
 ## 1. Резюме состояния
 
@@ -9,11 +9,11 @@ Latexed находится на стадии **рабочего full-stack MVP /
 - есть цельный вертикальный сценарий: создать проект, редактировать `.tex` файлы, видеть локальный preview, компилировать на backend, экспортировать PDF/HTML/TEX и использовать AI-генерацию LaTeX;
 - backend уже разделён на FastAPI app, routers, services, SQLAlchemy models, Pydantic schemas и Alembic migrations;
 - frontend остаётся dependency-light SPA без сборки, но разделён на ordered browser scripts, которые подключаются из `frontend/main.html`;
-- основные опасные границы — пользовательские LaTeX-файлы, subprocess `pdflatex`, файловые артефакты и AI-provider — уже имеют часть защит: filename policy, payload limits, sanitizer, validator, bounded compiler output и safe logging;
-- тестовая база заметно выросла: текущий backend suite проходит, но покрывает в основном API/service контракты, а не полноценные browser/E2E сценарии;
-- production-ready состояние ещё не достигнуто из-за отсутствия обязательной TeX Live среды в текущем окружении, недостаточной observability/readiness, синхронных тяжёлых операций, простого in-memory rate limiting и отсутствия полноценной auth/multi-user модели.
+- основные опасные границы — пользовательские LaTeX-файлы, subprocess `pdflatex`, файловые артефакты и AI-provider — уже имеют набор защит: filename policy, payload limits, sanitizer, validator, bounded compiler output, safe logging, readiness diagnostics и общий safe artifact resolver для compile/export downloads;
+- тестовая база заметно выросла: текущий backend suite покрывает API/service контракты, readiness, artifact safety, frontend script-order contract и timestamp policy, но полноценные browser/E2E сценарии пока остаются ограниченными optional smoke-проверками;
+- production-ready состояние ещё не достигнуто из-за отсутствия гарантированной TeX Live среды в текущем окружении, синхронных тяжёлых операций, простого in-memory rate limiting, отсутствия полноценной auth/multi-user модели и незавершённой job/observability стратегии.
 
-Главный вывод: проект можно демонстрировать и развивать локально, но следующий этап должен быть не добавлением большого количества новых UI-фич, а стабилизацией runtime, безопасности, эксплуатации и тестовой матрицы.
+Главный вывод: проект можно демонстрировать и развивать локально; часть задач baseline/runtime hardening уже закрыта, поэтому следующий этап должен сфокусироваться на оставшихся production blockers: реальная TeX Live среда/операторская готовность, асинхронные jobs, auth/ownership, расширение E2E и аккуратное внедрение lesson workflow.
 
 ## 2. Методика анализа
 
@@ -23,8 +23,9 @@ Latexed находится на стадии **рабочего full-stack MVP /
 - Makefile targets и фактические команды запуска/проверки;
 - FastAPI app, routers, services, schemas, models, migrations;
 - frontend shell и порядок подключения `frontend/js/*.js`;
-- тесты `backend/tests/test_api.py` и fixtures AI outputs;
-- ранее добавленные архитектурные диаграммы `docs/uml-diagrams.md`.
+- тесты `backend/tests/test_api.py`, `backend/tests/test_frontend_contract.py`, `backend/tests/test_backend_confidence.py`, optional frontend E2E и fixtures AI outputs;
+- ранее добавленные архитектурные диаграммы `docs/uml-diagrams.md`;
+- legacy `transcibe.py` и backend-owned prompt templates `backend/app/prompts/lesson/*.txt` для lesson/transcription/document workflow.
 
 ## 3. Текущая карта сервиса
 
@@ -44,7 +45,7 @@ backend/app/main.py
 
 | Область | Основные endpoints | Состояние |
 |---|---|---|
-| Health/root | `GET /api/health`, `GET /` | Есть базовый health, но без детальной readiness по DB/compiler/storage/AI. |
+| Health/root/readiness | `GET /api/health`, `GET /api/ready`, `GET /` | `health` остаётся лёгким liveness endpoint; `ready` уже проверяет DB, compiler, Russian/T2A packages и artifact dirs. AI/transcription readiness предстоит расширять по мере добавления новых workflows. |
 | Projects | CRUD, snapshots, restore, duplicate | Работает через `ProjectService`; есть typed contracts и тесты. |
 | Files | list/create/get/update/delete/upload/upload-all | Работает через `FileService`; есть защита имён и invariant единственного main-файла. |
 | Templates | list/get | Статические шаблоны в router-файле; для роста лучше вынести в data/service слой. |
@@ -74,13 +75,13 @@ frontend/main.html
 - низкий порог запуска: достаточно статического сервера;
 - есть fallback, если backend недоступен;
 - CodeMirror/KaTeX/PDF.js/html2pdf.js дают редактор, preview и локальный export;
-- frontend API contract частично зафиксирован backend-тестами.
+- frontend API/script contract зафиксирован backend-тестами, включая точный порядок numbered scripts и запрет возврата legacy `frontend/js/main.js`.
 
 Риски:
 
 - глобальные функции и состояние усложняют безопасные изменения;
 - legacy `frontend/js/main.js` удалён; риск теперь состоит в случайном повторном введении параллельного entrypoint вместо numbered scripts из `main.html`;
-- нет автоматических browser/E2E тестов для основных пользовательских сценариев;
+- browser/E2E покрытие всё ещё минимальное и optional; основных пользовательских сценариев в CI-level smoke пока недостаточно;
 - CDN-зависимости не зафиксированы через lockfile/integrity-политику.
 
 ### 3.3 Данные и миграции
@@ -97,7 +98,8 @@ Persisted entities:
 
 - Alembic содержит baseline schema, generation history и token usage migration;
 - локальный `AUTO_CREATE_TABLES=true` удобен для dev, но production должен запускаться с `AUTO_CREATE_TABLES=false` и явными миграциями;
-- есть compatibility patch для старых локальных `generation_history` таблиц без token columns.
+- есть compatibility patch для старых локальных `generation_history` таблиц без token columns;
+- timestamps в app-коде переведены на единый timezone-aware `utc_now()` helper; прямой `datetime.utcnow()` в `backend/app` не должен возвращаться.
 
 ### 3.4 Runtime-зависимости
 
@@ -117,13 +119,10 @@ Persisted entities:
 | Layout verification | PASS | Ожидаемые backend/frontend/docs директории существуют. |
 | `make compileall` | PASS | Python-файлы backend компилируются без syntax errors. |
 | `make frontend-check` | PASS | Актуальные numbered frontend scripts проходят `node --check`; legacy `main.js` удалён. |
-| `make test` | PASS | `88 passed`; есть `110 warnings`. |
+| `make test` | PASS на актуальном baseline | Тестовый suite расширен: readiness, artifact safety, frontend contract и timestamp confidence покрыты автоматическими проверками; warning budget стал строже. |
 | `make latex-check` | FAIL из-за окружения | `pdflatex not found`; это блокирует реальную backend-компиляцию/PDF export в текущей среде, но не доказывает дефект кода. |
 
-Заметные warnings:
-
-- `pytest-asyncio` предупреждает, что `asyncio_default_fixture_loop_scope` не задан;
-- SQLAlchemy/Python предупреждают о `datetime.datetime.utcnow()`; стоит перейти на timezone-aware UTC timestamps.
+Исторически заметные warnings были связаны с неявным `pytest-asyncio` loop scope и `datetime.datetime.utcnow()`. В текущем baseline `asyncio_default_fixture_loop_scope` задан явно в `pyproject.toml`, а app-level timestamps используют `utc_now()`; новые warnings не следует подавлять широким `ignore::Warning`.
 
 ## 5. Сильные стороны проекта
 
@@ -142,19 +141,19 @@ Persisted entities:
 2. **Тяжёлые операции выполняются синхронно.** Компиляция, export PDF и AI generation могут занимать секунды/минуты и держать HTTP request open.
 3. **Rate limiting in-memory.** Лимиты не будут корректно работать при нескольких процессах/репликах и не переживают restart.
 4. **Нет полноценной auth/ownership модели.** В моделях есть `owner_id`, но API сейчас фактически работает как single-user/local editor.
-5. **Readiness/observability недостаточны.** Health показывает базовый статус, но не проверяет DB migrations, compiler availability, writable artifact dirs и AI provider readiness.
+5. **Readiness/observability всё ещё неполные для production.** `/api/ready` уже проверяет DB, compiler, LaTeX packages и artifact dirs, но не покрывает будущие lesson/transcription roots, provider credentials, job backlog и production metrics.
 
 ### P1 — высокие риски качества и безопасности
 
-1. **LaTeX sandboxing требует усиления.** Нужна явная политика `pdflatex` flags, shell escape, temp dirs, UID/container isolation, TTL cleanup и максимально разрешённые расширения.
-2. **Frontend без E2E покрытия.** Критичные пользовательские flows не проверяются автоматическим браузерным тестом.
-3. **Frontend entrypoint drift.** Legacy `frontend/js/main.js` удалён; порядок numbered scripts нужно защищать contract-тестами, чтобы не появился параллельный entrypoint.
+1. **LaTeX sandboxing требует дальнейшего усиления.** Filename/payload/artifact protections уже есть, но нужна явная production-политика `pdflatex` flags, shell escape, temp dirs, UID/container isolation и resource quotas.
+2. **Frontend E2E покрытие пока недостаточно.** Есть static contract на script order и optional smoke target, но критичные пользовательские flows ещё не проверяются полноценным браузерным тестом.
+3. **Frontend entrypoint drift частично закрыт.** Legacy `frontend/js/main.js` удалён и защищён contract-тестом; риск остаётся при добавлении новых ordered scripts без обновления тестов и docs.
 4. **Большой `generation.py`.** Router содержит почти 500 строк и смешивает HTTP, orchestration, logging, repair flow и history handling; часть логики можно вынести в service layer.
 5. **Templates лежат в router.** При росте шаблонов лучше перейти к data file/service, чтобы router не был контейнером данных.
 
 ### P2 — улучшения поддерживаемости
 
-1. **Timezone-aware timestamps.** Нужно заменить `datetime.utcnow()` на `datetime.now(UTC)` и синхронизировать миграции/тесты.
+1. **Timezone-aware timestamps — baseline закрыт, политику нужно сохранять.** `utc_now()` уже используется в app-коде; дальнейшие изменения должны не возвращать `datetime.utcnow()` и проверять совместимость миграций/response schemas.
 2. **OpenAPI/contract docs.** API есть, но пользовательская документация endpoints ограничена.
 3. **Frontend dependency policy.** CDN versions есть, но нет SRI/integrity или локального vendor strategy.
 4. **Storage abstraction.** Сейчас артефакты локальные; production может потребовать S3-compatible storage или volume policy.
@@ -251,58 +250,67 @@ Persisted entities:
 
 | Priority | Item | Почему важно | Проверка готовности |
 |---|---|---|---|
-| P0 | Документировать и автоматизировать TeX Live readiness | Без этого compile/export PDF непредсказуемы | `make latex-check` PASS в целевой среде; `/api/ready` сообщает compiler status |
-| P0 | Readiness endpoint | Нужно отделить live от ready | Tests на DB/compiler/storage readiness branches |
-| P0 | Async compile job prototype | Убирает долгие HTTP requests | API + frontend polling smoke test |
-| P0 | Artifact cleanup policy | Не копить PDF/TEX/HTML и не отдавать лишнее | Unit tests cleanup + docs TTL |
-| P1 | E2E smoke tests | Защита frontend workflow | Playwright smoke в CI/local target |
-| P1 | Guard frontend script order | Уменьшает риск повторного появления неподключаемого entrypoint | `main.html` script order test; legacy `main.js` отсутствует |
+| P0 | TeX Live readiness в целевой среде | `/api/ready` и `make latex-check` уже есть, но production/non-Docker среда должна реально иметь `pdflatex`, Russian/T2A packages и documented install path | `make latex-check` PASS в target environment; `/api/ready.status` не degraded из-за compiler/packages |
+| P0 | Async compile/job prototype | Убирает долгие HTTP requests | API + frontend polling smoke test |
+| P0 | Auth/ownership design и первый enforcement slice | Безопасность пользовательских данных и будущего lesson workflow | Cross-user denial tests или documented single-user mode boundary |
+| P1 | Artifact cleanup operationalization | Safe resolver/cleanup уже есть; нужна production policy: schedule, metrics, retention, docs for non-default roots | Unit tests cleanup + docs TTL + operator runbook |
+| P1 | E2E smoke tests | Защита frontend workflow beyond syntax/static contract | Playwright smoke в CI/local target или documented optional limitation |
 | P1 | Move AI orchestration to service | Поддерживаемость и unit testing | `generation.py` меньше, service tests больше |
 | P1 | Distributed rate limiting | Production multi-replica | Redis-backed limiter или documented single-process limitation |
-| P1 | Auth/ownership | Безопасность пользовательских данных | Cross-user denial tests |
-| P2 | Timezone-aware datetimes | Убрать deprecation и timezone ambiguity | Tests без `utcnow()` warnings |
+| P1 | Lesson backend foundation | Подготовить домен учеников/занятий без audio/provider риска | `Pupil`/`Lesson` models, migration, schemas, routers, service tests |
+| P2 | Frontend dependency policy | CDN versions есть, но нет SRI/local vendor policy | Documented policy или SRI/local assets decision |
+| P2 | Timestamp/warning budget maintenance | Baseline закрыт, нужен guard от регрессий | `rg`/tests не находят `datetime.utcnow()` в app code; warnings не растут |
 
 ## 9. Ближайший план разработки
 
-Ближайший план сфокусирован на **стабилизации сервиса перед расширением функциональности**. Новые пользовательские возможности стоит добавлять только после того, как compile/export runtime, диагностика окружения и базовые regression checks станут предсказуемыми.
+Ближайший план после актуализации сфокусирован на **завершении production hardening и подготовке новых доменных возможностей без потери стабильности**. Readiness endpoint, safe artifact resolver, frontend script-order contract и timestamp cleanup уже реализованы; новые пользовательские возможности стоит добавлять только после сохранения этого baseline и явного закрытия оставшихся runtime/security gaps.
 
 ### 9.1 Цель ближайшего спринта
 
-За 1–2 недели довести Latexed до состояния, в котором разработчик или оператор может быстро ответить на четыре вопроса:
+За 1–2 недели довести Latexed до состояния, в котором разработчик или оператор может быстро ответить на шесть вопросов:
 
-1. Готов ли backend обслуживать API и работать с базой данных?
-2. Готов ли runtime выполнять backend-компиляцию LaTeX и PDF export?
-3. Безопасно ли сервис создаёт, хранит, чистит и отдаёт compile/export артефакты?
-4. Защищены ли ключевые frontend/backend сценарии минимальными автоматическими проверками?
+1. Готов ли backend обслуживать API и работать с базой данных? — базовый ответ уже даёт `/api/ready`.
+2. Готов ли runtime выполнять backend-компиляцию LaTeX и PDF export? — диагностика есть, но целевая среда должна быть подтверждена `make latex-check`.
+3. Безопасно ли сервис создаёт, хранит, чистит и отдаёт compile/export артефакты? — safe resolver есть, осталось операционализировать cleanup/retention.
+4. Защищены ли ключевые frontend/backend сценарии минимальными автоматическими проверками? — static contract есть, E2E надо расширить.
+5. Как тяжёлые операции будут уходить из synchronous HTTP lifecycle?
+6. Как future lesson workflow будет хранить персональные данные до полноценной auth-модели?
 
 ### 9.2 Workstream A — readiness и диагностика окружения
 
-- **Приоритет:** P0
-- **Оценка:** 2–3 дня
+- **Статус:** baseline реализован; дальше требуется production/operator hardening.
+- **Приоритет:** P0 для target environment validation, P1 для расширения под новые providers/workflows.
+- **Оценка остатка:** 1–2 дня на документацию target environments и будущие readiness hooks.
 - **Владелец зоны:** backend/runtime
 
-Задачи:
+Сделано в baseline:
 
-- Добавить endpoint `GET /api/ready` рядом с текущим `GET /api/health`.
-- Проверять в readiness:
-  - доступность DB connection;
-  - наличие ожидаемых таблиц или Alembic head/version state;
-  - наличие `pdflatex` в `PATH`;
-  - доступность Russian/T2A LaTeX support через `kpsewhich`, если бинарь есть;
-  - доступность на запись runtime directories для compile/export/upload artifacts.
-- Разделить понятия:
+- `GET /api/ready` добавлен рядом с `GET /api/health`.
+- Readiness проверяет DB connection/required tables, наличие `pdflatex`, Russian/T2A support через `kpsewhich` и writable runtime directories для compile/export/upload artifacts.
+- Разделены понятия:
   - `health` — процесс жив и может отвечать HTTP;
   - `ready` — сервис готов выполнять заявленные функции.
-- Добавить backend tests для successful readiness и degraded readiness без `pdflatex`.
-- Обновить README: объяснить, какие функции работают без TeX Live, а какие требуют `make latex-check`.
+- Добавлены backend tests для successful readiness и degraded readiness без `pdflatex`.
+- README объясняет, какие функции работают без TeX Live, а какие требуют `make latex-check`.
 
-Definition of Done:
+Остаток:
+
+- Проверить `make latex-check` в целевой non-Docker и Docker среде, где реально должен работать PDF compile/export.
+- При добавлении lesson/transcription workflow расширить readiness новыми checks: lesson artifact root, transcription provider config, AI provider readiness для lesson documents и job queue/backlog.
+
+Definition of Done baseline — выполнено:
 
 - `GET /api/ready` возвращает структурированный JSON со статусами `database`, `compiler`, `latex_packages`, `artifact_dirs`.
 - Отсутствие `pdflatex` не маскируется: endpoint явно показывает degraded state.
 - Tests покрывают минимум один успешный и один degraded сценарий.
 
-#### 9.2.1 Детальный план реализации итерации 1
+Новый Definition of Done для остатка:
+
+- В целевой среде `make latex-check` проходит или limitation явно задокументирована как degraded runtime.
+- README/operator notes описывают, как интерпретировать `ready/degraded/not_ready` для Docker и non-Docker installs.
+- Новые lesson/transcription checks не ломают лёгкий `/api/health`.
+
+#### 9.2.1 Исторический детальный план реализации итерации 1 — baseline выполнен
 
 **Целевой API-контракт `GET /api/ready`:**
 
@@ -397,30 +405,39 @@ make latex-check  # optional/environment check: может быть warning, е�
 
 ### 9.3 Workstream B — hardening compile/export артефактов
 
-- **Приоритет:** P0
-- **Оценка:** 2–3 дня
+- **Статус:** safe download resolver и cleanup guard реализованы; нужен operator lifecycle/retention слой.
+- **Приоритет:** P1 для production cleanup policy; P0 только при изменении filesystem/download boundary.
+- **Оценка остатка:** 1–2 дня на retention docs/metrics/scheduled cleanup decision.
 - **Владелец зоны:** backend/security
 
-Задачи:
+Сделано в baseline:
 
-- Вынести общую проверку имён download-артефактов в единый helper/service для compile и export.
-- Зафиксировать allowlist типов download-файлов: PDF, TEX, HTML и только ожидаемые generated filenames.
-- Проверить, что compile/export не читают файлы вне разрешённых output directories.
-- Уточнить lifecycle артефактов:
-  - TTL через `ARTIFACT_TTL_SECONDS`;
-  - cleanup command/target;
-  - запрет удаления файлов вне runtime directories.
-- Добавить тесты на path traversal, неподдерживаемые расширения, старые файлы и сохранение новых файлов.
+- Общая проверка download-артефактов вынесена в `backend/app/services/artifact_paths.py`.
+- Compile/export download endpoints используют общий resolver и media allowlist.
+- Path operations используют `Path.resolve()` и root containment check.
+- Cleanup использует trusted artifact root validation и тесты на старые/свежие/unsupported files.
+- README описывает runtime artifacts и `make clean-artifacts`.
 
-Definition of Done:
+Остаток:
+
+- Решить, нужен ли scheduled cleanup worker/cron для production или достаточно manual Makefile target.
+- Добавить operational metrics/logging для cleanup: сколько файлов удалено, сколько пропущено, сколько ошибок.
+- При добавлении lesson artifacts расширить trusted roots без wildcard-доступа к пользовательским путям.
+
+Definition of Done baseline — выполнено:
 
 - Compile/export download endpoints используют общий safe-path механизм.
 - Cleanup покрыт тестами и не может удалить файлы вне разрешённых директорий.
 - Документация объясняет, где лежат runtime artifacts и как их чистить.
 
-#### 9.3.1 Детальный план реализации итерации 2
+Новый Definition of Done для остатка:
 
-**Текущая точка старта:**
+- Production/operator docs объясняют schedule/retention для cleanup.
+- Lesson artifacts подключаются через тот же trusted-root механизм, а не через произвольные filesystem paths.
+
+#### 9.3.1 Исторический детальный план реализации итерации 2 — baseline выполнен
+
+**Историческая точка старта до реализации baseline:**
 
 - `compile.py` уже проверяет, что download filename заканчивается на `.pdf` и не содержит path components, но эта проверка локальна для compile router.
 - `export.py` уже имеет `resolve_export_download_path()`, suffix allowlist и `resolve()`-prefix check для export artifacts, но это не переиспользуется compile endpoint.
@@ -530,32 +547,37 @@ make latex-check  # optional/environment check for real TeX runtime
 
 ### 9.4 Workstream C — frontend regression baseline
 
+- **Статус:** static contract и optional smoke target реализованы; полноценное browser coverage ещё нужно расширять.
 - **Приоритет:** P1
-- **Оценка:** 2–4 дня
+- **Оценка остатка:** 2–3 дня на устойчивый browser smoke в целевой среде/CI.
 - **Владелец зоны:** frontend/testing
 
-Задачи:
+Сделано в baseline:
 
-- Зафиксировать, что legacy `frontend/js/main.js` удалён и не должен возвращаться как параллельный entrypoint.
-- Добавить contract test, который проверяет фактический script order в `frontend/main.html`:
-  `01-state.js → 02-api.js → ... → 09-ui-settings.js`.
-- Добавить минимальный E2E smoke на Playwright или аналогичном инструменте:
-  - открыть `main.html`;
-  - убедиться, что редактор и file tree отображаются;
-  - изменить содержимое main file;
-  - выполнить local preview;
-  - проверить graceful fallback, если backend или `pdflatex` недоступны.
-- Не вводить bundler на этом этапе, чтобы не смешивать hardening и frontend build migration.
+- Legacy `frontend/js/main.js` отсутствует и защищён contract test-ом.
+- Contract test проверяет фактический script order в `frontend/main.html`: `01-state.js → 02-api.js → ... → 09-ui-settings.js`.
+- Добавлен optional `make frontend-e2e` target для browser smoke; он не входит в обязательный `make check`, потому что browser dependencies могут отсутствовать.
+- Bundler/framework migration не начат.
 
-Definition of Done:
+Остаток:
+
+- Сделать browser smoke устойчивым в CI или явно закрепить его как локальную optional проверку с documented limitations.
+- Расширить smoke до user-critical flows: открыть editor, изменить main `.tex`, local preview, backend unavailable fallback, AI modal prompt preview mock.
+
+Definition of Done baseline — выполнено для static contract:
 
 - `make frontend-check` остаётся зелёным.
-- Есть хотя бы один browser smoke сценарий для локального editor/preview workflow.
-- Разработчик не может случайно править неподключаемый frontend entrypoint, не заметив этого.
+- Разработчик не может случайно вернуть неподключаемый `frontend/js/main.js`, не заметив этого.
+- Optional browser smoke target присутствует.
 
-#### 9.4.1 Детальный план реализации итерации 3
+Новый Definition of Done для остатка:
 
-**Текущая точка старта:**
+- Browser smoke стабильно проходит в выбранной среде или помечается как documented environment limitation.
+- Smoke проверяет минимум editor/file tree/local preview/backend fallback.
+
+#### 9.4.1 Исторический детальный план реализации итерации 3 — static baseline выполнен
+
+**Историческая точка старта до реализации baseline:**
 
 - `frontend/main.html` подключает только numbered scripts `01-state.js` → `09-ui-settings.js`; legacy `frontend/js/main.js` удалён.
 - `make frontend-check` запускает `node --check` для актуальных файлов `frontend/js/*.js`, а contract tests защищают порядок подключения scripts.
@@ -675,35 +697,41 @@ make frontend-e2e  # optional, если target добавлен и browser depen
 
 ### 9.5 Workstream D — cleanup warnings и developer confidence
 
-- **Приоритет:** P1
-- **Оценка:** 1–2 дня
+- **Статус:** baseline выполнен; задача стала regression policy.
+- **Приоритет:** P2 maintenance, P1 при изменении models/migrations/timestamp behavior.
+- **Оценка остатка:** ongoing guardrail.
 - **Владелец зоны:** backend/testing
 
-Задачи:
+Сделано в baseline:
 
-- Задать `asyncio_default_fixture_loop_scope` в pytest configuration.
-- Заменить новые/текущие `datetime.utcnow()` на timezone-aware UTC helper, например `datetime.now(UTC)`.
-- Проверить, что миграции и response schemas не ломаются от timezone-aware значений.
-- Зафиксировать warning budget: тесты не должны бесконтрольно накапливать новые warnings.
+- `asyncio_default_fixture_loop_scope` задан в pytest configuration.
+- App-level timestamps используют timezone-aware UTC helper `utc_now()`.
+- Добавлены confidence tests на helper, отсутствие прямого `datetime.utcnow()` в `backend/app` и parseable API timestamp responses.
+- Warning budget закреплён без широкого подавления всех warnings.
 
-Definition of Done:
+Остаток:
 
-- `make test` проходит с существенно меньшим числом warnings.
-- Новые timestamps создаются через единый timezone-aware подход.
-- Тесты явно показывают, какие warnings ещё допустимы временно.
+- При новых models/services использовать только `utc_now()` или явно документированную совместимую стратегию.
+- Не добавлять broad warning ignores; app-level deprecations устранять в коде.
 
-#### 9.5.1 Детальный план реализации итерации 4
+Definition of Done baseline — выполнено:
 
-**Текущая точка старта:**
+- Тесты защищают единый timezone-aware подход.
+- Новые timestamps должны создаваться через `utc_now()`.
+- Тесты явно показывают, какие warnings/deprecations недопустимы для app-кода.
 
-- `make test` проходит, но создаёт заметный шум warnings: pytest-asyncio предупреждает о неявном fixture loop scope, а SQLAlchemy/Python предупреждают о `datetime.datetime.utcnow()`.
+#### 9.5.1 Исторический детальный план реализации итерации 4 — baseline выполнен
+
+**Историческая точка старта до реализации baseline:**
+
+- На момент первичного анализа `make test` проходил, но создавал заметный шум warnings: pytest-asyncio предупреждал о неявном fixture loop scope, а SQLAlchemy/Python предупреждали о `datetime.datetime.utcnow()`.
 - `pyproject.toml` уже содержит `[tool.pytest.ini_options]`, поэтому настройку `asyncio_default_fixture_loop_scope` лучше добавить туда, без отдельного `pytest.ini`.
-- `datetime.utcnow()` используется в SQLAlchemy model defaults и service-level ручных обновлениях timestamps.
-- Миграции сейчас создают `DateTime` columns без timezone-aware политики; нужно выбрать совместимую стратегию, чтобы не сломать SQLite tests и существующие response schemas.
+- На момент первичного анализа `datetime.utcnow()` использовался в SQLAlchemy model defaults и service-level ручных обновлениях timestamps; в текущем baseline это уже заменено на `utc_now()`.
+- Миграции на тот момент создавали `DateTime` columns без timezone-aware политики; совместимость SQLite tests и существующих response schemas нужно проверять при каждом изменении timestamp behavior.
 
 **Целевой подход к UTC timestamps:**
 
-- Добавить единый helper, например `backend/app/services/time_utils.py` или `backend/app/time_utils.py`:
+- Целевой подход был реализован через единый helper, например `backend/app/time_utils.py`:
 
 ```python
 from datetime import UTC, datetime
@@ -791,25 +819,47 @@ make test
 
 | Порядок | Работа | Почему именно сейчас | Основной результат |
 |---:|---|---|---|
-| 1 | Readiness и TeX diagnostics | Без этого непонятно, какие возможности реально доступны в окружении | `/api/ready`, tests, README notes |
-| 2 | Artifact hardening | Compile/export — самый рискованный filesystem boundary | Общий safe download/cleanup механизм |
-| 3 | Frontend regression baseline | Нужно защитить текущий UI перед дальнейшими изменениями | Script-order test и первый browser smoke |
-| 4 | Warnings cleanup | Снижает шум и повышает доверие к тестам | Меньше warnings, timezone-aware timestamps |
-| 5 | Async jobs design spike | После стабилизации runtime можно проектировать job API | ADR/mini design для compile jobs |
+| 1 | TeX diagnostics в целевой среде | Readiness endpoint есть, но нужно подтвердить реальную TeX Live готовность там, где сервис будет запускаться | `make latex-check` PASS или documented degraded runtime |
+| 2 | Async jobs design spike | Синхронные compile/export/generation остаются главным production blocker | ADR/mini design для compile jobs и совместимости текущих endpoints |
+| 3 | Auth/ownership boundary design | Future lesson workflow содержит персональные данные; single-user допущение должно быть явно ограничено | Минимальная ownership policy и cross-user test plan |
+| 4 | Frontend E2E strengthening | Static contract есть, но browser flows требуют устойчивой проверки | Stable optional/CI smoke для editor/preview/fallback |
+| 5 | Lesson backend foundation | После runtime/security baseline можно добавлять домен без audio/provider риска | Узкий PR с `Pupil`/`Lesson` CRUD, migration, services, tests |
 
 ### 9.7 Что не делать в ближайшем спринте
 
 Чтобы не размывать фокус, в ближайший спринт **не включать**:
 
-- полноценную auth/multi-user модель;
+- полноценную auth/multi-user модель без отдельного design/ownership spike;
 - большой переход frontend на bundler/framework;
 - масштабную переработку AI prompt UX;
 - перенос всех тяжёлых операций на Celery без предварительного design spike;
+- audio/transcription/provider integration до узкого backend foundation PR для `Pupil`/`Lesson`;
 - новые крупные шаблоны/редакционные возможности, не связанные со стабилизацией runtime.
 
-Эти задачи важны, но они должны идти после readiness, artifact safety и базового E2E smoke.
+Эти задачи важны, но они должны идти после сохранения текущего readiness/artifact baseline, подтверждения TeX runtime в целевой среде и укрепления базового E2E smoke.
 
 ## 10. План встраивания фичи «занятие → запись → транскрипт → AI-документы ученика»
+
+### 10.0 Итерация 0 — инвентаризация и фиксация границ
+
+**Статус:** выполнено; последующие PR подключили backend foundation, audio storage, transcription и document-generation service boundaries.
+
+Цель этой подготовительной итерации — убрать неоднозначности перед началом реализации lesson workflow: что уже лежит в репозитории, что нельзя подключать напрямую и какие boundaries обязательны для следующих PR.
+
+Зафиксированные артефакты:
+
+- `transcibe.py` — standalone Whisper/ffmpeg-oriented CLI script с legacy-опечаткой в имени. Он не является backend service, не должен импортироваться из routers и не должен определять публичные API names; optional legacy adapter теперь изолирован в `backend/app/services/transcription.py`.
+- `backend/app/prompts/lesson/check_list.txt` — parameterized prompt template для чек-листа; прежний hardcoded student-like пример `[ФИО ученика: Николь, ЕГЭ]` удалён и покрыт tests на отсутствие `Николь`.
+- `backend/app/prompts/lesson/pupil_mistakes.txt` — parameterized prompt template для personalized mistakes-review document; подключается через `LessonPromptService`, а не напрямую из routers.
+
+Boundary decisions для следующих итераций:
+
+1. Первый implementation PR ограничивается `Pupil`/`Lesson` backend foundation и не включает audio upload, transcription provider, AI document generation или frontend UI.
+2. Audio/transcription logic не вызывается из routers напрямую; routers работают через services и typed schemas.
+3. Prompt-файлы подключаются только через `LessonPromptService`; routers не читают prompt files напрямую.
+4. Целевые backend-owned locations остаются: `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, `backend/app/prompts/lesson/pupil_mistakes.txt`.
+
+Проверка для этой итерации: достаточно `git diff --check`, потому что изменения только документальные.
 
 ### 10.1 Цель и продуктовый сценарий
 
@@ -817,8 +867,8 @@ make test
 
 1. преподаватель выбирает ученика из своего списка и начинает занятие по конкретной теме;
 2. по явной опции сервис записывает звук занятия;
-3. backend передаёт запись в transcription pipeline; черновой скрипт `transcribe.py` должен быть адаптирован в service layer;
-4. AI pipeline обрабатывает транскрипт по промптам `check_list.txt` и `pupil_mistakes.txt`;
+3. backend передаёт запись в transcription pipeline; текущий standalone-скрипт `transcibe.py` с legacy-опечаткой должен быть адаптирован в service layer, а публичные имена будущего adapter-а должны использовать корректное `transcription`/`transcribe`;
+4. document pipeline обрабатывает транскрипт по prompt templates `backend/app/prompts/lesson/check_list.txt` и `backend/app/prompts/lesson/pupil_mistakes.txt`;
 5. backend генерирует PDF-документы: чек-лист и ревью ошибок, названные по теме занятия;
 6. документы сохраняются в папку ученика внутри директории соответствующей даты и доступны для просмотра/скачивания.
 
@@ -826,12 +876,15 @@ make test
 
 ### 10.2 Важное наблюдение по текущему репозиторию
 
-На момент анализа команды поиска по репозиторию не нашли `transcribe.py`, `check_list.txt` и `pupil_mistakes.txt` в текущем checkout. Поэтому план закладывает два параллельных результата:
+При актуализации 2026-06-12 prompt-файлы уже перенесены в backend-owned структуру, а в корне остаётся только legacy CLI `transcibe.py` с опечаткой в имени. Важно сохранять это разделение: reusable logic живёт в services, prompt templates загружаются prompt loader-ом, routers не подключают файлы напрямую.
 
-- интеграционный контракт и места подключения этих артефактов;
-- безопасный fallback/заглушки для тестов, чтобы backend-домен можно было разработать до появления production-скрипта и финальных prompt-файлов.
+Текущее состояние:
 
-Когда файлы будут добавлены, их следует разместить в предсказуемых директориях:
+- `transcibe.py` — standalone Whisper/ffmpeg-oriented script; optional adapter есть в `TranscriptionService`, но routers его не импортируют;
+- `backend/app/prompts/lesson/check_list.txt` и `backend/app/prompts/lesson/pupil_mistakes.txt` — реальные parameterized prompt templates без hardcoded `Николь`;
+- для CI используются fake transcription/generation providers, чтобы tests не зависели от Whisper, ffmpeg, API keys или внешних моделей.
+
+Целевое расположение:
 
 ```text
 backend/app/services/transcription.py       # адаптер вокруг transcribe.py
@@ -839,7 +892,7 @@ backend/app/prompts/lesson/check_list.txt
 backend/app/prompts/lesson/pupil_mistakes.txt
 ```
 
-Если `transcribe.py` должен остаться standalone-скриптом, backend всё равно должен обращаться к нему через service adapter, а не вызывать из router напрямую.
+Если standalone script должен сохраниться для ручного запуска, backend всё равно должен обращаться к reusable service adapter, а не вызывать CLI/script из router напрямую. Имя `transcibe.py` нужно исправить или явно задокументировать как legacy wrapper, чтобы не распространять опечатку в import/API contracts.
 
 ### 10.3 Архитектурные принципы встраивания
 
@@ -872,7 +925,7 @@ Router layer
 |---|---|---|
 | `Pupil` | Ученик преподавателя | `id`, `teacher_id`, `display_name`, `notes`, `created_at`, `updated_at` |
 | `Lesson` | Конкретное занятие с учеником | `id`, `pupil_id`, `teacher_id`, `topic`, `lesson_date`, `status`, `created_at`, `updated_at` |
-| `LessonAudioRecording` | Метаданные аудиозаписи | `id`, `lesson_id`, `filename`, `content_type`, `size_bytes`, `duration_seconds`, `storage_path`, `status` |
+| `LessonAudioRecording` | Метаданные аудиозаписи | `id`, `lesson_id`, `filename`, `content_type`, `size_bytes`, `duration_seconds`, `sha256_checksum`, `storage_path`, `status` |
 | `LessonTranscript` | Результат транскрибации | `id`, `lesson_id`, `recording_id`, `provider`, `language`, `text`, `status`, `error_message`, `created_at` |
 | `LessonGeneratedDocument` | Чек-лист / ревью ошибок / будущие документы | `id`, `lesson_id`, `document_type`, `title`, `filename`, `storage_path`, `status`, `error_message`, `created_at` |
 | `LessonProcessingJob` | Асинхронное состояние pipeline | `id`, `lesson_id`, `job_type`, `status`, `started_at`, `finished_at`, `error_message` |
@@ -1017,7 +1070,7 @@ Failure behavior:
 
 ### 10.8 AI processing pipeline для чек-листа и ревью ошибок
 
-Промпты `check_list.txt` и `pupil_mistakes.txt` нужно подключить через отдельный prompt loader:
+Промпты `backend/app/prompts/lesson/check_list.txt` и `backend/app/prompts/lesson/pupil_mistakes.txt` подключены через отдельный prompt loader:
 
 ```text
 LessonPromptService.load("check_list")
@@ -1090,75 +1143,91 @@ pupil_mistakes:
 
 #### Итерация A. Backend domain foundation, 2–3 дня, P0
 
+**Статус:** реализовано как backend-only foundation.
+
 Цель: создать доменную основу без записи аудио и внешних AI calls.
 
-Задачи:
+Сделано:
 
-- добавить SQLAlchemy models и Alembic migration для `Pupil`, `Lesson`, `LessonGeneratedDocument` минимум;
-- добавить Pydantic schemas для pupil/lesson/document responses;
-- добавить `PupilService` и `LessonService`;
-- добавить routers `/api/pupils` и `/api/lessons`;
-- добавить tests на CRUD, фильтрацию lessons по pupil/date и ownership placeholder;
-- обновить README/API docs.
+- добавлены SQLAlchemy models и Alembic migration для `Pupil` и `Lesson`; `LessonGeneratedDocument` сознательно оставлен для итерации D, чтобы первый PR не тянул document storage/download decisions;
+- добавлены Pydantic schemas для pupil/lesson create/update/response contracts;
+- добавлены `PupilService` и `LessonService`;
+- добавлены routers `/api/pupils` и `/api/lessons`;
+- добавлены tests на CRUD, фильтрацию lessons по pupil/date и placeholder ownership boundary;
+- обновлены README/API docs и references.
 
 Definition of Done:
 
 - можно создать ученика, создать занятие с темой, получить список занятий ученика;
 - миграция соответствует models;
+- audio upload, transcription provider, AI document generation и frontend UI не входят в этот slice;
 - `make compileall` и `make test` проходят.
 
 #### Итерация B. Audio upload и безопасное lesson storage, 2–3 дня, P0
 
+**Статус:** реализовано как backend-only safe upload/storage slice.
+
 Цель: принимать аудио и сохранять его в trusted runtime root.
 
-Задачи:
+Сделано:
 
-- добавить `LessonAudioRecording` model/migration;
-- добавить `AudioStorageService` с safe path policy;
-- добавить endpoint `POST /api/lessons/{lesson_id}/recordings`;
-- ограничить content-type, размер, расширение и filename;
-- добавить cleanup policy для lesson artifacts;
-- добавить tests на path traversal, unsupported media type, oversized upload, сохранение валидного файла.
+- добавлены `LessonAudioRecording` model/migration;
+- добавлен `AudioStorageService` с safe path policy, generated storage filenames и root containment check;
+- добавлен endpoint `POST /api/lessons/{lesson_id}/recordings`;
+- добавлены настройки `LESSON_ARTIFACT_ROOT`, `MAX_LESSON_AUDIO_SIZE`, `LESSON_AUDIO_ALLOWED_CONTENT_TYPES`, `LESSON_AUDIO_ALLOWED_EXTENSIONS`, `LESSON_AUDIO_DURATION_PROBE_ENABLED`, `MAX_LESSON_AUDIO_DURATION_SECONDS`;
+- ограничены content-type, размер, расширение, filename и опционально probed duration;
+- добавлены checksum metadata и best-effort `ffprobe` duration probing;
+- добавлены tests на path traversal, unsupported media type, oversized upload, duration limit, cross-teacher access, unknown lesson и сохранение валидного файла.
+
+Остаток для отдельного retention PR: TTL/recursive cleanup для custom `LESSON_ARTIFACT_ROOT`, idempotency key для повторных upload после сетевого сбоя; локальный default-root остаётся под `${UPLOAD_DIR}/lessons`, поэтому `make clean-artifacts` удаляет его вместе с `/tmp/latexed_uploads`.
 
 Definition of Done:
 
 - запись аудио сохраняется только внутри trusted lesson root;
-- API возвращает recording metadata;
-- unsafe filename/content-type не проходят.
+- API возвращает recording metadata, включая `sha256_checksum` и best-effort `duration_seconds` при доступном `ffprobe`;
+- unsafe filename/content-type/size не проходят;
+- transcription provider, AI document generation и frontend UI не входят в этот slice.
 
 #### Итерация C. Transcription integration, 2–4 дня, P0/P1
 
-Цель: подключить `transcribe.py` через service adapter.
+**Статус:** реализовано как synchronous backend-only transcription adapter slice; PR3 добавляет provider registry и optional `faster_whisper` adapter, но внешний worker остаётся отдельным PR.
 
-Задачи:
+Цель: подключить transcription workflow через service adapter, не импортируя legacy `transcibe.py` из routers.
 
-- добавить `TranscriptionService` и fake provider для тестов;
-- адаптировать `transcribe.py` к reusable function/API;
-- добавить `LessonTranscript` model/migration;
-- добавить endpoint `POST /api/lessons/{lesson_id}/transcribe`;
-- сохранять transcript text и provider metadata;
-- добавить tests на успешную транскрибацию и provider failure.
+Сделано:
+
+- добавлены `TranscriptionService`, typed `TranscriptResult`/`TranscriptSegment` contracts, provider registry, `FakeTranscriptionProvider` для CI, optional `FasterWhisperTranscriptionProvider` и optional `LegacyWhisperTranscriptionProvider`, который содержит legacy-опечатку `transcibe.py` внутри service layer;
+- добавлены настройки `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_BEAM_SIZE`, `TRANSCRIPTION_DEVICE`, `TRANSCRIPTION_COMPUTE_TYPE`, `TRANSCRIPTION_WORD_TIMESTAMPS`;
+- добавлены `LessonTranscript` model/migration и response/request schemas;
+- добавлен endpoint `POST /api/lessons/{lesson_id}/transcribe`;
+- сохраняются transcript text, provider, language, status и sanitized provider error;
+- provider failure создаёт `failed` transcript и не переводит lesson из `recording_uploaded`;
+- добавлены tests на successful fake transcription, provider failure, отсутствие recording и teacher-scope boundary.
 
 Definition of Done:
 
 - по загруженной записи можно получить transcript record;
 - failure provider-а не ломает lesson и отражается статусом `failed`;
-- CI tests не требуют реального внешнего AI/transcription provider.
+- CI tests не требуют реального внешнего AI/transcription provider; optional `faster_whisper` adapter покрывается fake-module unit test;
+- AI document generation и frontend UI не входят в этот slice.
 
 #### Итерация D. AI documents generation, 3–5 дней, P0/P1
 
-Цель: генерировать чек-лист и ревью ошибок из transcript-а.
+**Статус:** реализовано как backend-only document generation/storage slice для `.tex` artifacts.
 
-Задачи:
+Цель: генерировать чек-лист и ревью ошибок из completed transcript-а через service layer.
 
-- добавить prompt files `check_list.txt`, `pupil_mistakes.txt` в `backend/app/prompts/lesson/`;
-- добавить prompt loader и structured output contract;
-- добавить `LessonDocumentGenerationService`;
-- добавить LaTeX builder для lesson documents;
-- использовать safe artifact paths и compile/export hardening;
-- добавить endpoint `POST /api/lessons/{lesson_id}/documents/generate`;
-- добавить download endpoint для generated documents;
-- добавить tests на prompt loading, AI fake response, LaTeX escaping, PDF/document metadata persistence.
+Сделано:
+
+- prompt files `check_list.txt`, `pupil_mistakes.txt` перенесены из корня в `backend/app/prompts/lesson/` и параметризованы; hardcoded `Николь` удалена и покрыта tests;
+- добавлены `LessonPromptService`, structured `LessonDocumentDraft` contract, fake provider для CI и `LessonDocumentGenerationService`;
+- добавлены `LessonGeneratedDocument` model/migration и response/request schemas;
+- добавлен LaTeX builder с escaping для lesson documents;
+- generated `.tex` artifacts сохраняются через trusted lesson root и generated filenames;
+- добавлены endpoints `POST /api/lessons/{lesson_id}/documents/generate`, `GET /api/lessons/{lesson_id}/documents`, `GET /api/lessons/{lesson_id}/documents/{document_id}/download`;
+- добавлены tests на prompt loading, отсутствие hardcoded PII в prompt templates, fake document generation, LaTeX escaping, metadata persistence/download и teacher-scope boundary.
+
+Остаток для следующих PR: production AI/provider adapter, PDF compilation для lesson documents, external worker/background execution и frontend UI.
 
 Definition of Done:
 
@@ -1168,15 +1237,21 @@ Definition of Done:
 
 #### Итерация E. Job-based orchestration, 3–5 дней, P1
 
-Цель: не держать HTTP request во время транскрибации, AI и PDF compilation.
+**Статус:** реализовано как backend job status/polling foundation с in-process execution MVP.
 
-Задачи:
+Цель: дать frontend стабильный job contract для запуска и polling-а тяжёлого lesson pipeline, сохранив возможность вынести execution во внешний worker позже.
 
-- добавить `LessonProcessingJob` model/migration;
-- реализовать job statuses и polling endpoint;
-- вынести transcription/generation pipeline в worker-friendly service;
-- добавить retry/cancel policy;
-- добавить tests на переходы статусов.
+Сделано:
+
+- добавлены `LessonProcessingJob` model/migration и response/create schemas;
+- реализованы statuses `queued`, `running`, `completed`, `failed`, stage tracking, attempts, started/finished timestamps, `transcript_id`, `document_ids`, sanitized error message;
+- добавлен `LessonProcessingJobService`, который оркестрирует `transcribe`, `generate_documents`, `full_pipeline` через существующие service boundaries;
+- добавлены endpoints `POST /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs/{job_id}`;
+- повторный `full_pipeline` переиспользует completed transcript/documents и не создаёт неконтролируемые дубль-документы;
+- provider failure сохраняется в `failed` job и не удаляет предыдущие transcript/document результаты;
+- добавлены tests на миграцию, successful full pipeline, polling/list, duplicate prevention, provider failure и teacher-scope boundary.
+
+Остаток для следующих PR: настоящий background worker/queue, retry/cancel endpoints, job backlog/readiness metrics и frontend polling UI.
 
 Definition of Done:
 
@@ -1186,18 +1261,22 @@ Definition of Done:
 
 #### Итерация F. Frontend lesson workflow, 4–6 дней, P1
 
-Цель: дать преподавателю UI для полного сценария.
+**Статус:** реализовано как lightweight frontend workflow panel без изменения основного editor contract.
 
-Задачи:
+Цель: дать преподавателю UI для backend lesson workflow и polling/status сценария.
 
-- добавить UI списка учеников и занятий;
-- добавить создание занятия и выбор темы;
-- добавить MediaRecorder flow;
-- добавить upload/progress/status UI;
-- добавить transcript preview;
-- добавить список и скачивание documents;
-- добавить frontend contract test для нового script order;
-- добавить E2E smoke: создать ученика → создать занятие → загрузить fake audio → увидеть статус и documents fallback.
+Сделано:
+
+- добавлен sidebar tab `Уроки` и script `frontend/js/10-lessons.js` после existing numbered scripts;
+- добавлен UI списка учеников/занятий, создание ученика и занятия;
+- добавлен MediaRecorder flow с fallback на manual audio file upload;
+- добавлены upload/status controls, explicit transcription, document generation и full pipeline job action;
+- добавлен production-UX первый слой для записи: consent checkbox, MIME selection по `MediaRecorder.isTypeSupported`, states `recording`/`ready_to_upload`/`uploading`, timer/size metrics, локальный audio preview и reset action;
+- добавлены transcript/job status previews и список download links для generated documents;
+- graceful fallback показывает offline state при недоступном backend;
+- обновлён frontend contract test для script order и lesson DOM/entrypoint contract.
+
+Остаток для следующих PR: browser E2E с реальным backend fixture, manual QA по Chrome/Safari/mobile microphone permissions, progress polling timer для внешнего worker-а и visual states для long-running jobs.
 
 Definition of Done:
 
@@ -1257,14 +1336,15 @@ Readiness endpoint нужно расширять постепенно, не см
 
 ### 10.14 Рекомендуемый первый PR
 
-Первый PR должен быть узким и не должен одновременно включать запись аудио, transcription provider и frontend UI.
+Исторически первый PR был запланирован узким и не должен был одновременно включать запись аудио, transcription provider и frontend UI. Этот принцип поэтапности сохранён: audio, transcription и document generation подключены отдельными backend slices.
 
-Рекомендуемый scope:
+Реализованный начальный scope:
 
 - models/migration/schemas/services/routers для `Pupil` и `Lesson`;
 - базовые endpoints CRUD;
-- tests на создание ученика, создание занятия, получение списка занятий ученика;
+- tests на создание ученика, создание занятия, получение списка занятий ученика и placeholder ownership boundary;
 - README секция с описанием будущего lesson workflow и текущего backend foundation;
-- без изменений в frontend и без внешних AI calls.
+- inventory note по legacy `transcibe.py` и prompt templates;
+- без изменений в frontend на backend-foundation этапах.
 
-Такой scope снижает риск, даёт основу для хранения документов и позволит следующими PR подключать audio storage, transcription и generation по одному безопасному boundary за раз.
+Такой scope снизил риск и позволил подключить audio storage, transcription и document generation по одному безопасному boundary за раз.
