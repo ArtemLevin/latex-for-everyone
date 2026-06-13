@@ -1815,7 +1815,7 @@ def test_frontend_generation_ui_contract():
     assert 'id="generationLatexMode"' in content
     assert 'value="safe" selected' in content
     assert 'value="rich"' in content
-    assert 'value="gemma4"' in content
+    assert 'value="qwen2.5:3b"' in content
     assert "collectGenerationRequest" in content
     assert "generateLatexFromAi" in content
     assert "main_file_name" in content
@@ -2275,17 +2275,17 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     assert usage.source == "estimated"
 
 
-def test_ai_generation_service_defaults_to_gemma4_for_ollama(monkeypatch):
+def test_ai_generation_service_defaults_to_qwen2.5:3b_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
 
     monkeypatch.setattr(settings, "AI_PROVIDER", "ollama")
-    monkeypatch.setattr(settings, "OLLAMA_MODEL", "gemma4")
+    monkeypatch.setattr(settings, "OLLAMA_MODEL", "qwen2.5:3b")
 
     provider, model = AIGenerationService().resolve_provider_model()
 
     assert provider == "ollama"
-    assert model == "gemma4"
+    assert model == "qwen2.5:3b"
 
 
 def test_generation_provider_status_uses_selected_provider_and_model(monkeypatch):
@@ -2446,7 +2446,7 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
             r"\section{History}Generated history body"
             "\n```",
             "ollama",
-            "gemma4",
+            "qwen2.5:3b",
         )
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
@@ -2471,7 +2471,7 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
     item = history[0]
     assert item["project_id"] == project_id
     assert item["provider"] == "ollama"
-    assert item["model"] == "gemma4"
+    assert item["model"] == "qwen2.5:3b"
     assert item["status"] == "success"
     assert item["fields"]["topic"] == "История генерации"
     assert item["prompt_hash"]
@@ -2546,7 +2546,7 @@ def test_generation_generate_strips_accidental_model_preamble(monkeypatch):
             r"\documentclass{article}\usepackage{graphicx}\begin{document}Generated full doc\end{document}"
             "\n```",
             "ollama",
-            "gemma4",
+            "qwen2.5:3b",
         )
 
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
@@ -2582,14 +2582,14 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
                 r"\section{Broken}Компилируемый body, но компилятор вернул ошибку."
                 "\n```",
                 "ollama",
-                "gemma4",
+                "qwen2.5:3b",
             )
         return (
             "```latex\n"
             r"\section{Fixed}\begin{infoblock}{Важно}Закрыто\end{infoblock}"
             "\n```",
             "ollama",
-            "gemma4",
+            "qwen2.5:3b",
         )
 
     def fake_compile(main_content, files, main_filename="main.tex"):
@@ -2647,7 +2647,7 @@ def test_generation_generate_simplifies_safe_mode_risky_latex_before_compile(mon
             r"\section{Risky}\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
             "\n```",
             "ollama",
-            "gemma4",
+            "qwen2.5:3b",
         )
 
     def fake_compile(main_content, files, main_filename="main.tex"):
