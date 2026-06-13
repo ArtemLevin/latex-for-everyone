@@ -84,11 +84,11 @@
         const provider = getGenerationFieldValue('generationProvider');
         const modelInput = document.getElementById('generationModel');
         if (!modelInput) return;
-        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'gemma4')) {
+        if (provider === 'vendor' && (!modelInput.value || modelInput.value === 'qwen2.5:3b')) {
             modelInput.value = 'gpt-4o-mini';
         }
         if (provider === 'ollama' && (!modelInput.value || modelInput.value === 'gpt-4o-mini')) {
-            modelInput.value = 'gemma4';
+            modelInput.value = 'qwen2.5:3b';
         }
     }
 
