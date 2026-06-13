@@ -41,3 +41,8 @@ def test_lesson_frontend_entrypoint_and_dom_contract_are_present():
     assert "function renderLessonSidebar" in lessons_js
     assert "startLessonProcessingJob" in lessons_js
     assert "MediaRecorder" in lessons_js
+    assert "LESSON_RECORDING_MIME_CANDIDATES" in lessons_js
+    assert "lessonRecordingConsent" in lessons_js
+    assert "formatLessonRecordingDuration" in lessons_js
+    assert "data-recording-state" in lessons_js
+    assert "lesson-audio-preview" in lessons_js

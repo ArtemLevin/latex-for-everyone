@@ -1270,11 +1270,12 @@ Definition of Done:
 - добавлен UI списка учеников/занятий, создание ученика и занятия;
 - добавлен MediaRecorder flow с fallback на manual audio file upload;
 - добавлены upload/status controls, explicit transcription, document generation и full pipeline job action;
+- добавлен production-UX первый слой для записи: consent checkbox, MIME selection по `MediaRecorder.isTypeSupported`, states `recording`/`ready_to_upload`/`uploading`, timer/size metrics, локальный audio preview и reset action;
 - добавлены transcript/job status previews и список download links для generated documents;
 - graceful fallback показывает offline state при недоступном backend;
 - обновлён frontend contract test для script order и lesson DOM/entrypoint contract.
 
-Остаток для следующих PR: production UX polish, progress polling timer, browser E2E с реальным backend fixture, visual states для long-running external worker jobs.
+Остаток для следующих PR: browser E2E с реальным backend fixture, manual QA по Chrome/Safari/mobile microphone permissions, progress polling timer для внешнего worker-а и visual states для long-running jobs.
 
 Definition of Done:
 

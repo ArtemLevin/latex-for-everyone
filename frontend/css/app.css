@@ -1563,3 +1563,72 @@
     }
 
     .lesson-doc-link:hover { text-decoration: underline; }
+
+    .lesson-recording-card[data-recording-state="recording"] {
+        border-color: rgba(239, 68, 68, 0.5);
+    }
+
+    .lesson-recording-state,
+    .lesson-recording-metrics,
+    .lesson-consent {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 8px;
+        color: var(--text-secondary);
+        font-size: 12px;
+    }
+
+    .lesson-recording-state {
+        font-weight: 600;
+    }
+
+    .lesson-recording-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 999px;
+        background: var(--text-muted);
+        box-shadow: 0 0 0 3px rgba(148, 163, 184, 0.14);
+    }
+
+    .lesson-recording-card[data-recording-state="recording"] .lesson-recording-dot {
+        background: var(--accent-danger);
+        box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.16);
+    }
+
+    .lesson-recording-card[data-recording-state="ready_to_upload"] .lesson-recording-dot,
+    .lesson-recording-card[data-recording-state="uploaded"] .lesson-recording-dot {
+        background: var(--accent-success);
+        box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.16);
+    }
+
+    .lesson-recording-metrics {
+        justify-content: space-between;
+        flex-wrap: wrap;
+    }
+
+    .lesson-consent {
+        align-items: flex-start;
+        line-height: 1.35;
+    }
+
+    .lesson-consent input {
+        margin-top: 2px;
+    }
+
+    .lesson-audio-preview {
+        width: 100%;
+        margin-top: 8px;
+    }
+
+    .lesson-recording-error {
+        margin-top: 8px;
+        color: var(--accent-danger);
+        font-size: 12px;
+        line-height: 1.35;
+    }
+
+    .lesson-action-btn:disabled {
+        cursor: not-allowed;
+        opacity: 0.55;
+    }
