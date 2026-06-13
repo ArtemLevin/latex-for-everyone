@@ -1,3 +1,4 @@
+import importlib
 import importlib.util
 import sys
 import uuid
@@ -129,16 +130,100 @@ class LegacyWhisperTranscriptionProvider:
         )
 
 
+class FasterWhisperTranscriptionProvider:
+    """Optional production-oriented provider backed by `faster-whisper`.
+
+    The dependency is intentionally loaded only when this provider is used so the
+    default development/CI path can keep `TRANSCRIPTION_PROVIDER=disabled` or
+    `fake` without installing model/runtime packages.
+    """
+
+    provider_name = "faster_whisper"
+
+    def __init__(self, *, model_name: str, device: str, compute_type: str, beam_size: int, word_timestamps: bool):
+        self.model_name = model_name
+        self.device = device
+        self.compute_type = compute_type
+        self.beam_size = beam_size
+        self.word_timestamps = word_timestamps
+
+    def transcribe(self, audio_path: Path, *, language: str) -> TranscriptResult:
+        faster_whisper = importlib.import_module("faster_whisper")
+        model = faster_whisper.WhisperModel(
+            self.model_name,
+            device=self.device,
+            compute_type=self.compute_type,
+        )
+        raw_segments, info = model.transcribe(
+            str(audio_path),
+            language=language,
+            beam_size=self.beam_size,
+            word_timestamps=self.word_timestamps,
+        )
+        segments = [
+            TranscriptSegment(
+                start=float(getattr(segment, "start", 0.0)),
+                end=float(getattr(segment, "end", 0.0)),
+                text=str(getattr(segment, "text", "")).strip(),
+            )
+            for segment in raw_segments
+        ]
+        text = "\n".join(segment.text for segment in segments if segment.text).strip()
+        if not text:
+            raise TranscriptionProviderError("Transcription provider returned empty text")
+        detected_language = str(getattr(info, "language", None) or language)
+        duration = getattr(info, "duration", None)
+        return TranscriptResult(
+            text=text,
+            language=detected_language,
+            provider=self.provider_name,
+            duration_seconds=float(duration) if duration is not None else None,
+            segments=segments,
+        )
+
+
+def build_disabled_transcription_provider() -> TranscriptionProvider:
+    return DisabledTranscriptionProvider()
+
+
+def build_fake_transcription_provider() -> TranscriptionProvider:
+    return FakeTranscriptionProvider()
+
+
+def build_legacy_whisper_transcription_provider() -> TranscriptionProvider:
+    return LegacyWhisperTranscriptionProvider(
+        model_name=settings.TRANSCRIPTION_MODEL,
+        beam_size=settings.TRANSCRIPTION_BEAM_SIZE,
+    )
+
+
+def build_faster_whisper_transcription_provider() -> TranscriptionProvider:
+    return FasterWhisperTranscriptionProvider(
+        model_name=settings.TRANSCRIPTION_MODEL,
+        device=settings.TRANSCRIPTION_DEVICE,
+        compute_type=settings.TRANSCRIPTION_COMPUTE_TYPE,
+        beam_size=settings.TRANSCRIPTION_BEAM_SIZE,
+        word_timestamps=settings.TRANSCRIPTION_WORD_TIMESTAMPS,
+    )
+
+
+TRANSCRIPTION_PROVIDER_REGISTRY = {
+    "disabled": build_disabled_transcription_provider,
+    "fake": build_fake_transcription_provider,
+    "legacy_whisper": build_legacy_whisper_transcription_provider,
+    "whisper": build_legacy_whisper_transcription_provider,
+    "faster_whisper": build_faster_whisper_transcription_provider,
+}
+
+
+def available_transcription_providers() -> tuple[str, ...]:
+    return tuple(sorted(TRANSCRIPTION_PROVIDER_REGISTRY))
+
+
 def build_transcription_provider() -> TranscriptionProvider:
     provider = settings.TRANSCRIPTION_PROVIDER.strip().lower()
-    if provider == "fake":
-        return FakeTranscriptionProvider()
-    if provider in {"legacy_whisper", "whisper"}:
-        return LegacyWhisperTranscriptionProvider(
-            model_name=settings.TRANSCRIPTION_MODEL,
-            beam_size=settings.TRANSCRIPTION_BEAM_SIZE,
-        )
-    return DisabledTranscriptionProvider()
+    factory = TRANSCRIPTION_PROVIDER_REGISTRY.get(provider, build_disabled_transcription_provider)
+    return factory()
 
 
 def sanitize_provider_error(exc: Exception) -> str:

@@ -176,7 +176,7 @@ Backend application code uses a shared `utc_now()` helper from `backend/app/time
 
 ## Lesson/transcription preparation inventory
 
-The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD, safe lesson-audio upload/storage, synchronous transcription, and deterministic lesson-document generation for backend tests; frontend workflow and production AI/provider orchestration remain future work. The current checkout also contains the legacy transcription CLI and backend-owned lesson prompt templates:
+The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD, safe lesson-audio upload/storage, synchronous transcription, optional `faster-whisper`/legacy transcription adapters, and deterministic lesson-document generation for backend tests; frontend workflow and production AI/provider orchestration remain future work. The current checkout also contains the legacy transcription CLI and backend-owned lesson prompt templates:
 
 - `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
 - `backend/app/prompts/lesson/check_list.txt` is the parameterized prompt template for a lesson checklist document. The former hardcoded student-like text has been replaced with template placeholders.
@@ -184,7 +184,7 @@ The lesson workflow is implemented incrementally. The backend now has pupil/less
 
 Boundary policy for the remaining transcription/document-generation iterations:
 
-- Do not import or call `transcibe.py` from routers. The backend boundary is `backend/app/services/transcription.py`, which exposes a typed provider contract and fake provider for tests while containing the legacy CLI typo behind an optional adapter.
+- Do not import or call `transcibe.py` from routers. The backend boundary is `backend/app/services/transcription.py`, which exposes a typed provider registry/contract, a fake provider for tests, an optional `faster_whisper` provider, and the legacy CLI typo behind a contained adapter.
 - Prompt templates must be loaded through `LessonPromptService`; routers must not read prompt files directly.
 - The backend-owned locations are `backend/app/services/transcription.py`, `backend/app/prompts/lesson/check_list.txt`, and `backend/app/prompts/lesson/pupil_mistakes.txt`.
 - Audio upload is limited to validated storage metadata under `POST /api/lessons/{lesson_id}/recordings`; transcription is started explicitly through `POST /api/lessons/{lesson_id}/transcribe`; document generation is started explicitly through `POST /api/lessons/{lesson_id}/documents/generate` and currently persists safe `.tex` artifacts only.
@@ -208,7 +208,7 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 
 The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
 
-This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings` with checksum metadata and best-effort duration probing, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts, and processing-job endpoints for start/list/poll status. The transcription default provider is disabled, document generation defaults to a deterministic fake provider for backend coverage, and production external-worker orchestration remains future work; a lightweight frontend sidebar panel is available under the `Уроки` tab.
+This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings` with checksum metadata and best-effort duration probing, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts, and processing-job endpoints for start/list/poll status. The transcription default provider is disabled, `faster_whisper` is an optional runtime install for production transcription, document generation defaults to a deterministic fake provider for backend coverage, and production external-worker orchestration remains future work; a lightweight frontend sidebar panel is available under the `Уроки` tab.
 
 The browser UI includes a lightweight `Уроки` sidebar tab loaded by `frontend/js/10-lessons.js`. It lets a teacher create/select pupils and lessons, record audio with `MediaRecorder` when available or upload an audio file manually, start transcription/document generation or the full processing job, and open generated document download links. The recording panel now chooses a supported audio MIME type, requires an explicit consent checkbox before microphone capture, shows recording state/timer/size metrics, and renders an audio preview before upload. When the backend is offline, the tab shows a degraded state instead of breaking the editor.
 
@@ -352,10 +352,13 @@ Deprecated compatibility routes are still available for compile history:
 | `LESSON_AUDIO_ALLOWED_EXTENSIONS` | `.webm,.wav,.mp3,.m4a,.ogg` | Comma-separated allowlist for lesson audio upload filename extensions |
 | `LESSON_AUDIO_DURATION_PROBE_ENABLED` | `true` | Enable best-effort `ffprobe` duration metadata for stored lesson audio when `ffprobe` is available |
 | `MAX_LESSON_AUDIO_DURATION_SECONDS` | `0` | Maximum probed audio duration; `0` disables duration rejection |
-| `TRANSCRIPTION_PROVIDER` | `disabled` | Transcription provider selector (`disabled`, `fake`, or `legacy_whisper`/`whisper`) |
+| `TRANSCRIPTION_PROVIDER` | `disabled` | Transcription provider selector (`disabled`, `fake`, `faster_whisper`, or `legacy_whisper`/`whisper`) |
 | `TRANSCRIPTION_LANGUAGE` | `ru` | Default transcription language |
-| `TRANSCRIPTION_MODEL` | `small` | Legacy Whisper model name when the optional adapter is enabled |
-| `TRANSCRIPTION_BEAM_SIZE` | `5` | Legacy Whisper beam size when the optional adapter is enabled |
+| `TRANSCRIPTION_MODEL` | `small` | Whisper/faster-whisper model name when an optional adapter is enabled |
+| `TRANSCRIPTION_BEAM_SIZE` | `5` | Beam size for Whisper/faster-whisper adapters |
+| `TRANSCRIPTION_DEVICE` | `cpu` | Device passed to the optional faster-whisper adapter |
+| `TRANSCRIPTION_COMPUTE_TYPE` | `int8` | Compute type passed to the optional faster-whisper adapter |
+| `TRANSCRIPTION_WORD_TIMESTAMPS` | `false` | Enable word timestamps in the optional faster-whisper adapter |
 | `LESSON_DOCUMENT_PROVIDER` | `fake` | Lesson document provider selector; currently `fake` or disabled fallback |
 | `LESSON_DOCUMENT_ALLOWED_TYPES` | `check_list,pupil_mistakes` | Comma-separated document types planned for lesson generation |
 | `CORS_ORIGINS` | local dev origins | Explicit allowed CORS origins |
@@ -380,6 +383,8 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
+
+Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper.
 
 ## Logging and observability
 

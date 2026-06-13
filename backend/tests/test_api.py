@@ -611,6 +611,94 @@ def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     assert lesson_response.json()["status"] == "transcript_ready"
 
 
+def test_transcription_provider_registry_selects_faster_whisper(monkeypatch):
+    from app.config import settings
+    from app.services.transcription import (
+        DisabledTranscriptionProvider,
+        FasterWhisperTranscriptionProvider,
+        available_transcription_providers,
+        build_transcription_provider,
+    )
+
+    monkeypatch.setattr(settings, "TRANSCRIPTION_PROVIDER", "faster_whisper")
+    monkeypatch.setattr(settings, "TRANSCRIPTION_MODEL", "small")
+    monkeypatch.setattr(settings, "TRANSCRIPTION_DEVICE", "cpu")
+    monkeypatch.setattr(settings, "TRANSCRIPTION_COMPUTE_TYPE", "int8")
+    monkeypatch.setattr(settings, "TRANSCRIPTION_BEAM_SIZE", 3)
+    monkeypatch.setattr(settings, "TRANSCRIPTION_WORD_TIMESTAMPS", True)
+
+    provider = build_transcription_provider()
+
+    assert "faster_whisper" in available_transcription_providers()
+    assert isinstance(provider, FasterWhisperTranscriptionProvider)
+    assert provider.model_name == "small"
+    assert provider.device == "cpu"
+    assert provider.compute_type == "int8"
+    assert provider.beam_size == 3
+    assert provider.word_timestamps is True
+
+    monkeypatch.setattr(settings, "TRANSCRIPTION_PROVIDER", "unknown-provider")
+    assert isinstance(build_transcription_provider(), DisabledTranscriptionProvider)
+
+
+def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
+    import sys
+    from types import SimpleNamespace
+    from app.services.transcription import FasterWhisperTranscriptionProvider
+
+    captured = {}
+
+    class FakeWhisperModel:
+        def __init__(self, model_name, *, device, compute_type):
+            captured["model_name"] = model_name
+            captured["device"] = device
+            captured["compute_type"] = compute_type
+
+        def transcribe(self, audio_path, *, language, beam_size, word_timestamps):
+            captured["audio_path"] = audio_path
+            captured["language"] = language
+            captured["beam_size"] = beam_size
+            captured["word_timestamps"] = word_timestamps
+            return (
+                [
+                    SimpleNamespace(start=0.0, end=1.25, text=" Первый фрагмент "),
+                    SimpleNamespace(start=1.25, end=2.5, text="Второй фрагмент"),
+                ],
+                SimpleNamespace(language="ru", duration=2.5),
+            )
+
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=FakeWhisperModel))
+    audio_path = tmp_path / "recording.webm"
+    audio_path.write_bytes(b"audio")
+    provider = FasterWhisperTranscriptionProvider(
+        model_name="base",
+        device="cpu",
+        compute_type="int8",
+        beam_size=5,
+        word_timestamps=False,
+    )
+
+    result = provider.transcribe(audio_path, language="ru")
+
+    assert captured == {
+        "model_name": "base",
+        "device": "cpu",
+        "compute_type": "int8",
+        "audio_path": str(audio_path),
+        "language": "ru",
+        "beam_size": 5,
+        "word_timestamps": False,
+    }
+    assert result.provider == "faster_whisper"
+    assert result.language == "ru"
+    assert result.duration_seconds == 2.5
+    assert result.text == "Первый фрагмент\nВторой фрагмент"
+    assert [(segment.start, segment.end, segment.text) for segment in result.segments] == [
+        (0.0, 1.25, "Первый фрагмент"),
+        (1.25, 2.5, "Второй фрагмент"),
+    ]
+
+
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router

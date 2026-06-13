@@ -103,7 +103,7 @@ References:
 - `backend/app/prompts/lesson/pupil_mistakes.txt`
 - `frontend/js/10-lessons.js`
 
-Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService` (filename/type/size checks, generated storage paths, checksum metadata, best-effort duration probing), explicit transcription through `TranscriptionService`, checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Frontend lesson concerns live in `frontend/js/10-lessons.js`; routers should remain service-bound HTTP adapters.
+Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService` (filename/type/size checks, generated storage paths, checksum metadata, best-effort duration probing), explicit transcription through `TranscriptionService` (provider registry with disabled/fake/faster-whisper/legacy adapters), checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService`. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Frontend lesson concerns live in `frontend/js/10-lessons.js`; routers should remain service-bound HTTP adapters.
 
 ### Projects and files routers
 
@@ -176,7 +176,7 @@ Current status:
 
 Required boundaries for future work:
 
-1. `Pupil`/`Lesson` CRUD, lesson-audio upload/storage, and transcription are backend-only foundations; transcription must stay behind `TranscriptionService` and must not call AI document-generation providers.
+1. `Pupil`/`Lesson` CRUD, lesson-audio upload/storage, and transcription are backend-only foundations; transcription must stay behind `TranscriptionService` and its provider registry and must not call AI document-generation providers.
 2. Transcription must go through the typed service adapter with a fake provider for tests; routers must not import the legacy `transcibe.py` script.
 3. Lesson document generation must prefer structured provider output that the backend validates before building escaped LaTeX.
 4. Downloads must resolve by persisted lesson/document metadata and trusted roots, not by arbitrary user-provided filenames.

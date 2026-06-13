@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     TRANSCRIPTION_LANGUAGE: str = "ru"
     TRANSCRIPTION_MODEL: str = "small"
     TRANSCRIPTION_BEAM_SIZE: int = 5
+    TRANSCRIPTION_DEVICE: str = "cpu"
+    TRANSCRIPTION_COMPUTE_TYPE: str = "int8"
+    TRANSCRIPTION_WORD_TIMESTAMPS: bool = False
 
     # Lesson document generation foundation
     LESSON_DOCUMENT_PROVIDER: str = "fake"

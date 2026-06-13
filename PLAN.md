@@ -1190,14 +1190,14 @@ Definition of Done:
 
 #### Итерация C. Transcription integration, 2–4 дня, P0/P1
 
-**Статус:** реализовано как synchronous backend-only transcription adapter slice.
+**Статус:** реализовано как synchronous backend-only transcription adapter slice; PR3 добавляет provider registry и optional `faster_whisper` adapter, но внешний worker остаётся отдельным PR.
 
 Цель: подключить transcription workflow через service adapter, не импортируя legacy `transcibe.py` из routers.
 
 Сделано:
 
-- добавлены `TranscriptionService`, typed `TranscriptResult`/`TranscriptSegment` contracts, `FakeTranscriptionProvider` для CI и optional `LegacyWhisperTranscriptionProvider`, который содержит legacy-опечатку `transcibe.py` внутри service layer;
-- добавлены настройки `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_BEAM_SIZE`;
+- добавлены `TranscriptionService`, typed `TranscriptResult`/`TranscriptSegment` contracts, provider registry, `FakeTranscriptionProvider` для CI, optional `FasterWhisperTranscriptionProvider` и optional `LegacyWhisperTranscriptionProvider`, который содержит legacy-опечатку `transcibe.py` внутри service layer;
+- добавлены настройки `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_BEAM_SIZE`, `TRANSCRIPTION_DEVICE`, `TRANSCRIPTION_COMPUTE_TYPE`, `TRANSCRIPTION_WORD_TIMESTAMPS`;
 - добавлены `LessonTranscript` model/migration и response/request schemas;
 - добавлен endpoint `POST /api/lessons/{lesson_id}/transcribe`;
 - сохраняются transcript text, provider, language, status и sanitized provider error;
@@ -1208,7 +1208,7 @@ Definition of Done:
 
 - по загруженной записи можно получить transcript record;
 - failure provider-а не ломает lesson и отражается статусом `failed`;
-- CI tests не требуют реального внешнего AI/transcription provider;
+- CI tests не требуют реального внешнего AI/transcription provider; optional `faster_whisper` adapter покрывается fake-module unit test;
 - AI document generation и frontend UI не входят в этот slice.
 
 #### Итерация D. AI documents generation, 3–5 дней, P0/P1
