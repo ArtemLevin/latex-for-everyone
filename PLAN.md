@@ -1237,21 +1237,21 @@ Definition of Done:
 
 #### Итерация E. Job-based orchestration, 3–5 дней, P1
 
-**Статус:** реализовано как backend job status/polling foundation с in-process execution MVP.
+**Статус:** реализовано как backend job status/polling foundation; PR4 добавляет persisted job payload и режим `background`, который возвращает queued job и запускает выполнение через background task по `job_id`.
 
 Цель: дать frontend стабильный job contract для запуска и polling-а тяжёлого lesson pipeline, сохранив возможность вынести execution во внешний worker позже.
 
 Сделано:
 
-- добавлены `LessonProcessingJob` model/migration и response/create schemas;
+- добавлены `LessonProcessingJob` model/migration и response/create schemas, включая persisted `document_types` payload;
 - реализованы statuses `queued`, `running`, `completed`, `failed`, stage tracking, attempts, started/finished timestamps, `transcript_id`, `document_ids`, sanitized error message;
-- добавлен `LessonProcessingJobService`, который оркестрирует `transcribe`, `generate_documents`, `full_pipeline` через существующие service boundaries;
+- добавлен `LessonProcessingJobService`, который оркестрирует `transcribe`, `generate_documents`, `full_pipeline` через существующие service boundaries и умеет создать queued job отдельно от выполнения;
 - добавлены endpoints `POST /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs/{job_id}`;
 - повторный `full_pipeline` переиспользует completed transcript/documents и не создаёт неконтролируемые дубль-документы;
 - provider failure сохраняется в `failed` job и не удаляет предыдущие transcript/document результаты;
 - добавлены tests на миграцию, successful full pipeline, polling/list, duplicate prevention, provider failure и teacher-scope boundary.
 
-Остаток для следующих PR: настоящий background worker/queue, retry/cancel endpoints, job backlog/readiness metrics и frontend polling UI.
+Остаток для следующих PR: внешний worker/queue process вместо in-process BackgroundTasks, retry/cancel endpoints, job backlog/readiness metrics и frontend polling UI.
 
 Definition of Done:
 

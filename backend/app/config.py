@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     TRANSCRIPTION_COMPUTE_TYPE: str = "int8"
     TRANSCRIPTION_WORD_TIMESTAMPS: bool = False
 
+    # Lesson job execution foundation
+    LESSON_JOB_EXECUTION_MODE: str = "inline"  # inline or background
+
     # Lesson document generation foundation
     LESSON_DOCUMENT_PROVIDER: str = "fake"
     LESSON_DOCUMENT_ALLOWED_TYPES: str = "check_list,pupil_mistakes"

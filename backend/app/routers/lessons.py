@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File as FastAPIFile, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File as FastAPIFile, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -34,7 +34,12 @@ from app.services.lesson_documents import (
     LessonPromptError,
     LessonTranscriptNotFoundError,
 )
-from app.services.lesson_jobs import LessonJobConflictError, LessonJobNotFoundError, LessonProcessingJobService
+from app.services.lesson_jobs import (
+    LessonJobConflictError,
+    LessonJobNotFoundError,
+    LessonProcessingJobService,
+    run_lesson_processing_job_once,
+)
 from app.services.lesson_service import LessonNotFoundError, LessonService, PupilNotFoundError
 from app.services.transcription import RecordingNotFoundError, TranscriptionService
 
@@ -293,6 +298,7 @@ async def download_lesson_document(
 )
 async def create_lesson_processing_job(
     lesson_id: str,
+    background_tasks: BackgroundTasks,
     request: LessonProcessingJobCreate | None = None,
     teacher_id: str = Depends(get_current_teacher_id),
     db: Session = Depends(get_db),
@@ -300,6 +306,10 @@ async def create_lesson_processing_job(
     try:
         lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
         request_data = request or LessonProcessingJobCreate()
+        if settings.LESSON_JOB_EXECUTION_MODE.strip().lower() == "background":
+            job = lesson_job_service.create_job(db, lesson=lesson, request=request_data)
+            background_tasks.add_task(run_lesson_processing_job_once, job.id)
+            return job
         return await lesson_job_service.create_and_run_job(db, lesson=lesson, request=request_data)
     except LessonNotFoundError as exc:
         raise map_lesson_service_error(exc) from exc

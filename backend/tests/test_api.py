@@ -144,7 +144,7 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_generated_documents_document_type",
     }.issubset(document_indexes)
     job_columns = {column["name"] for column in inspector.get_columns("lesson_processing_jobs")}
-    assert {"lesson_id", "teacher_id", "job_type", "status", "stage", "document_ids", "error_message"}.issubset(job_columns)
+    assert {"lesson_id", "teacher_id", "job_type", "status", "stage", "recording_id", "transcript_id", "document_types", "document_ids", "error_message"}.issubset(job_columns)
     job_indexes = {index["name"] for index in inspector.get_indexes("lesson_processing_jobs")}
     assert {
         "ix_lesson_processing_jobs_lesson_id",
@@ -878,6 +878,51 @@ def install_fake_job_service(monkeypatch, *, transcript_text: str = "Pipeline tr
         document_service=LessonDocumentGenerationService(),
     )
     monkeypatch.setattr(lessons_router, "lesson_job_service", service)
+    return service
+
+
+def test_lesson_processing_job_can_be_created_queued_and_run_later(monkeypatch, tmp_path):
+    import asyncio
+    from app.config import settings
+    from app.models import Lesson
+    from app.schemas import LessonProcessingJobCreate
+    from app.services.lesson_jobs import LessonProcessingJobService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    service = install_fake_job_service(monkeypatch, transcript_text="Deferred pipeline text")
+    pupil = create_test_pupil("Deferred Job Student")
+    lesson = create_test_lesson(pupil["id"], topic="Deferred topic")
+    recording = upload_test_recording(lesson["id"], data=b"webm-data").json()
+
+    db = SessionTesting()
+    try:
+        lesson_model = db.query(Lesson).filter(Lesson.id == lesson["id"]).one()
+        job = service.create_job(
+            db,
+            lesson=lesson_model,
+            request=LessonProcessingJobCreate(
+                job_type="full_pipeline",
+                recording_id=recording["id"],
+                document_types=["check_list"],
+            ),
+        )
+        assert job.status == "queued"
+        assert job.stage == "queued"
+        assert job.document_types == ["check_list"]
+
+        runner = LessonProcessingJobService(
+            transcription_service=service.transcription_service,
+            document_service=service.document_service,
+        )
+        completed = asyncio.run(runner.run_existing_job(db, job_id=job.id))
+
+        assert completed.status == "completed"
+        assert completed.stage == "completed"
+        assert completed.recording_id == recording["id"]
+        assert completed.transcript_id
+        assert len(completed.document_ids) == 1
+    finally:
+        db.close()
 
 
 def test_lesson_processing_job_full_pipeline_and_polling(monkeypatch, tmp_path):

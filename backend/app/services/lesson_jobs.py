@@ -3,6 +3,7 @@ from dataclasses import dataclass
 
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
 from app.models import Lesson, LessonGeneratedDocument, LessonProcessingJob, LessonTranscript
 from app.schemas import LessonProcessingJobCreate
 from app.services.lesson_documents import DOCUMENT_TYPES, LessonDocumentGenerationService, LessonTranscriptNotFoundError
@@ -35,8 +36,9 @@ class LessonJobResult:
 class LessonProcessingJobService:
     """Worker-friendly orchestration for lesson processing stages.
 
-    This service persists status transitions and can be called by HTTP handlers today
-    or by an out-of-process worker later without changing the job state contract.
+    HTTP handlers can create queued jobs and either run them inline for the current
+    development/test baseline or hand the job id to an in-process/background or
+    external worker without changing the persisted state contract.
     """
 
     def __init__(
@@ -70,7 +72,7 @@ class LessonProcessingJobService:
             raise LessonJobNotFoundError("Lesson processing job not found")
         return job
 
-    async def create_and_run_job(self, db: Session, *, lesson: Lesson, request: LessonProcessingJobCreate) -> LessonProcessingJob:
+    def create_job(self, db: Session, *, lesson: Lesson, request: LessonProcessingJobCreate) -> LessonProcessingJob:
         self._ensure_no_active_job(db, lesson=lesson, job_type=request.job_type)
         job = LessonProcessingJob(
             id=str(uuid.uuid4()),
@@ -81,12 +83,32 @@ class LessonProcessingJobService:
             stage="queued",
             recording_id=request.recording_id,
             transcript_id=request.transcript_id,
+            document_types=list(request.document_types),
             document_ids=[],
             attempts=0,
         )
         db.add(job)
         db.commit()
         db.refresh(job)
+        return job
+
+    async def create_and_run_job(self, db: Session, *, lesson: Lesson, request: LessonProcessingJobCreate) -> LessonProcessingJob:
+        job = self.create_job(db, lesson=lesson, request=request)
+        await self.run_job(db, lesson=lesson, job=job, request=request)
+        db.refresh(job)
+        return job
+
+    async def run_existing_job(self, db: Session, *, job_id: str) -> LessonProcessingJob:
+        job = db.query(LessonProcessingJob).filter(LessonProcessingJob.id == job_id).first()
+        if not job:
+            raise LessonJobNotFoundError("Lesson processing job not found")
+        if job.status in TERMINAL_JOB_STATUSES:
+            return job
+        lesson = db.query(Lesson).filter(Lesson.id == job.lesson_id, Lesson.teacher_id == job.teacher_id).first()
+        if not lesson:
+            self._mark_failed(db, job, "Lesson not found")
+            return job
+        request = self._request_from_job(job)
         await self.run_job(db, lesson=lesson, job=job, request=request)
         db.refresh(job)
         return job
@@ -129,6 +151,14 @@ class LessonProcessingJobService:
         except Exception as exc:
             self._mark_failed(db, job, str(exc) or "Lesson processing job failed")
         return job
+
+    def _request_from_job(self, job: LessonProcessingJob) -> LessonProcessingJobCreate:
+        return LessonProcessingJobCreate(
+            job_type=job.job_type,
+            recording_id=job.recording_id,
+            transcript_id=job.transcript_id,
+            document_types=list(job.document_types or []),
+        )
 
     def _ensure_no_active_job(self, db: Session, *, lesson: Lesson, job_type: str) -> None:
         active_job = (
@@ -260,3 +290,17 @@ class LessonProcessingJobService:
             .first()
             is not None
         )
+
+
+async def run_lesson_processing_job_once(job_id: str) -> None:
+    """Run one persisted lesson processing job using a fresh database session.
+
+    This is suitable for FastAPI BackgroundTasks today and for external worker
+    entrypoints later because it receives only the persisted job id.
+    """
+
+    db = SessionLocal()
+    try:
+        await LessonProcessingJobService().run_existing_job(db, job_id=job_id)
+    finally:
+        db.close()

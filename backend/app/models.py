@@ -123,6 +123,7 @@ class LessonProcessingJob(Base):
     stage = Column(String(50), nullable=False, default="queued")
     recording_id = Column(String(36), nullable=True)
     transcript_id = Column(String(36), nullable=True)
+    document_types = Column(JSON, nullable=False, default=list)
     document_ids = Column(JSON, nullable=False, default=list)
     error_message = Column(Text, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)

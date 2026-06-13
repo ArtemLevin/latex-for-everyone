@@ -181,6 +181,7 @@ class LessonProcessingJobResponse(BaseModel):
     stage: str
     recording_id: Optional[str] = None
     transcript_id: Optional[str] = None
+    document_types: list[str] = Field(default_factory=list)
     document_ids: list[str] = Field(default_factory=list)
     error_message: Optional[str] = None
     attempts: int
