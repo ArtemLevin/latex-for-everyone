@@ -131,7 +131,7 @@ make backend BACKEND_PORT=9000
 make frontend FRONTEND_PORT=3000
 make frontend PYTHON=python
 make migration MSG="add users table"
-make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
+make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
 ```
 
 ## uv notes
@@ -375,7 +375,7 @@ Deprecated compatibility routes are still available for compile history:
 | `LOG_SLOW_REQUEST_MS` | `1000` | Requests at or above this duration are logged as warnings |
 | `AI_LOG_PROMPT_PREVIEW_CHARS` | `500` | Max compact prompt preview characters in AI logs; set `0` to disable previews |
 | `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama server URL |
-| `OLLAMA_MODEL` | `gemma4` | Default Ollama model for LaTeX generation |
+| `OLLAMA_MODEL` | `qwen2.5:3b` | Default Ollama model for LaTeX generation |
 | `AI_VENDOR_BASE_URL` | `https://api.openai.com/v1` | OpenAI-compatible vendor API base URL |
 | `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
@@ -426,13 +426,13 @@ Use this checklist to verify the complete generation path manually after the bac
 2. Pull the configured model, for example:
 
    ```bash
-   ollama pull gemma4
+   ollama pull qwen2.5:3b
    ```
 
 3. Check that the backend can reach Ollama:
 
    ```bash
-   make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
+   make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
    ```
 
 4. In the browser, click **AI** → **Проверить провайдера**. The status should say that Ollama is reachable and the model is available.
@@ -485,12 +485,12 @@ These commands are useful when debugging without the browser:
 
 ```bash
 make health
-make ai-provider-status AI_PROVIDER=ollama AI_MODEL=gemma4
+make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
 make ai-validate-smoke
 make clean-artifacts   # optional: remove local generated PDFs/exports in default /tmp artifact dirs
 curl -fsS -X POST http://localhost:8000/api/generation/prompt \
   -H 'Content-Type: application/json' \
-  --data '{"provider":"ollama","model":"gemma4","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only","latex_mode":"safe"},"materials":"Решить уравнение 2^x = 8."}'
+  --data '{"provider":"ollama","model":"qwen2.5:3b","fields":{"topic":"Показательные уравнения","student_name":"Михаил Романов","language":"русский","content_source_mode":"materials_only","latex_mode":"safe"},"materials":"Решить уравнение 2^x = 8."}'
 curl -fsS http://localhost:8000/api/generation/history/project/YOUR_PROJECT_ID
 ```
 
