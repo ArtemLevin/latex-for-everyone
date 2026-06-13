@@ -9,6 +9,7 @@ from app.config import settings
 from app.models import Lesson, LessonGeneratedDocument, LessonTranscript, Pupil
 from app.services.audio_storage import lesson_artifact_root, resolve_inside_root, safe_path_part
 from app.services.latex_document_builder import build_latex_document
+from app.services.transcription import effective_transcript_text
 from app.time_utils import utc_now
 
 
@@ -63,7 +64,7 @@ class FakeLessonDocumentProvider:
 
     async def generate(self, *, document_type: str, prompt: str, context: LessonDocumentContext) -> LessonDocumentDraft:
         topic = context.lesson.topic
-        transcript_preview = " ".join((context.transcript.text or "").split())[:240]
+        transcript_preview = " ".join(effective_transcript_text(context.transcript).split())[:240]
         if document_type == "check_list":
             return LessonDocumentDraft(
                 document_type=document_type,
@@ -118,7 +119,7 @@ class LessonPromptService:
             "{{ pupil_display_name }}": context.pupil.display_name,
             "{{ lesson_topic }}": context.lesson.topic,
             "{{ lesson_date }}": context.lesson.lesson_date.isoformat(),
-            "{{ transcript_text }}": context.transcript.text or "",
+            "{{ transcript_text }}": effective_transcript_text(context.transcript),
         }
         rendered = template
         for placeholder, value in replacements.items():

@@ -1198,8 +1198,8 @@ Definition of Done:
 
 - добавлены `TranscriptionService`, typed `TranscriptResult`/`TranscriptSegment` contracts, provider registry, `FakeTranscriptionProvider` для CI, optional `FasterWhisperTranscriptionProvider` и optional `LegacyWhisperTranscriptionProvider`, который содержит legacy-опечатку `transcibe.py` внутри service layer;
 - добавлены настройки `TRANSCRIPTION_PROVIDER`, `TRANSCRIPTION_LANGUAGE`, `TRANSCRIPTION_MODEL`, `TRANSCRIPTION_BEAM_SIZE`, `TRANSCRIPTION_DEVICE`, `TRANSCRIPTION_COMPUTE_TYPE`, `TRANSCRIPTION_WORD_TIMESTAMPS`;
-- добавлены `LessonTranscript` model/migration и response/request schemas;
-- добавлен endpoint `POST /api/lessons/{lesson_id}/transcribe`;
+- добавлены `LessonTranscript` model/migration и response/request schemas; PR5 расширяет transcript schema полями `edited_text`, `review_status`, `reviewed_at` для human review без потери raw output;
+- добавлен endpoint `POST /api/lessons/{lesson_id}/transcribe`; PR5 добавляет `GET /api/lessons/{lesson_id}/transcripts`, `GET /api/lessons/{lesson_id}/transcripts/{transcript_id}` и `PATCH /api/lessons/{lesson_id}/transcripts/{transcript_id}`;
 - сохраняются transcript text, provider, language, status и sanitized provider error;
 - provider failure создаёт `failed` transcript и не переводит lesson из `recording_uploaded`;
 - добавлены tests на successful fake transcription, provider failure, отсутствие recording и teacher-scope boundary.
@@ -1276,7 +1276,7 @@ Definition of Done:
 - graceful fallback показывает offline state при недоступном backend;
 - обновлён frontend contract test для script order и lesson DOM/entrypoint contract.
 
-Остаток для следующих PR: browser E2E с реальным backend fixture, manual QA по Chrome/Safari/mobile microphone permissions, progress polling timer для внешнего worker-а и visual states для long-running jobs.
+PR5 дополняет backend review workspace: raw transcript сохраняется в `text`, правка преподавателя — в `edited_text`, document generation использует reviewed text при наличии. Остаток для следующих PR: browser E2E с реальным backend fixture, manual QA по Chrome/Safari/mobile microphone permissions, progress polling timer для внешнего worker-а и visual states для long-running jobs.
 
 Definition of Done:
 

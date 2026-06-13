@@ -17,6 +17,7 @@ from app.schemas import (
     LessonResponse,
     LessonTranscribeRequest,
     LessonTranscriptResponse,
+    LessonTranscriptUpdate,
     LessonUpdate,
     MessageResponse,
 )
@@ -41,12 +42,19 @@ from app.services.lesson_jobs import (
     run_lesson_processing_job_once,
 )
 from app.services.lesson_service import LessonNotFoundError, LessonService, PupilNotFoundError
-from app.services.transcription import RecordingNotFoundError, TranscriptionService
+from app.services.transcription import (
+    LessonTranscriptNotFoundError as TranscriptionTranscriptNotFoundError,
+    LessonTranscriptReviewError,
+    LessonTranscriptService,
+    RecordingNotFoundError,
+    TranscriptionService,
+)
 
 router = APIRouter()
 lesson_service = LessonService()
 audio_storage_service = AudioStorageService()
 transcription_service = TranscriptionService()
+lesson_transcript_service = LessonTranscriptService()
 lesson_document_service = LessonDocumentGenerationService()
 lesson_job_service = LessonProcessingJobService(
     transcription_service=transcription_service,
@@ -63,8 +71,10 @@ def map_lesson_service_error(exc: Exception) -> HTTPException:
 
 
 def map_transcription_error(exc: Exception) -> HTTPException:
-    if isinstance(exc, RecordingNotFoundError):
+    if isinstance(exc, (RecordingNotFoundError, TranscriptionTranscriptNotFoundError)):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    if isinstance(exc, LessonTranscriptReviewError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected transcription error")
 
 
@@ -221,6 +231,67 @@ async def transcribe_lesson(
     except LessonNotFoundError as exc:
         raise map_lesson_service_error(exc) from exc
     except RecordingNotFoundError as exc:
+        raise map_transcription_error(exc) from exc
+
+
+@router.get(
+    "/{lesson_id}/transcripts",
+    response_model=list[LessonTranscriptResponse],
+)
+async def list_lesson_transcripts(
+    lesson_id: str,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        return lesson_transcript_service.list_transcripts(db, lesson=lesson)
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+
+
+@router.get(
+    "/{lesson_id}/transcripts/{transcript_id}",
+    response_model=LessonTranscriptResponse,
+)
+async def get_lesson_transcript(
+    lesson_id: str,
+    transcript_id: str,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        return lesson_transcript_service.get_transcript(db, lesson=lesson, transcript_id=transcript_id)
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except TranscriptionTranscriptNotFoundError as exc:
+        raise map_transcription_error(exc) from exc
+
+
+@router.patch(
+    "/{lesson_id}/transcripts/{transcript_id}",
+    response_model=LessonTranscriptResponse,
+)
+async def update_lesson_transcript_review(
+    lesson_id: str,
+    transcript_id: str,
+    request: LessonTranscriptUpdate,
+    teacher_id: str = Depends(get_current_teacher_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        lesson = lesson_service.get_lesson(db, teacher_id, lesson_id)
+        return lesson_transcript_service.update_transcript_review(
+            db,
+            lesson=lesson,
+            transcript_id=transcript_id,
+            edited_text=request.edited_text,
+            review_status=request.review_status,
+        )
+    except LessonNotFoundError as exc:
+        raise map_lesson_service_error(exc) from exc
+    except (TranscriptionTranscriptNotFoundError, LessonTranscriptReviewError) as exc:
         raise map_transcription_error(exc) from exc
 
 

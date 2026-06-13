@@ -232,6 +232,65 @@ def sanitize_provider_error(exc: Exception) -> str:
     return single_line[:500]
 
 
+def effective_transcript_text(transcript: LessonTranscript) -> str:
+    return (transcript.edited_text if transcript.edited_text is not None else transcript.text) or ""
+
+
+class LessonTranscriptNotFoundError(TranscriptionError):
+    """Raised when a transcript is not in the current lesson scope."""
+
+
+class LessonTranscriptReviewError(TranscriptionError):
+    """Raised when a transcript cannot be reviewed or updated."""
+
+
+class LessonTranscriptService:
+    """Review/update operations for persisted lesson transcripts."""
+
+    def list_transcripts(self, db: Session, *, lesson: Lesson) -> list[LessonTranscript]:
+        return (
+            db.query(LessonTranscript)
+            .filter(LessonTranscript.lesson_id == lesson.id)
+            .order_by(LessonTranscript.created_at.desc())
+            .all()
+        )
+
+    def get_transcript(self, db: Session, *, lesson: Lesson, transcript_id: str) -> LessonTranscript:
+        transcript = (
+            db.query(LessonTranscript)
+            .filter(LessonTranscript.id == transcript_id, LessonTranscript.lesson_id == lesson.id)
+            .first()
+        )
+        if not transcript:
+            raise LessonTranscriptNotFoundError("Lesson transcript not found")
+        return transcript
+
+    def update_transcript_review(
+        self,
+        db: Session,
+        *,
+        lesson: Lesson,
+        transcript_id: str,
+        edited_text: str,
+        review_status: str,
+    ) -> LessonTranscript:
+        transcript = self.get_transcript(db, lesson=lesson, transcript_id=transcript_id)
+        if transcript.status != "completed":
+            raise LessonTranscriptReviewError("Only completed transcripts can be reviewed")
+        normalized_text = "\n".join(line.rstrip() for line in edited_text.strip().splitlines()).strip()
+        if not normalized_text:
+            raise LessonTranscriptReviewError("Transcript review text cannot be empty")
+        if review_status not in {"needs_review", "reviewed"}:
+            raise LessonTranscriptReviewError("Unsupported transcript review status")
+        transcript.edited_text = normalized_text
+        transcript.review_status = review_status
+        transcript.reviewed_at = utc_now() if review_status == "reviewed" else None
+        transcript.updated_at = utc_now()
+        db.commit()
+        db.refresh(transcript)
+        return transcript
+
+
 class TranscriptionService:
     """Synchronous MVP transcription workflow for lesson recordings."""
 

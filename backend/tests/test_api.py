@@ -132,9 +132,9 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     recording_indexes = {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
     assert {"ix_lesson_audio_recordings_lesson_id", "ix_lesson_audio_recordings_sha256_checksum"}.issubset(recording_indexes)
     transcript_columns = {column["name"] for column in inspector.get_columns("lesson_transcripts")}
-    assert {"lesson_id", "recording_id", "provider", "language", "text", "status", "error_message"}.issubset(transcript_columns)
+    assert {"lesson_id", "recording_id", "provider", "language", "text", "edited_text", "review_status", "reviewed_at", "status", "error_message"}.issubset(transcript_columns)
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
-    assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id"}.issubset(transcript_indexes)
+    assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id", "ix_lesson_transcripts_review_status"}.issubset(transcript_indexes)
     document_columns = {column["name"] for column in inspector.get_columns("lesson_generated_documents")}
     assert {"lesson_id", "transcript_id", "document_type", "title", "filename", "storage_path", "status"}.issubset(document_columns)
     document_indexes = {index["name"] for index in inspector.get_indexes("lesson_generated_documents")}
@@ -611,6 +611,60 @@ def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     assert lesson_response.json()["status"] == "transcript_ready"
 
 
+def test_lesson_transcript_review_list_get_and_update(monkeypatch, tmp_path):
+    lesson, transcript = create_transcribed_lesson(
+        monkeypatch,
+        tmp_path,
+        transcript_text="сырой текст распознавания",
+    )
+
+    list_response = client.get(f"/api/lessons/{lesson['id']}/transcripts")
+    assert list_response.status_code == 200
+    assert [item["id"] for item in list_response.json()] == [transcript["id"]]
+    assert list_response.json()[0]["review_status"] == "unreviewed"
+
+    get_response = client.get(f"/api/lessons/{lesson['id']}/transcripts/{transcript['id']}")
+    assert get_response.status_code == 200
+    assert get_response.json()["text"] == "сырой текст распознавания"
+
+    update_response = client.patch(
+        f"/api/lessons/{lesson['id']}/transcripts/{transcript['id']}",
+        json={"edited_text": "исправленный текст для документов", "review_status": "reviewed"},
+    )
+
+    assert update_response.status_code == 200
+    data = update_response.json()
+    assert data["text"] == "сырой текст распознавания"
+    assert data["edited_text"] == "исправленный текст для документов"
+    assert data["review_status"] == "reviewed"
+    assert data["reviewed_at"] is not None
+
+
+def test_lesson_transcript_review_rejects_failed_transcript(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=FakeTranscriptionProvider(fail=True)),
+    )
+    pupil = create_test_pupil("Failed Review Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], data=b"webm-data")
+    transcript = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={}).json()
+
+    response = client.patch(
+        f"/api/lessons/{lesson['id']}/transcripts/{transcript['id']}",
+        json={"edited_text": "нельзя ревьюить", "review_status": "reviewed"},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Only completed transcripts can be reviewed"
+
+
 def test_transcription_provider_registry_selects_faster_whisper(monkeypatch):
     from app.config import settings
     from app.services.transcription import (
@@ -837,6 +891,23 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
     lesson_response = client.get(f"/api/lessons/{lesson['id']}")
     assert lesson_response.status_code == 200
     assert lesson_response.json()["status"] == "completed"
+
+
+def test_lesson_document_generation_uses_reviewed_transcript_text(monkeypatch, tmp_path):
+    lesson, transcript = create_transcribed_lesson(monkeypatch, tmp_path, transcript_text="сырой x_1")
+    update_response = client.patch(
+        f"/api/lessons/{lesson['id']}/transcripts/{transcript['id']}",
+        json={"edited_text": "исправленный y_2", "review_status": "reviewed"},
+    )
+    assert update_response.status_code == 200
+
+    response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"transcript_id": transcript["id"]})
+
+    assert response.status_code == 201
+    stored_files = list((tmp_path / "lesson_artifacts").rglob("*.tex"))
+    combined_latex = "\n".join(path.read_text(encoding="utf-8") for path in stored_files)
+    assert r"исправленный y\_2" in combined_latex
+    assert r"сырой x\_1" not in combined_latex
 
 
 def test_lesson_document_generation_requires_completed_transcript(monkeypatch, tmp_path):

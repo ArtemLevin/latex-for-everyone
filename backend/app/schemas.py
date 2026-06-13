@@ -126,6 +126,11 @@ class LessonTranscribeRequest(BaseModel):
     language: Optional[str] = Field(default=None, min_length=2, max_length=20)
 
 
+class LessonTranscriptUpdate(BaseModel):
+    edited_text: str = Field(min_length=1, max_length=200_000)
+    review_status: Literal["needs_review", "reviewed"] = "reviewed"
+
+
 class LessonTranscriptResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -135,6 +140,9 @@ class LessonTranscriptResponse(BaseModel):
     provider: str
     language: str
     text: Optional[str] = None
+    edited_text: Optional[str] = None
+    review_status: str = "unreviewed"
+    reviewed_at: Optional[datetime] = None
     status: str
     error_message: Optional[str] = None
     created_at: datetime
