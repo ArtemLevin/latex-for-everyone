@@ -1632,3 +1632,37 @@
         cursor: not-allowed;
         opacity: 0.55;
     }
+
+.lesson-transcript-review-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.lesson-transcript-editor {
+    width: 100%;
+    min-height: 140px;
+    resize: vertical;
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.45;
+}
+
+.lesson-transcript-editor:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.18);
+}
+
+.lesson-transcript-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    color: var(--text-muted);
+    font-size: 11px;
+}

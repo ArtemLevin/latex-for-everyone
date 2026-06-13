@@ -1272,11 +1272,11 @@ Definition of Done:
 - добавлен MediaRecorder flow с fallback на manual audio file upload;
 - добавлены upload/status controls, explicit transcription, document generation и full pipeline job action;
 - добавлен production-UX первый слой для записи: consent checkbox, MIME selection по `MediaRecorder.isTypeSupported`, states `recording`/`ready_to_upload`/`uploading`, timer/size metrics, локальный audio preview и reset action;
-- добавлены transcript/job status previews и список download links для generated documents;
+- добавлены transcript/job status previews, transcript review textarea с save/needs-review actions и список download links для generated documents;
 - graceful fallback показывает offline state при недоступном backend;
 - обновлён frontend contract test для script order и lesson DOM/entrypoint contract.
 
-PR5 дополняет backend review workspace: raw transcript сохраняется в `text`, правка преподавателя — в `edited_text`, document generation использует reviewed text при наличии. Остаток для следующих PR: browser E2E с реальным backend fixture, manual QA по Chrome/Safari/mobile microphone permissions, progress polling timer для внешнего worker-а и visual states для long-running jobs.
+PR5 дополняет backend review workspace: raw transcript сохраняется в `text`, правка преподавателя — в `edited_text`, document generation использует reviewed text при наличии. PR6 выводит этот contract во frontend: загружает transcripts, даёт выбрать transcript, сохранить review или пометить `needs_review` перед генерацией документов. Остаток для следующих PR: browser E2E с реальным backend fixture, manual QA по Chrome/Safari/mobile microphone permissions, progress polling timer для внешнего worker-а и visual states для long-running jobs.
 
 Definition of Done:
 

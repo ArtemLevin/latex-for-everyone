@@ -46,3 +46,7 @@ def test_lesson_frontend_entrypoint_and_dom_contract_are_present():
     assert "formatLessonRecordingDuration" in lessons_js
     assert "data-recording-state" in lessons_js
     assert "lesson-audio-preview" in lessons_js
+    assert "loadLessonTranscripts" in lessons_js
+    assert "saveLessonTranscriptReview" in lessons_js
+    assert "lessonTranscriptEditor" in lessons_js
+    assert "review_status" in lessons_js

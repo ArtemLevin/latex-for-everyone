@@ -2,6 +2,7 @@
 let lessonPupils = [];
 let lessonLessons = [];
 let lessonDocuments = [];
+let lessonTranscripts = [];
 let selectedLessonPupilId = '';
 let selectedLessonId = '';
 let selectedLessonRecordingId = '';
@@ -234,6 +235,32 @@ function renderLessonSidebar(message = '') {
             </a>
         `).join('')
         : '<div class="lesson-muted">Документы ещё не созданы</div>';
+    const selectedTranscript = lessonTranscripts.find(transcript => transcript.id === selectedLessonTranscriptId) || lessonTranscripts[0] || null;
+    if (selectedTranscript && !selectedLessonTranscriptId) selectedLessonTranscriptId = selectedTranscript.id;
+    const transcriptOptions = lessonTranscripts.map(transcript => {
+        const labelStatus = transcript.review_status || transcript.status || 'unknown';
+        const labelDate = (transcript.created_at || '').slice(0, 16).replace('T', ' ');
+        return `<option value="${escapeHtml(transcript.id)}" ${transcript.id === selectedLessonTranscriptId ? 'selected' : ''}>${escapeHtml(labelStatus)} · ${escapeHtml(labelDate || transcript.provider)}</option>`;
+    }).join('');
+    const transcriptText = selectedTranscript ? (selectedTranscript.edited_text || selectedTranscript.text || '') : '';
+    const transcriptStatus = selectedTranscript
+        ? `${selectedTranscript.status} · review: ${selectedTranscript.review_status || 'unreviewed'}`
+        : 'Transcript ещё не создан';
+    const transcriptEditor = selectedTranscript ? `
+        <label class="lesson-label" for="lessonTranscriptSelect">Transcript</label>
+        <select class="lesson-input" id="lessonTranscriptSelect" onchange="selectLessonTranscript(this.value)">
+            ${transcriptOptions}
+        </select>
+        <textarea class="lesson-transcript-editor" id="lessonTranscriptEditor" rows="7" placeholder="Проверьте и исправьте текст транскрибации">${escapeHtml(transcriptText)}</textarea>
+        <div class="lesson-transcript-meta">
+            <span>${escapeHtml(transcriptStatus)}</span>
+            ${selectedTranscript.reviewed_at ? `<span>reviewed: ${escapeHtml(selectedTranscript.reviewed_at.slice(0, 16).replace('T', ' '))}</span>` : ''}
+        </div>
+        <div class="lesson-actions">
+            <button class="lesson-action-btn" onclick="saveLessonTranscriptReview('reviewed')">Сохранить review</button>
+            <button class="lesson-action-btn" onclick="saveLessonTranscriptReview('needs_review')">Нужно проверить</button>
+        </div>
+    ` : '<div class="lesson-muted">Transcript ещё не создан</div>';
 
     tree.innerHTML = `
         <div class="lesson-panel">
@@ -279,9 +306,9 @@ function renderLessonSidebar(message = '') {
                 <strong>Job</strong>
                 <div id="lessonJobStatus">${lastLessonJob ? `${escapeHtml(lastLessonJob.status)} · ${escapeHtml(lastLessonJob.stage)}` : 'нет job'}</div>
             </div>
-            <div class="lesson-card">
-                <strong>Transcript</strong>
-                <div class="lesson-transcript" id="lessonTranscriptPreview">${selectedLessonTranscriptId ? 'Transcript создан' : 'Transcript ещё не создан'}</div>
+            <div class="lesson-card lesson-transcript-review-card">
+                <strong>Transcript review</strong>
+                <div class="lesson-transcript" id="lessonTranscriptPreview">${transcriptEditor}</div>
             </div>
             <div class="lesson-card">
                 <strong>Documents</strong>
@@ -310,14 +337,23 @@ async function refreshLessonsWorkflow() {
 async function loadLessonsForSelectedPupil() {
     if (!selectedLessonPupilId) {
         lessonLessons = [];
+        lessonTranscripts = [];
         selectedLessonId = '';
+        selectedLessonTranscriptId = '';
         return;
     }
     lessonLessons = await lessonApiRequest(`/lessons/?pupil_id=${encodeURIComponent(selectedLessonPupilId)}`);
     if (!lessonLessons.some(lesson => lesson.id === selectedLessonId)) {
         selectedLessonId = lessonLessons[0]?.id || '';
     }
-    if (selectedLessonId) await loadLessonDocuments();
+    if (selectedLessonId) {
+        await loadLessonTranscripts();
+        await loadLessonDocuments();
+    } else {
+        lessonTranscripts = [];
+        lessonDocuments = [];
+        selectedLessonTranscriptId = '';
+    }
 }
 
 async function createLessonPupil() {
@@ -372,6 +408,7 @@ async function selectLesson(lessonId) {
     selectedLessonTranscriptId = '';
     lastLessonJob = null;
     resetLessonRecordingState();
+    await loadLessonTranscripts();
     await loadLessonDocuments();
     renderLessonSidebar();
 }
@@ -504,6 +541,7 @@ async function transcribeLesson() {
             body: JSON.stringify({ recording_id: selectedLessonRecordingId || null })
         });
         selectedLessonTranscriptId = transcript.id;
+        await loadLessonTranscripts();
         renderLessonSidebar(transcript.status === 'failed' ? transcript.error_message : 'Transcript создан.');
         showToast(transcript.status === 'failed' ? 'Транскрибация завершилась ошибкой' : 'Transcript создан', transcript.status === 'failed' ? 'error' : 'success');
     } catch (error) {
@@ -519,6 +557,7 @@ async function generateLessonDocuments() {
             body: JSON.stringify({ transcript_id: selectedLessonTranscriptId || null })
         });
         lessonDocuments = documents;
+        await loadLessonTranscripts();
         renderLessonSidebar('Документы созданы.');
         showToast('Документы урока готовы', 'success');
     } catch (error) {
@@ -539,11 +578,53 @@ async function startLessonProcessingJob() {
         });
         lastLessonJob = job;
         if (job.transcript_id) selectedLessonTranscriptId = job.transcript_id;
+        await loadLessonTranscripts();
         await loadLessonDocuments();
         renderLessonSidebar(job.status === 'failed' ? job.error_message : `Job ${job.status}`);
         showToast(`Lesson job: ${job.status}`, job.status === 'failed' ? 'error' : 'success');
     } catch (error) {
         showToast(`Ошибка lesson job: ${error.message}`, 'error');
+    }
+}
+
+async function loadLessonTranscripts() {
+    if (!backendAvailable || !selectedLessonId) {
+        lessonTranscripts = [];
+        selectedLessonTranscriptId = '';
+        return;
+    }
+    try {
+        lessonTranscripts = await lessonApiRequest(`/lessons/${selectedLessonId}/transcripts`);
+        if (!lessonTranscripts.some(transcript => transcript.id === selectedLessonTranscriptId)) {
+            selectedLessonTranscriptId = lessonTranscripts[0]?.id || '';
+        }
+    } catch (error) {
+        lessonTranscripts = [];
+        selectedLessonTranscriptId = '';
+    }
+}
+
+function selectLessonTranscript(transcriptId) {
+    selectedLessonTranscriptId = transcriptId;
+    renderLessonSidebar();
+}
+
+async function saveLessonTranscriptReview(reviewStatus = 'reviewed') {
+    if (!selectedLessonId || !selectedLessonTranscriptId) return showToast('Сначала выберите transcript', 'error');
+    const editor = document.getElementById('lessonTranscriptEditor');
+    const editedText = editor?.value.trim();
+    if (!editedText) return showToast('Transcript review не может быть пустым', 'error');
+    try {
+        const transcript = await lessonApiRequest(`/lessons/${selectedLessonId}/transcripts/${selectedLessonTranscriptId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ edited_text: editedText, review_status: reviewStatus })
+        });
+        selectedLessonTranscriptId = transcript.id;
+        await loadLessonTranscripts();
+        renderLessonSidebar(reviewStatus === 'reviewed' ? 'Transcript review сохранён.' : 'Transcript помечен как требующий проверки.');
+        showToast('Transcript review сохранён', 'success');
+    } catch (error) {
+        showToast(`Ошибка сохранения transcript review: ${error.message}`, 'error');
     }
 }
 
@@ -572,3 +653,5 @@ window.discardLessonRecording = discardLessonRecording;
 window.transcribeLesson = transcribeLesson;
 window.generateLessonDocuments = generateLessonDocuments;
 window.startLessonProcessingJob = startLessonProcessingJob;
+window.selectLessonTranscript = selectLessonTranscript;
+window.saveLessonTranscriptReview = saveLessonTranscriptReview;
