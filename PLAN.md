@@ -1249,7 +1249,7 @@ Definition of Done:
 - добавлены endpoints `POST /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs`, `GET /api/lessons/{lesson_id}/processing-jobs/{job_id}`;
 - повторный `full_pipeline` переиспользует completed transcript/documents и не создаёт неконтролируемые дубль-документы;
 - provider failure сохраняется в `failed` job и не удаляет предыдущие transcript/document результаты;
-- добавлены tests на миграцию, successful full pipeline, polling/list, duplicate prevention, provider failure и teacher-scope boundary.
+- добавлены tests на миграцию, successful full pipeline, polling/list, duplicate prevention, provider failure и teacher-scope boundary; после обнаруженного stale-local-DB сбоя добавлен startup compatibility patch для AUTO_CREATE_TABLES=true, который добавляет отсутствующие lesson metadata columns (`sha256_checksum`, transcript review fields, `document_types`) в старые SQLite таблицы.
 
 Остаток для следующих PR: внешний worker/queue process вместо in-process BackgroundTasks, retry/cancel endpoints, job backlog/readiness metrics и frontend polling UI.
 

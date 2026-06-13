@@ -191,7 +191,7 @@ Boundary policy for the remaining transcription/document-generation iterations:
 
 ## Database migrations
 
-Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`, `lesson_transcripts`, `lesson_generated_documents`, `lesson_processing_jobs`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs a small compatibility patch for older local `generation_history` tables missing token-usage columns. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
+Alembic is the source of truth for schema changes. The repository includes Alembic revisions for the current project/file/history schema, AI generation history, and the lesson foundation (`pupils`, `lessons`, `lesson_audio_recordings`, `lesson_transcripts`, `lesson_generated_documents`, `lesson_processing_jobs`). Local development still keeps `AUTO_CREATE_TABLES=true` by default so a fresh SQLite checkout starts quickly, and startup performs small compatibility patches for older local `generation_history` tables missing token-usage columns and stale lesson workflow tables missing newly added metadata columns such as `sha256_checksum`, transcript review fields, or persisted job payload fields. Production deployments should set `AUTO_CREATE_TABLES=false` and run migrations explicitly before serving traffic.
 
 Recommended workflow:
 

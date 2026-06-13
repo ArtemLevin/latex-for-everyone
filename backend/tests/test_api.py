@@ -87,6 +87,36 @@ def test_initialize_database_adds_generation_history_token_columns_for_stale_loc
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(columns)
 
 
+def test_initialize_database_adds_lesson_workflow_columns_for_stale_local_db(monkeypatch, tmp_path):
+    from sqlalchemy import inspect, text
+    from app import main as main_module
+    from app.config import settings
+
+    stale_engine = create_engine(f"sqlite:///{tmp_path / 'stale_lessons.db'}")
+    with stale_engine.begin() as connection:
+        connection.execute(text("CREATE TABLE lesson_audio_recordings (id VARCHAR(36) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE lesson_transcripts (id VARCHAR(36) PRIMARY KEY)"))
+        connection.execute(text("CREATE TABLE lesson_processing_jobs (id VARCHAR(36) PRIMARY KEY)"))
+
+    monkeypatch.setattr(settings, "AUTO_CREATE_TABLES", True)
+    monkeypatch.setattr(main_module, "engine", stale_engine)
+
+    main_module.initialize_database()
+
+    inspector = inspect(stale_engine)
+    recording_columns = {column["name"] for column in inspector.get_columns("lesson_audio_recordings")}
+    transcript_columns = {column["name"] for column in inspector.get_columns("lesson_transcripts")}
+    job_columns = {column["name"] for column in inspector.get_columns("lesson_processing_jobs")}
+    recording_indexes = {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
+    transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
+
+    assert {"duration_seconds", "sha256_checksum"}.issubset(recording_columns)
+    assert {"edited_text", "review_status", "reviewed_at"}.issubset(transcript_columns)
+    assert "document_types" in job_columns
+    assert "ix_lesson_audio_recordings_sha256_checksum" in recording_indexes
+    assert "ix_lesson_transcripts_review_status" in transcript_indexes
+
+
 def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     from alembic import command
     from alembic.config import Config
