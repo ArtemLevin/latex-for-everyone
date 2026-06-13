@@ -73,6 +73,13 @@ Persisted entities:
 - `File`
 - `CompileHistory`
 - `ProjectSnapshot`
+- `GenerationHistory`
+- `Pupil`
+- `Lesson`
+- `LessonAudioRecording`
+- `LessonTranscript`
+- `LessonGeneratedDocument`
+- `LessonProcessingJob`
 
 Guidelines:
 
@@ -80,6 +87,23 @@ Guidelines:
 - Use `utc_now()` from `backend/app/time_utils.py` for new timestamp defaults and manual `updated_at` changes; do not call `datetime.utcnow()` directly in app code.
 - Use migrations for schema changes when practical.
 - Do not commit local SQLite databases.
+
+### Pupils and lessons routers
+
+References:
+
+- `backend/app/routers/pupils.py`
+- `backend/app/routers/lessons.py`
+- `backend/app/services/lesson_service.py`
+- `backend/app/services/audio_storage.py`
+- `backend/app/services/transcription.py`
+- `backend/app/services/lesson_documents.py`
+- `backend/app/services/lesson_jobs.py`
+- `backend/app/prompts/lesson/check_list.txt`
+- `backend/app/prompts/lesson/pupil_mistakes.txt`
+- `frontend/js/10-lessons.js`
+
+Use them for the lesson foundation: pupil CRUD, lesson CRUD, lesson filtering by pupil/date, the placeholder teacher ownership boundary, safe audio recording upload through `AudioStorageService` (filename/type/size checks, generated storage paths, checksum metadata, best-effort duration probing), explicit transcription through `TranscriptionService` (provider registry with disabled/fake/faster-whisper/legacy adapters), transcript review/update through `LessonTranscriptService`, checklist/mistakes-review document artifacts through `LessonDocumentGenerationService`, and processing-job status orchestration through `LessonProcessingJobService` with queued-job creation and background execution boundaries. The current teacher scope is supplied by `get_current_teacher_id()` and returns `local-teacher` until real auth is introduced. Frontend lesson concerns live in `frontend/js/10-lessons.js`, including transcript review/edit UI against the transcript endpoints; routers should remain service-bound HTTP adapters.
 
 ### Projects and files routers
 
@@ -133,6 +157,30 @@ Good patterns:
 - validate generated LaTeX structure;
 - log metadata, hashes, counts, and status instead of full user content.
 
+### Lesson/transcription preparation artifacts
+
+References:
+
+- `PLAN.md` section 10
+- `transcibe.py`
+- `backend/app/prompts/lesson/check_list.txt`
+- `backend/app/prompts/lesson/pupil_mistakes.txt`
+- `frontend/js/10-lessons.js`
+
+Current status:
+
+- The lesson workflow currently includes backend-only `Pupil`/`Lesson` CRUD, safe audio upload metadata/storage with checksums and optional duration metadata, `LessonTranscript` persistence, `LessonGeneratedDocument` metadata/artifacts, and `LessonProcessingJob` polling/status records through typed service adapters.
+- `transcibe.py` is a legacy-named standalone CLI script, not a backend service. It is contained behind the optional legacy adapter and must not be imported from routers.
+- `backend/app/prompts/lesson/check_list.txt` and `backend/app/prompts/lesson/pupil_mistakes.txt` are parameterized prompt templates loaded through `LessonPromptService`.
+- Prompt-loader tests guard against the removed hardcoded student-like `Николь` example returning to production templates.
+
+Required boundaries for future work:
+
+1. `Pupil`/`Lesson` CRUD, lesson-audio upload/storage, and transcription are backend-only foundations; transcription must stay behind `TranscriptionService` and its provider registry and must not call AI document-generation providers.
+2. Transcription must go through the typed service adapter with a fake provider for tests; routers must not import the legacy `transcibe.py` script.
+3. Lesson document generation must prefer structured provider output that the backend validates before building escaped LaTeX.
+4. Downloads must resolve by persisted lesson/document metadata and trusted roots, not by arbitrary user-provided filenames.
+
 ### Tests
 
 Reference: `backend/tests/test_api.py`
@@ -143,7 +191,7 @@ Current style:
 - dependency override for `get_db`;
 - test SQLite database;
 - `setup_db` fixture that creates/drops metadata;
-- direct API assertions for health, projects, files, templates, and selected LaTeX service helpers.
+- direct API assertions for health, projects, files, pupils, lessons, templates, and selected LaTeX service helpers.
 
 Add tests here or split into additional files under `backend/tests/` when a feature grows large.
 
