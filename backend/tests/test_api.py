@@ -606,6 +606,28 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Lesson not found"
 
 
+
+def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
+    import shutil
+    import sys
+    from types import SimpleNamespace
+
+    from app.services.transcription import load_legacy_transcibe_module
+
+    repo_root = Path(__file__).resolve().parents[2]
+    test_audio = repo_root / "test_audio.mp3"
+    assert test_audio.exists()
+
+    monkeypatch.setitem(sys.modules, "whisper", SimpleNamespace(load_model=lambda model_name: object()))
+
+    module = load_legacy_transcibe_module()
+
+    assert module.__file__ == str(repo_root / "transcribe.py")
+    assert module.AUDIO_EXTENSIONS >= {".mp3"}
+    if shutil.which("ffprobe") is None:
+        pytest.skip("ffprobe is required to probe repository test_audio.mp3")
+    assert module.get_audio_duration_seconds(test_audio) > 0
+
 def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router
@@ -2305,7 +2327,7 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     assert usage.source == "estimated"
 
 
-def test_ai_generation_service_defaults_to_qwen2.5:3b_for_ollama(monkeypatch):
+def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
 

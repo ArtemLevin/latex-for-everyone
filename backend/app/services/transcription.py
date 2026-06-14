@@ -78,7 +78,7 @@ class FakeTranscriptionProvider:
 
 
 def load_legacy_transcibe_module() -> ModuleType:
-    script_path = Path(__file__).resolve().parents[3] / "transcibe.py"
+    script_path = Path(__file__).resolve().parents[3] / "transcribe.py"
     spec = importlib.util.spec_from_file_location("latexed_legacy_transcibe", script_path)
     if spec is None or spec.loader is None:
         raise TranscriptionProviderError("Legacy transcription script is unavailable")
@@ -89,7 +89,7 @@ def load_legacy_transcibe_module() -> ModuleType:
 
 
 class LegacyWhisperTranscriptionProvider:
-    """Adapter around the legacy root-level `transcibe.py` script.
+    """Adapter around the legacy root-level `transcribe.py` script.
 
     The public backend service uses the correctly spelled transcription naming;
     the legacy typo is contained here and is never imported by routers.
