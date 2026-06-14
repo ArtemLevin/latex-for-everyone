@@ -16,7 +16,10 @@
             } catch (e) {
                 message = response.statusText || message;
             }
-            throw new Error(message);
+            const error = new Error(message);
+            error.status = response.status;
+            error.retryAfter = response.headers.get('Retry-After') || '';
+            throw error;
         }
 
         if (response.status === 204) return null;

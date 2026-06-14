@@ -606,6 +606,28 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Lesson not found"
 
 
+
+def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
+    import shutil
+    import sys
+    from types import SimpleNamespace
+
+    from app.services.transcription import load_legacy_transcibe_module
+
+    repo_root = Path(__file__).resolve().parents[2]
+    test_audio = repo_root / "test_audio.mp3"
+    assert test_audio.exists()
+
+    monkeypatch.setitem(sys.modules, "whisper", SimpleNamespace(load_model=lambda model_name: object()))
+
+    module = load_legacy_transcibe_module()
+
+    assert module.__file__ == str(repo_root / "transcribe.py")
+    assert module.AUDIO_EXTENSIONS >= {".mp3"}
+    if shutil.which("ffprobe") is None:
+        pytest.skip("ffprobe is required to probe repository test_audio.mp3")
+    assert module.get_audio_duration_seconds(test_audio) > 0
+
 def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router
@@ -782,6 +804,34 @@ def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
         (1.25, 2.5, "Второй фрагмент"),
     ]
 
+
+
+def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypatch, tmp_path, caplog):
+    import logging
+
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import DisabledTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=DisabledTranscriptionProvider()),
+    )
+    caplog.set_level(logging.INFO, logger="app.services.transcription")
+    pupil = create_test_pupil("Disabled Provider Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], filename="recording.mp3", content_type="audio/mpeg", data=b"mp3-data")
+
+    response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "failed"
+    assert "Set TRANSCRIPTION_PROVIDER" in data["error_message"]
+    assert any("lesson transcription provider unavailable" in record.message for record in caplog.records)
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
@@ -2287,7 +2337,8 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
-    assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
+    assert second_response.headers["Retry-After"].isdigit()
+    assert second_response.json()["detail"].startswith("AI rate limit exceeded. Try again in ")
     generation_router.rate_limit_buckets.clear()
 
 
@@ -2305,7 +2356,7 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     assert usage.source == "estimated"
 
 
-def test_ai_generation_service_defaults_to_qwen2.5:3b_for_ollama(monkeypatch):
+def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
 
