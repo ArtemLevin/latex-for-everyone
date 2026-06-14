@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     # LaTeX Compiler
     LATEX_COMPILER: str = "pdflatex"
     COMPILE_TIMEOUT: int = 30
-    MAX_FILE_SIZE: int = 10 * 1024 * 1024  # 10MB
+    MAX_FILE_SIZE: int = 100 * 1024 * 1024  # 100MB
     COMPILE_WORK_DIR: str = "/tmp/latexed_compiles"
     MAX_LATEX_FILES: int = 100
     MAX_LATEX_FILE_CHARS: int = 500_000
@@ -49,11 +49,11 @@ class Settings(BaseSettings):
 
     # Upload
     UPLOAD_DIR: str = "/tmp/latexed_uploads"
-    MAX_UPLOAD_SIZE: int = 50 * 1024 * 1024  # 50MB
+    MAX_UPLOAD_SIZE: int = 1000 * 1024 * 1024  # 1000MB
 
     # Lesson audio/storage foundation
     LESSON_ARTIFACT_ROOT: Optional[str] = None
-    MAX_LESSON_AUDIO_SIZE: int = 100 * 1024 * 1024  # 100MB
+    MAX_LESSON_AUDIO_SIZE: int = 1000 * 1024 * 1024   # 1000MB
     LESSON_AUDIO_ALLOWED_CONTENT_TYPES: str = "audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a"
     LESSON_AUDIO_ALLOWED_EXTENSIONS: str = ".webm,.wav,.mp3,.m4a,.ogg"
     LESSON_AUDIO_DURATION_PROBE_ENABLED: bool = True
