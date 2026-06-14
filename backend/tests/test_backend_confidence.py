@@ -74,3 +74,11 @@ def test_project_and_file_timestamp_responses_remain_parseable(isolated_client):
     for payload in [project, file]:
         assert datetime.fromisoformat(payload["created_at"])
         assert datetime.fromisoformat(payload["updated_at"])
+
+
+def test_latex_compiler_uses_uuid_compile_work_directories():
+    source = (REPO_ROOT / "backend" / "app" / "services" / "latex_compiler.py").read_text(encoding="utf-8")
+
+    assert "compile_{uuid.uuid4().hex}" in source
+    assert "os.getpid()" not in source
+    assert "int(time.time())" not in source
