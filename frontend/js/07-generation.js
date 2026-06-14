@@ -467,13 +467,37 @@
         document.getElementById('statusText').textContent = 'AI-документ вставлен для ручной правки';
     }
 
+    function formatApiError(error) {
+        if (error.status === 429) {
+            const retryAfter = Number(error.retryAfter || 0);
+            const suffix = retryAfter > 0 ? ` Подождите примерно ${retryAfter} сек. и повторите.` : ' Подождите немного и повторите.';
+            return `${error.message}${suffix}`;
+        }
+        return error.message;
+    }
+
     async function runGenerationRequest(request, loadingButtonId = 'generateLatexBtn') {
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
             showToast('Запустите backend для AI-генерации', 'error');
             return;
         }
+        if (generationRequestInFlight) {
+            setGenerationStatus('AI-генерация уже выполняется. Дождитесь завершения текущего запроса.', 'error');
+            showToast('AI-генерация уже выполняется', 'error');
+            return;
+        }
+        const waitMs = generationRateLimitedUntil - Date.now();
+        if (waitMs > 0) {
+            const waitSeconds = Math.ceil(waitMs / 1000);
+            const message = `AI-генерация временно ограничена rate limit. Подождите примерно ${waitSeconds} сек.`;
+            setGenerationStatus(message, 'error');
+            setGenerationDetails([message], 'error');
+            showToast(message, 'error');
+            return;
+        }
 
+        generationRequestInFlight = true;
         const previousContent = editor.getValue();
         const previousFileId = currentFileId;
         setButtonLoading(loadingButtonId, true, 'Генерация...');
@@ -530,16 +554,21 @@
                 files[currentFileId].content = previousContent;
                 renderFileTree();
             }
+            if (error.status === 429) {
+                const retryAfter = Number(error.retryAfter || 0);
+                generationRateLimitedUntil = retryAfter > 0 ? Date.now() + retryAfter * 1000 : Date.now() + 60_000;
+            }
+            const message = formatApiError(error);
             setGenerationRetryActionsVisible(Boolean(lastGenerationRequest), Boolean(lastGenerationResult?.latex_code));
-            setGenerationStatus(`Ошибка генерации: ${error.message}`, 'error');
-            setGenerationDetails([error.message], 'error');
-            document.getElementById('statusText').textContent = 'Ошибка AI-генерации';
-            showToast(`Ошибка AI-генерации: ${error.message}`, 'error');
+            setGenerationStatus(`Ошибка генерации: ${message}`, 'error');
+            setGenerationDetails([message], 'error');
+            document.getElementById('statusText').textContent = error.status === 429 ? 'AI-генерация ограничена rate limit' : 'Ошибка AI-генерации';
+            showToast(`Ошибка AI-генерации: ${message}`, 'error');
         } finally {
+            generationRequestInFlight = false;
             stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
         }
-        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
     }
 
     async function regenerateWithLatexMode(mode) {
@@ -564,61 +593,4 @@
             return;
         }
         await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
-    }
-
-    async function regenerateWithLatexMode(mode) {
-        const modeInput = document.getElementById('generationLatexMode');
-        if (modeInput) modeInput.value = mode;
-        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
-        request.fields = request.fields || {};
-        request.fields.latex_mode = mode;
-        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
-    }
-
-    async function generateLatexFromAi() {
-        lastGenerationResult = null;
-        lastGenerationRawOutput = '';
-        await runGenerationRequest(collectGenerationRequest(), 'generateLatexBtn');
-    }
-
-    async function retryLastGeneration() {
-        if (!lastGenerationRequest) {
-            setGenerationStatus('Нет сохранённого запроса для retry.', 'error');
-            showToast('Сначала выполните AI-генерацию', 'error');
-            return;
-        }
-        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
-    }
-
-    async function regenerateWithLatexMode(mode) {
-        const modeInput = document.getElementById('generationLatexMode');
-        if (modeInput) modeInput.value = mode;
-        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
-        request.fields = request.fields || {};
-        request.fields.latex_mode = mode;
-        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
-    }
-
-    async function generateLatexFromAi() {
-        lastGenerationResult = null;
-        lastGenerationRawOutput = '';
-        await runGenerationRequest(collectGenerationRequest(), 'generateLatexBtn');
-    }
-
-    async function retryLastGeneration() {
-        if (!lastGenerationRequest) {
-            setGenerationStatus('Нет сохранённого запроса для retry.', 'error');
-            showToast('Сначала выполните AI-генерацию', 'error');
-            return;
-        }
-        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
-    }
-
-    async function regenerateWithLatexMode(mode) {
-        const modeInput = document.getElementById('generationLatexMode');
-        if (modeInput) modeInput.value = mode;
-        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
-        request.fields = request.fields || {};
-        request.fields.latex_mode = mode;
-        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
     }
