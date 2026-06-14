@@ -22,10 +22,12 @@ EXPECTED_LOCAL_SCRIPT_ORDER = [
 
 def test_frontend_main_html_uses_expected_numbered_script_order():
     main_html = (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
-    local_scripts = re.findall(r'<script\s+src="(js/[^"]+)"', main_html)
+    local_script_urls = re.findall(r'<script\s+src="(js/[^"]+)"', main_html)
+    local_scripts = [script_url.split("?", 1)[0] for script_url in local_script_urls]
 
     assert local_scripts == EXPECTED_LOCAL_SCRIPT_ORDER
     assert "js/main.js" not in local_scripts
+    assert all("?v=" in script_url for script_url in local_script_urls)
 
 
 def test_legacy_frontend_main_bundle_is_not_present():
