@@ -50,3 +50,15 @@ def test_lesson_frontend_entrypoint_and_dom_contract_are_present():
     assert "saveLessonTranscriptReview" in lessons_js
     assert "lessonTranscriptEditor" in lessons_js
     assert "review_status" in lessons_js
+
+
+def test_frontend_renders_user_controlled_file_names_and_toasts_as_text():
+    files_js = (FRONTEND_DIR / "js" / "04-files.js").read_text(encoding="utf-8")
+    settings_js = (FRONTEND_DIR / "js" / "09-ui-settings.js").read_text(encoding="utf-8")
+
+    assert '<span class="file-name">${file.name}</span>' not in files_js
+    assert "name.textContent = file.name" in files_js
+    assert "renameButton.addEventListener('click'" in files_js
+    assert "deleteButton.addEventListener('click'" in files_js
+    assert "toast.innerHTML = `${icons[type] || icons.info}<span>${message}</span>`" not in settings_js
+    assert "text.textContent = message" in settings_js
