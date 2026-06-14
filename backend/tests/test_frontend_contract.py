@@ -62,3 +62,17 @@ def test_frontend_renders_user_controlled_file_names_and_toasts_as_text():
     assert "deleteButton.addEventListener('click'" in files_js
     assert "toast.innerHTML = `${icons[type] || icons.info}<span>${message}</span>`" not in settings_js
     assert "text.textContent = message" in settings_js
+
+
+def test_generation_frontend_does_not_auto_retry_after_request_completion():
+    generation_js = (FRONTEND_DIR / "js" / "07-generation.js").read_text(encoding="utf-8")
+    api_js = (FRONTEND_DIR / "js" / "02-api.js").read_text(encoding="utf-8")
+
+    assert generation_js.count("async function runGenerationRequest") == 1
+    assert generation_js.count("async function generateLatexFromAi") == 1
+    assert generation_js.count("async function retryLastGeneration") == 1
+    assert generation_js.count("async function regenerateWithLatexMode") == 1
+    assert generation_js.count("await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');") == 1
+    assert "finally {" in generation_js
+    assert "error.status = response.status" in api_js
+    assert "error.retryAfter = response.headers.get('Retry-After')" in api_js

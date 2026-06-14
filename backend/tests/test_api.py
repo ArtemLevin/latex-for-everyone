@@ -2337,7 +2337,8 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
-    assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
+    assert second_response.headers["Retry-After"].isdigit()
+    assert second_response.json()["detail"].startswith("AI rate limit exceeded. Try again in ")
     generation_router.rate_limit_buckets.clear()
 
 
