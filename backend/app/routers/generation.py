@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 import hashlib
 import logging
+import math
 import shutil
 import time
 
@@ -76,13 +77,19 @@ def enforce_ai_rate_limit(request: Request) -> None:
     while bucket and now - bucket[0] >= 60:
         bucket.popleft()
     if len(bucket) >= limit:
+        retry_after = max(1, math.ceil(60 - (now - bucket[0])))
         logger.warning(
-            "ai rate limit exceeded client=%s path=%s limit=%s window_seconds=60",
+            "ai rate limit exceeded client=%s path=%s limit=%s window_seconds=60 retry_after_seconds=%s",
             client,
             request.url.path,
             limit,
+            retry_after,
         )
-        raise HTTPException(status_code=429, detail="AI rate limit exceeded. Try again later.")
+        raise HTTPException(
+            status_code=429,
+            detail=f"AI rate limit exceeded. Try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)},
+        )
     bucket.append(now)
 
 
