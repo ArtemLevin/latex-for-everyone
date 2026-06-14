@@ -482,7 +482,22 @@
             showToast('Запустите backend для AI-генерации', 'error');
             return;
         }
+        if (generationRequestInFlight) {
+            setGenerationStatus('AI-генерация уже выполняется. Дождитесь завершения текущего запроса.', 'error');
+            showToast('AI-генерация уже выполняется', 'error');
+            return;
+        }
+        const waitMs = generationRateLimitedUntil - Date.now();
+        if (waitMs > 0) {
+            const waitSeconds = Math.ceil(waitMs / 1000);
+            const message = `AI-генерация временно ограничена rate limit. Подождите примерно ${waitSeconds} сек.`;
+            setGenerationStatus(message, 'error');
+            setGenerationDetails([message], 'error');
+            showToast(message, 'error');
+            return;
+        }
 
+        generationRequestInFlight = true;
         const previousContent = editor.getValue();
         const previousFileId = currentFileId;
         setButtonLoading(loadingButtonId, true, 'Генерация...');
@@ -539,6 +554,10 @@
                 files[currentFileId].content = previousContent;
                 renderFileTree();
             }
+            if (error.status === 429) {
+                const retryAfter = Number(error.retryAfter || 0);
+                generationRateLimitedUntil = retryAfter > 0 ? Date.now() + retryAfter * 1000 : Date.now() + 60_000;
+            }
             const message = formatApiError(error);
             setGenerationRetryActionsVisible(Boolean(lastGenerationRequest), Boolean(lastGenerationResult?.latex_code));
             setGenerationStatus(`Ошибка генерации: ${message}`, 'error');
@@ -546,6 +565,7 @@
             document.getElementById('statusText').textContent = error.status === 429 ? 'AI-генерация ограничена rate limit' : 'Ошибка AI-генерации';
             showToast(`Ошибка AI-генерации: ${message}`, 'error');
         } finally {
+            generationRequestInFlight = false;
             stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
         }

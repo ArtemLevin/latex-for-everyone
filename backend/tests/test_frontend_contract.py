@@ -74,5 +74,14 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert generation_js.count("async function regenerateWithLatexMode") == 1
     assert generation_js.count("await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');") == 1
     assert "finally {" in generation_js
+    state_js = (FRONTEND_DIR / "js" / "01-state.js").read_text(encoding="utf-8")
+
+    assert "let generationRequestInFlight = false" in state_js
+    assert "let generationRateLimitedUntil = 0" in state_js
+    assert "if (generationRequestInFlight)" in generation_js
+    assert "generationRequestInFlight = true" in generation_js
+    assert "generationRequestInFlight = false" in generation_js
+    assert "generationRateLimitedUntil = retryAfter > 0" in generation_js
+    assert "const waitMs = generationRateLimitedUntil - Date.now()" in generation_js
     assert "error.status = response.status" in api_js
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js
