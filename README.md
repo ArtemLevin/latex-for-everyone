@@ -388,7 +388,7 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
 
-Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper.
+Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper. If `/api/lessons/{id}/transcribe` logs `provider=disabled` or returns a failed transcript with `Transcription provider is disabled`, the backend is running in the safe no-provider mode; set `TRANSCRIPTION_PROVIDER=faster_whisper` after installing the optional runtime, or set `TRANSCRIPTION_PROVIDER=fake` only for local UI smoke tests.
 
 ## Logging and observability
 

@@ -60,7 +60,10 @@ class DisabledTranscriptionProvider:
     provider_name = "disabled"
 
     def transcribe(self, audio_path: Path, *, language: str) -> TranscriptResult:
-        raise TranscriptionProviderError("Transcription provider is disabled")
+        raise TranscriptionProviderError(
+            "Transcription provider is disabled. "
+            "Set TRANSCRIPTION_PROVIDER=faster_whisper, legacy_whisper, or fake for local testing."
+        )
 
 
 class FakeTranscriptionProvider:
@@ -239,7 +242,15 @@ def available_transcription_providers() -> tuple[str, ...]:
 
 def build_transcription_provider() -> TranscriptionProvider:
     provider = settings.TRANSCRIPTION_PROVIDER.strip().lower()
-    factory = TRANSCRIPTION_PROVIDER_REGISTRY.get(provider, build_disabled_transcription_provider)
+    factory = TRANSCRIPTION_PROVIDER_REGISTRY.get(provider)
+    if factory is None:
+        logger.warning(
+            "unknown transcription provider configured provider=%s available_providers=%s fallback=disabled",
+            provider,
+            available_transcription_providers(),
+        )
+        factory = build_disabled_transcription_provider
+    logger.info("transcription provider selected provider=%s", provider if provider in TRANSCRIPTION_PROVIDER_REGISTRY else "disabled")
     return factory()
 
 
@@ -347,6 +358,30 @@ class TranscriptionService:
 
         try:
             result = self.provider.transcribe(audio_path, language=transcript_language)
+        except TranscriptionProviderError as exc:
+            logger.warning(
+                "lesson transcription provider unavailable lesson_id=%s recording_id=%s provider=%s error_type=%s message=%s",
+                lesson.id,
+                recording.id,
+                getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER),
+                type(exc).__name__,
+                sanitize_provider_error(exc),
+            )
+            transcript = LessonTranscript(
+                id=transcript_id,
+                lesson_id=lesson.id,
+                recording_id=recording.id,
+                provider=getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER),
+                language=transcript_language,
+                text=None,
+                status="failed",
+                error_message=sanitize_provider_error(exc),
+            )
+            db.add(transcript)
+            db.commit()
+            db.refresh(transcript)
+            logger.info("lesson transcription failed transcript persisted lesson_id=%s recording_id=%s transcript_id=%s error_chars=%s", lesson.id, recording.id, transcript.id, len(transcript.error_message or ""))
+            return transcript
         except Exception as exc:
             logger.exception("lesson transcription provider failed lesson_id=%s recording_id=%s provider=%s error_type=%s", lesson.id, recording.id, getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER), type(exc).__name__)
             transcript = LessonTranscript(

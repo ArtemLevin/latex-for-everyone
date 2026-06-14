@@ -805,6 +805,34 @@ def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
     ]
 
 
+
+def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypatch, tmp_path, caplog):
+    import logging
+
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import DisabledTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=DisabledTranscriptionProvider()),
+    )
+    caplog.set_level(logging.INFO, logger="app.services.transcription")
+    pupil = create_test_pupil("Disabled Provider Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], filename="recording.mp3", content_type="audio/mpeg", data=b"mp3-data")
+
+    response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "failed"
+    assert "Set TRANSCRIPTION_PROVIDER" in data["error_message"]
+    assert any("lesson transcription provider unavailable" in record.message for record in caplog.records)
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router
