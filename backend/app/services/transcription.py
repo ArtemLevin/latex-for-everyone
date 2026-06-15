@@ -1,5 +1,7 @@
 import importlib
 import importlib.util
+import logging
+import shutil
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -14,6 +16,9 @@ from app.config import settings
 from app.models import Lesson, LessonAudioRecording, LessonTranscript
 from app.services.audio_storage import lesson_artifact_root, resolve_inside_root
 from app.time_utils import utc_now
+
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionError(Exception):
@@ -56,7 +61,10 @@ class DisabledTranscriptionProvider:
     provider_name = "disabled"
 
     def transcribe(self, audio_path: Path, *, language: str) -> TranscriptResult:
-        raise TranscriptionProviderError("Transcription provider is disabled")
+        raise TranscriptionProviderError(
+            "Transcription provider is disabled. "
+            "Set TRANSCRIPTION_PROVIDER=faster_whisper, legacy_whisper, or fake for local testing."
+        )
 
 
 class FakeTranscriptionProvider:
@@ -76,20 +84,21 @@ class FakeTranscriptionProvider:
             segments=[TranscriptSegment(start=0.0, end=1.0, text=self.text)],
         )
 
-
 def load_legacy_transcibe_module() -> ModuleType:
-    script_path = Path(__file__).resolve().parents[3] / "transcibe.py"
+    script_path = Path(__file__).resolve().parents[3] / "transcribe.py"
+    logger.info("legacy transcription module load requested script_path=%s", script_path)
     spec = importlib.util.spec_from_file_location("latexed_legacy_transcibe", script_path)
     if spec is None or spec.loader is None:
         raise TranscriptionProviderError("Legacy transcription script is unavailable")
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    logger.info("legacy transcription module loaded script_path=%s", script_path)
     return module
 
 
 class LegacyWhisperTranscriptionProvider:
-    """Adapter around the legacy root-level `transcibe.py` script.
+    """Adapter around the legacy root-level `transcribe.py` script.
 
     The public backend service uses the correctly spelled transcription naming;
     the legacy typo is contained here and is never imported by routers.
@@ -102,14 +111,20 @@ class LegacyWhisperTranscriptionProvider:
         self.beam_size = beam_size
 
     def transcribe(self, audio_path: Path, *, language: str) -> TranscriptResult:
+        logger.info("legacy whisper transcription started audio_path=%s model=%s beam_size=%s language=%s", audio_path, self.model_name, self.beam_size, language)
         legacy_script = load_legacy_transcibe_module()
         legacy_script.ensure_ffmpeg_tools()
+        logger.info("legacy whisper ffmpeg tools verified audio_path=%s", audio_path)
         duration_seconds = legacy_script.get_audio_duration_seconds(audio_path)
+        logger.info("legacy whisper audio duration detected audio_path=%s duration_seconds=%s", audio_path, duration_seconds)
         model = legacy_script.whisper.load_model(self.model_name)
+        logger.info("legacy whisper model loaded model=%s", self.model_name)
 
         with TemporaryDirectory(prefix="latexed_transcribe_") as tmp_dir:
             prepared_wav = Path(tmp_dir) / f"{audio_path.stem}_prepared.wav"
+            logger.info("legacy whisper preparing audio audio_path=%s prepared_wav=%s", audio_path, prepared_wav)
             legacy_script.prepare_audio_for_whisper(audio_path, prepared_wav)
+            logger.info("legacy whisper prepared audio prepared_wav=%s", prepared_wav)
             text, lines = legacy_script.transcribe_audio_file(
                 model=model,
                 prepared_audio_file=prepared_wav,
@@ -117,6 +132,7 @@ class LegacyWhisperTranscriptionProvider:
                 beam_size=self.beam_size,
             )
 
+        logger.info("legacy whisper transcription completed audio_path=%s text_chars=%s segment_count=%s", audio_path, len(text), len(lines))
         segments = [
             TranscriptSegment(start=float(line.start), end=float(line.end), text=str(line.text))
             for line in lines
@@ -148,6 +164,7 @@ class FasterWhisperTranscriptionProvider:
         self.word_timestamps = word_timestamps
 
     def transcribe(self, audio_path: Path, *, language: str) -> TranscriptResult:
+        logger.info("faster-whisper transcription started audio_path=%s model=%s device=%s compute_type=%s beam_size=%s language=%s word_timestamps=%s", audio_path, self.model_name, self.device, self.compute_type, self.beam_size, language, self.word_timestamps)
         faster_whisper = importlib.import_module("faster_whisper")
         model = faster_whisper.WhisperModel(
             self.model_name,
@@ -160,6 +177,7 @@ class FasterWhisperTranscriptionProvider:
             beam_size=self.beam_size,
             word_timestamps=self.word_timestamps,
         )
+        logger.info("faster-whisper raw segments received audio_path=%s", audio_path)
         segments = [
             TranscriptSegment(
                 start=float(getattr(segment, "start", 0.0)),
@@ -170,9 +188,11 @@ class FasterWhisperTranscriptionProvider:
         ]
         text = "\n".join(segment.text for segment in segments if segment.text).strip()
         if not text:
+            logger.warning("faster-whisper returned empty transcript audio_path=%s segment_count=%s", audio_path, len(segments))
             raise TranscriptionProviderError("Transcription provider returned empty text")
         detected_language = str(getattr(info, "language", None) or language)
         duration = getattr(info, "duration", None)
+        logger.info("faster-whisper transcription completed audio_path=%s detected_language=%s duration_seconds=%s text_chars=%s segment_count=%s", audio_path, detected_language, duration, len(text), len(segments))
         return TranscriptResult(
             text=text,
             language=detected_language,
@@ -181,21 +201,128 @@ class FasterWhisperTranscriptionProvider:
             segments=segments,
         )
 
+def _runtime_binary_status(binary: str) -> dict[str, str | bool | None]:
+    path = shutil.which(binary)
+    return {"binary": binary, "available": path is not None, "path": path}
+
+def _dependency_status(module_name: str) -> dict[str, str | bool]:
+    # Readiness must not import Whisper runtimes because importing can eagerly load
+    # heavy native libraries or model bootstrap code; module discovery is sufficient
+    # to tell operators which optional install group is missing.
+    return {"module": module_name, "available": importlib.util.find_spec(module_name) is not None}
+
+def get_transcription_runtime_status() -> dict[str, object]:
+    """Return operator-facing readiness details for the configured transcription provider."""
+    provider = settings.TRANSCRIPTION_PROVIDER.strip().lower()
+    known_provider = provider in TRANSCRIPTION_PROVIDER_REGISTRY
+    effective_provider = provider if known_provider else "disabled"
+    details: dict[str, object] = {
+        "configured_provider": provider,
+        "effective_provider": effective_provider,
+        "available_providers": available_transcription_providers(),
+        "language": settings.TRANSCRIPTION_LANGUAGE,
+        "model": settings.TRANSCRIPTION_MODEL,
+        "beam_size": settings.TRANSCRIPTION_BEAM_SIZE,
+    }
+
+    if not known_provider:
+        details["fallback"] = "disabled"
+        return {
+            "status": "error",
+            "message": "Unknown transcription provider configured; falling back to disabled provider",
+            "details": details,
+        }
+
+    if provider == "disabled":
+        return {
+            "status": "skipped",
+            "message": "Transcription provider is disabled",
+            "details": details,
+        }
+
+    if provider == "fake":
+        return {
+            "status": "ok",
+            "message": "Fake transcription provider is available for local smoke tests",
+            "details": details,
+        }
+
+    ffmpeg = _runtime_binary_status("ffmpeg")
+    ffprobe = _runtime_binary_status("ffprobe")
+    details.update({"ffmpeg": ffmpeg, "ffprobe": ffprobe})
+
+    if provider == "faster_whisper":
+        dependency = _dependency_status("faster_whisper")
+        details.update(
+            {
+                "dependency": dependency,
+                "device": settings.TRANSCRIPTION_DEVICE,
+                "compute_type": settings.TRANSCRIPTION_COMPUTE_TYPE,
+                "word_timestamps": settings.TRANSCRIPTION_WORD_TIMESTAMPS,
+                "install_hint": "uv sync --group transcription",
+            }
+        )
+        missing = [
+            name
+            for name, available in {
+                "faster_whisper": bool(dependency["available"]),
+                "ffmpeg": bool(ffmpeg["available"]),
+                "ffprobe": bool(ffprobe["available"]),
+            }.items()
+            if not available
+        ]
+        if missing:
+            details["missing_requirements"] = missing
+            return {
+                "status": "missing",
+                "message": "faster-whisper transcription runtime is incomplete",
+                "details": details,
+            }
+        return {"status": "ok", "message": "faster-whisper transcription runtime is available", "details": details}
+
+    if provider in {"legacy_whisper", "whisper"}:
+        dependency = _dependency_status("whisper")
+        script_path = Path(__file__).resolve().parents[3] / "transcribe.py"
+        details.update(
+            {
+                "dependency": dependency,
+                "legacy_script_path": str(script_path),
+                "legacy_script_present": script_path.exists(),
+                "install_hint": "uv sync --group legacy-transcription",
+            }
+        )
+        missing = [
+            name
+            for name, available in {
+                "whisper": bool(dependency["available"]),
+                "ffmpeg": bool(ffmpeg["available"]),
+                "ffprobe": bool(ffprobe["available"]),
+                "transcribe.py": script_path.exists(),
+            }.items()
+            if not available
+        ]
+        if missing:
+            details["missing_requirements"] = missing
+            return {
+                "status": "missing",
+                "message": "Legacy Whisper transcription runtime is incomplete",
+                "details": details,
+            }
+        return {"status": "ok", "message": "Legacy Whisper transcription runtime is available", "details": details}
+
+    return {"status": "error", "message": "Unsupported transcription provider readiness branch", "details": details}
 
 def build_disabled_transcription_provider() -> TranscriptionProvider:
     return DisabledTranscriptionProvider()
 
-
 def build_fake_transcription_provider() -> TranscriptionProvider:
     return FakeTranscriptionProvider()
-
 
 def build_legacy_whisper_transcription_provider() -> TranscriptionProvider:
     return LegacyWhisperTranscriptionProvider(
         model_name=settings.TRANSCRIPTION_MODEL,
         beam_size=settings.TRANSCRIPTION_BEAM_SIZE,
     )
-
 
 def build_faster_whisper_transcription_provider() -> TranscriptionProvider:
     return FasterWhisperTranscriptionProvider(
@@ -215,22 +342,26 @@ TRANSCRIPTION_PROVIDER_REGISTRY = {
     "faster_whisper": build_faster_whisper_transcription_provider,
 }
 
-
 def available_transcription_providers() -> tuple[str, ...]:
     return tuple(sorted(TRANSCRIPTION_PROVIDER_REGISTRY))
 
-
 def build_transcription_provider() -> TranscriptionProvider:
     provider = settings.TRANSCRIPTION_PROVIDER.strip().lower()
-    factory = TRANSCRIPTION_PROVIDER_REGISTRY.get(provider, build_disabled_transcription_provider)
+    factory = TRANSCRIPTION_PROVIDER_REGISTRY.get(provider)
+    if factory is None:
+        logger.warning(
+            "unknown transcription provider configured provider=%s available_providers=%s fallback=disabled",
+            provider,
+            available_transcription_providers(),
+        )
+        factory = build_disabled_transcription_provider
+    logger.info("transcription provider selected provider=%s", provider if provider in TRANSCRIPTION_PROVIDER_REGISTRY else "disabled")
     return factory()
-
 
 def sanitize_provider_error(exc: Exception) -> str:
     message = str(exc).strip() or "Transcription provider failed"
     single_line = " ".join(message.split())
     return single_line[:500]
-
 
 def effective_transcript_text(transcript: LessonTranscript) -> str:
     return (transcript.edited_text if transcript.edited_text is not None else transcript.text) or ""
@@ -320,14 +451,25 @@ class TranscriptionService:
         recording_id: str | None = None,
         language: str | None = None,
     ) -> LessonTranscript:
+        logger.info("lesson transcription requested lesson_id=%s requested_recording_id=%s provider=%s language=%s", lesson.id, recording_id, getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER), language or settings.TRANSCRIPTION_LANGUAGE)
         recording = self.get_recording(db, lesson=lesson, recording_id=recording_id)
+        logger.info("lesson transcription recording selected lesson_id=%s recording_id=%s storage_path=%s status=%s", lesson.id, recording.id, recording.storage_path, recording.status)
         transcript_language = language or settings.TRANSCRIPTION_LANGUAGE
         transcript_id = str(uuid.uuid4())
         audio_path = resolve_inside_root(lesson_artifact_root(), recording.storage_path)
+        logger.info("lesson transcription audio path resolved lesson_id=%s recording_id=%s audio_path=%s", lesson.id, recording.id, audio_path)
 
         try:
             result = self.provider.transcribe(audio_path, language=transcript_language)
-        except Exception as exc:
+        except TranscriptionProviderError as exc:
+            logger.warning(
+                "lesson transcription provider unavailable lesson_id=%s recording_id=%s provider=%s error_type=%s message=%s",
+                lesson.id,
+                recording.id,
+                getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER),
+                type(exc).__name__,
+                sanitize_provider_error(exc),
+            )
             transcript = LessonTranscript(
                 id=transcript_id,
                 lesson_id=lesson.id,
@@ -341,8 +483,27 @@ class TranscriptionService:
             db.add(transcript)
             db.commit()
             db.refresh(transcript)
+            logger.info("lesson transcription failed transcript persisted lesson_id=%s recording_id=%s transcript_id=%s error_chars=%s", lesson.id, recording.id, transcript.id, len(transcript.error_message or ""))
+            return transcript
+        except Exception as exc:
+            logger.exception("lesson transcription provider failed lesson_id=%s recording_id=%s provider=%s error_type=%s", lesson.id, recording.id, getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER), type(exc).__name__)
+            transcript = LessonTranscript(
+                id=transcript_id,
+                lesson_id=lesson.id,
+                recording_id=recording.id,
+                provider=getattr(self.provider, "provider_name", settings.TRANSCRIPTION_PROVIDER),
+                language=transcript_language,
+                text=None,
+                status="failed",
+                error_message=sanitize_provider_error(exc),
+            )
+            db.add(transcript)
+            db.commit()
+            db.refresh(transcript)
+            logger.info("lesson transcription failed transcript persisted lesson_id=%s recording_id=%s transcript_id=%s error_chars=%s", lesson.id, recording.id, transcript.id, len(transcript.error_message or ""))
             return transcript
 
+        logger.info("lesson transcription provider completed lesson_id=%s recording_id=%s provider=%s result_language=%s text_chars=%s segment_count=%s duration_seconds=%s", lesson.id, recording.id, result.provider, result.language, len(result.text), len(result.segments), result.duration_seconds)
         transcript = LessonTranscript(
             id=transcript_id,
             lesson_id=lesson.id,
@@ -361,4 +522,5 @@ class TranscriptionService:
         db.add(transcript)
         db.commit()
         db.refresh(transcript)
+        logger.info("lesson transcription completed lesson_id=%s recording_id=%s transcript_id=%s status=%s", lesson.id, recording.id, transcript.id, transcript.status)
         return transcript

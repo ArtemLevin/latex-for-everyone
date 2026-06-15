@@ -16,6 +16,7 @@ class GenerationHistoryService:
         db: Session,
         *,
         project_id: str | None,
+        owner_id: str,
         provider: str,
         model: str | None,
         fields: GenerationFields,
@@ -30,6 +31,7 @@ class GenerationHistoryService:
     ) -> GenerationHistory:
         item = GenerationHistory(
             project_id=project_id,
+            owner_id=owner_id,
             provider=provider,
             model=model,
             status="success",
@@ -56,6 +58,7 @@ class GenerationHistoryService:
         db: Session,
         *,
         project_id: str | None,
+        owner_id: str,
         provider: str,
         model: str | None,
         fields: GenerationFields,
@@ -65,6 +68,7 @@ class GenerationHistoryService:
     ) -> GenerationHistory:
         item = GenerationHistory(
             project_id=project_id,
+            owner_id=owner_id,
             provider=provider,
             model=model,
             status="error",
@@ -83,20 +87,24 @@ class GenerationHistoryService:
         db: Session,
         project_id: str,
         *,
+        owner_id: str,
         skip: int = 0,
         limit: int = 20,
     ) -> list[GenerationHistory]:
         return (
             db.query(GenerationHistory)
-            .filter(GenerationHistory.project_id == project_id)
+            .filter(GenerationHistory.project_id == project_id, GenerationHistory.owner_id == owner_id)
             .order_by(GenerationHistory.created_at.desc())
             .offset(skip)
             .limit(limit)
             .all()
         )
 
-    def get_history_item(self, db: Session, history_id: str) -> GenerationHistory:
-        item = db.query(GenerationHistory).filter(GenerationHistory.id == history_id).first()
+    def get_history_item(self, db: Session, history_id: str, *, owner_id: str | None = None) -> GenerationHistory:
+        query = db.query(GenerationHistory).filter(GenerationHistory.id == history_id)
+        if owner_id is not None:
+            query = query.filter(GenerationHistory.owner_id == owner_id)
+        item = query.first()
         if item is None:
             raise GenerationHistoryNotFoundError(f"Generation history item {history_id} not found")
         return item

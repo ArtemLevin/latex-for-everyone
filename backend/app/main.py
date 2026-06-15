@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.logging_config import configure_logging, reset_request_id, set_request_id
 from app.routers import compile, export, files, generation, lessons, projects, pupils, templates
-from app.schemas import ReadinessResponse
+from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services import readiness
 
 
@@ -34,6 +34,12 @@ LESSON_WORKFLOW_COMPAT_TABLE_COLUMNS = {
         "review_status": "VARCHAR(50) DEFAULT 'unreviewed'",
         "reviewed_at": "DATETIME",
     },
+    "lesson_generated_documents": {
+        "provider": "VARCHAR(100) DEFAULT 'unknown'",
+        "prompt_template_hash": "VARCHAR(64)",
+        "source_text_hash": "VARCHAR(64)",
+        "source_text_kind": "VARCHAR(50) DEFAULT 'raw'",
+    },
     "lesson_processing_jobs": {
         "document_types": "JSON DEFAULT '[]'",
     },
@@ -49,10 +55,22 @@ LESSON_WORKFLOW_COMPAT_INDEXES = {
 }
 
 GENERATION_HISTORY_COMPAT_COLUMNS = {
+    "owner_id": "VARCHAR(255) DEFAULT 'local-teacher'",
     "input_tokens": "INTEGER",
     "output_tokens": "INTEGER",
     "total_tokens": "INTEGER",
     "token_count_source": "VARCHAR(50)",
+}
+
+
+GENERATION_RUNTIME_COMPAT_TABLE_COLUMNS = {
+    "generation_history": GENERATION_HISTORY_COMPAT_COLUMNS,
+    "generation_jobs": {"owner_id": "VARCHAR(255) DEFAULT 'local-teacher'", "idempotency_key": "VARCHAR(128)"},
+}
+
+GENERATION_RUNTIME_COMPAT_INDEXES = {
+    "generation_history": {"ix_generation_history_owner_id": "owner_id"},
+    "generation_jobs": {"ix_generation_jobs_owner_id": "owner_id", "ix_generation_jobs_idempotency_key": "idempotency_key"},
 }
 
 
@@ -65,25 +83,41 @@ def ensure_generation_history_compat_columns() -> None:
     the default local/dev auto-create path from crashing on stale SQLite files.
     """
     inspector = inspect(engine)
-    if "generation_history" not in inspector.get_table_names():
-        return
+    table_names = set(inspector.get_table_names())
+    pending_columns: dict[str, dict[str, str]] = {}
 
-    existing_columns = {column["name"] for column in inspector.get_columns("generation_history")}
-    missing_columns = {
-        name: definition
-        for name, definition in GENERATION_HISTORY_COMPAT_COLUMNS.items()
-        if name not in existing_columns
-    }
-    if not missing_columns:
-        return
+    for table_name, expected_columns in GENERATION_RUNTIME_COMPAT_TABLE_COLUMNS.items():
+        if table_name not in table_names:
+            continue
+        existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
+        missing_columns = {
+            name: definition
+            for name, definition in expected_columns.items()
+            if name not in existing_columns
+        }
+        if missing_columns:
+            pending_columns[table_name] = missing_columns
 
-    logger.warning(
-        "database auto-create found stale generation_history schema; adding missing columns=%s",
-        sorted(missing_columns),
-    )
+    if pending_columns:
+        logger.warning(
+            "database auto-create found stale generation schema; adding missing columns=%s",
+            {table: sorted(columns) for table, columns in pending_columns.items()},
+        )
+        with engine.begin() as connection:
+            for table_name, missing_columns in pending_columns.items():
+                for name, definition in missing_columns.items():
+                    connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}"))
+
+    refreshed_inspector = inspect(engine)
     with engine.begin() as connection:
-        for name, definition in missing_columns.items():
-            connection.execute(text(f"ALTER TABLE generation_history ADD COLUMN {name} {definition}"))
+        for table_name, index_columns in GENERATION_RUNTIME_COMPAT_INDEXES.items():
+            if table_name not in table_names:
+                continue
+            existing_columns = {column["name"] for column in refreshed_inspector.get_columns(table_name)}
+            existing_indexes = {index["name"] for index in refreshed_inspector.get_indexes(table_name)}
+            for index_name, column_name in index_columns.items():
+                if column_name in existing_columns and index_name not in existing_indexes:
+                    connection.execute(text(f"CREATE INDEX {index_name} ON {table_name} ({column_name})"))
 
 
 def ensure_lesson_workflow_compat_columns() -> None:
@@ -255,6 +289,11 @@ async def health_check():
 @app.get("/api/ready", response_model=ReadinessResponse)
 async def readiness_check():
     return readiness.build_readiness_response(engine)
+
+
+@app.get("/api/transcription/status", response_model=ReadinessCheckResponse)
+async def transcription_status_check():
+    return readiness.check_transcription_ready()
 
 
 @app.get("/")

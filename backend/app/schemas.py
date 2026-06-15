@@ -152,6 +152,7 @@ class LessonTranscriptResponse(BaseModel):
 class LessonDocumentGenerateRequest(BaseModel):
     transcript_id: Optional[str] = None
     document_types: list[Literal["check_list", "pupil_mistakes"]] = Field(default_factory=list)
+    allow_unreviewed: bool = False
 
 
 class LessonGeneratedDocumentResponse(BaseModel):
@@ -164,6 +165,10 @@ class LessonGeneratedDocumentResponse(BaseModel):
     title: str
     filename: str
     content_type: str
+    provider: str
+    prompt_template_hash: Optional[str] = None
+    source_text_hash: Optional[str] = None
+    source_text_kind: str
     status: str
     error_message: Optional[str] = None
     created_at: datetime
@@ -352,6 +357,68 @@ class GenerationResultResponse(GenerationPromptResponse):
     validation: GenerationValidationResponse
     compile_check: GenerationCompileCheckResponse = Field(default_factory=GenerationCompileCheckResponse)
     token_usage: GenerationTokenUsageResponse = Field(default_factory=GenerationTokenUsageResponse)
+
+
+class GenerationJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    provider: str
+    model: Optional[str] = None
+    status: str
+    stage: str
+    request_hash: str
+    prompt_hash: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    result: Optional[GenerationResultResponse] = None
+    error_message: Optional[str] = None
+    attempts: int
+    queue_wait_seconds: Optional[float] = None
+    run_duration_seconds: Optional[float] = None
+    total_duration_seconds: Optional[float] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class GenerationJobStatusCountsResponse(BaseModel):
+    queued: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+    canceled: int = 0
+
+
+class GenerationJobStaleSampleResponse(BaseModel):
+    id: str
+    project_id: Optional[str] = None
+    status: str
+    stage: str
+    attempts: int
+    started_at: Optional[datetime] = None
+    updated_at: datetime
+
+
+class GenerationJobOperatorStatusResponse(BaseModel):
+    execution_mode: str
+    stale_after_seconds: int
+    counts: GenerationJobStatusCountsResponse
+    backlog: int
+    stale_running: int
+    stale_samples: list[GenerationJobStaleSampleResponse] = Field(default_factory=list)
+
+
+class GenerationJobRecoverStaleRequest(BaseModel):
+    stale_after_seconds: Optional[int] = Field(default=None, ge=0)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class GenerationJobRecoverStaleResponse(BaseModel):
+    recovered_count: int
+    recovered_job_ids: list[str] = Field(default_factory=list)
+    stale_after_seconds: int
 
 
 class GenerationPresetResponse(BaseModel):
