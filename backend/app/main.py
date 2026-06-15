@@ -13,7 +13,7 @@ from app.config import settings
 from app.database import Base, engine
 from app.logging_config import configure_logging, reset_request_id, set_request_id
 from app.routers import compile, export, files, generation, lessons, projects, pupils, templates
-from app.schemas import ReadinessResponse
+from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services import readiness
 
 
@@ -255,6 +255,11 @@ async def health_check():
 @app.get("/api/ready", response_model=ReadinessResponse)
 async def readiness_check():
     return readiness.build_readiness_response(engine)
+
+
+@app.get("/api/transcription/status", response_model=ReadinessCheckResponse)
+async def transcription_status_check():
+    return readiness.check_transcription_ready()
 
 
 @app.get("/")

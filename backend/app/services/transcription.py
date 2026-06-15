@@ -1,6 +1,7 @@
 import importlib
 import importlib.util
 import logging
+import shutil
 import sys
 import uuid
 from dataclasses import dataclass, field
@@ -82,7 +83,6 @@ class FakeTranscriptionProvider:
             provider=self.provider_name,
             segments=[TranscriptSegment(start=0.0, end=1.0, text=self.text)],
         )
-
 
 def load_legacy_transcibe_module() -> ModuleType:
     script_path = Path(__file__).resolve().parents[3] / "transcribe.py"
@@ -201,21 +201,128 @@ class FasterWhisperTranscriptionProvider:
             segments=segments,
         )
 
+def _runtime_binary_status(binary: str) -> dict[str, str | bool | None]:
+    path = shutil.which(binary)
+    return {"binary": binary, "available": path is not None, "path": path}
+
+def _dependency_status(module_name: str) -> dict[str, str | bool]:
+    # Readiness must not import Whisper runtimes because importing can eagerly load
+    # heavy native libraries or model bootstrap code; module discovery is sufficient
+    # to tell operators which optional install group is missing.
+    return {"module": module_name, "available": importlib.util.find_spec(module_name) is not None}
+
+def get_transcription_runtime_status() -> dict[str, object]:
+    """Return operator-facing readiness details for the configured transcription provider."""
+    provider = settings.TRANSCRIPTION_PROVIDER.strip().lower()
+    known_provider = provider in TRANSCRIPTION_PROVIDER_REGISTRY
+    effective_provider = provider if known_provider else "disabled"
+    details: dict[str, object] = {
+        "configured_provider": provider,
+        "effective_provider": effective_provider,
+        "available_providers": available_transcription_providers(),
+        "language": settings.TRANSCRIPTION_LANGUAGE,
+        "model": settings.TRANSCRIPTION_MODEL,
+        "beam_size": settings.TRANSCRIPTION_BEAM_SIZE,
+    }
+
+    if not known_provider:
+        details["fallback"] = "disabled"
+        return {
+            "status": "error",
+            "message": "Unknown transcription provider configured; falling back to disabled provider",
+            "details": details,
+        }
+
+    if provider == "disabled":
+        return {
+            "status": "skipped",
+            "message": "Transcription provider is disabled",
+            "details": details,
+        }
+
+    if provider == "fake":
+        return {
+            "status": "ok",
+            "message": "Fake transcription provider is available for local smoke tests",
+            "details": details,
+        }
+
+    ffmpeg = _runtime_binary_status("ffmpeg")
+    ffprobe = _runtime_binary_status("ffprobe")
+    details.update({"ffmpeg": ffmpeg, "ffprobe": ffprobe})
+
+    if provider == "faster_whisper":
+        dependency = _dependency_status("faster_whisper")
+        details.update(
+            {
+                "dependency": dependency,
+                "device": settings.TRANSCRIPTION_DEVICE,
+                "compute_type": settings.TRANSCRIPTION_COMPUTE_TYPE,
+                "word_timestamps": settings.TRANSCRIPTION_WORD_TIMESTAMPS,
+                "install_hint": "uv sync --group transcription",
+            }
+        )
+        missing = [
+            name
+            for name, available in {
+                "faster_whisper": bool(dependency["available"]),
+                "ffmpeg": bool(ffmpeg["available"]),
+                "ffprobe": bool(ffprobe["available"]),
+            }.items()
+            if not available
+        ]
+        if missing:
+            details["missing_requirements"] = missing
+            return {
+                "status": "missing",
+                "message": "faster-whisper transcription runtime is incomplete",
+                "details": details,
+            }
+        return {"status": "ok", "message": "faster-whisper transcription runtime is available", "details": details}
+
+    if provider in {"legacy_whisper", "whisper"}:
+        dependency = _dependency_status("whisper")
+        script_path = Path(__file__).resolve().parents[3] / "transcribe.py"
+        details.update(
+            {
+                "dependency": dependency,
+                "legacy_script_path": str(script_path),
+                "legacy_script_present": script_path.exists(),
+                "install_hint": "uv sync --group legacy-transcription",
+            }
+        )
+        missing = [
+            name
+            for name, available in {
+                "whisper": bool(dependency["available"]),
+                "ffmpeg": bool(ffmpeg["available"]),
+                "ffprobe": bool(ffprobe["available"]),
+                "transcribe.py": script_path.exists(),
+            }.items()
+            if not available
+        ]
+        if missing:
+            details["missing_requirements"] = missing
+            return {
+                "status": "missing",
+                "message": "Legacy Whisper transcription runtime is incomplete",
+                "details": details,
+            }
+        return {"status": "ok", "message": "Legacy Whisper transcription runtime is available", "details": details}
+
+    return {"status": "error", "message": "Unsupported transcription provider readiness branch", "details": details}
 
 def build_disabled_transcription_provider() -> TranscriptionProvider:
     return DisabledTranscriptionProvider()
 
-
 def build_fake_transcription_provider() -> TranscriptionProvider:
     return FakeTranscriptionProvider()
-
 
 def build_legacy_whisper_transcription_provider() -> TranscriptionProvider:
     return LegacyWhisperTranscriptionProvider(
         model_name=settings.TRANSCRIPTION_MODEL,
         beam_size=settings.TRANSCRIPTION_BEAM_SIZE,
     )
-
 
 def build_faster_whisper_transcription_provider() -> TranscriptionProvider:
     return FasterWhisperTranscriptionProvider(
@@ -235,10 +342,8 @@ TRANSCRIPTION_PROVIDER_REGISTRY = {
     "faster_whisper": build_faster_whisper_transcription_provider,
 }
 
-
 def available_transcription_providers() -> tuple[str, ...]:
     return tuple(sorted(TRANSCRIPTION_PROVIDER_REGISTRY))
-
 
 def build_transcription_provider() -> TranscriptionProvider:
     provider = settings.TRANSCRIPTION_PROVIDER.strip().lower()
@@ -253,12 +358,10 @@ def build_transcription_provider() -> TranscriptionProvider:
     logger.info("transcription provider selected provider=%s", provider if provider in TRANSCRIPTION_PROVIDER_REGISTRY else "disabled")
     return factory()
 
-
 def sanitize_provider_error(exc: Exception) -> str:
     message = str(exc).strip() or "Transcription provider failed"
     single_line = " ".join(message.split())
     return single_line[:500]
-
 
 def effective_transcript_text(transcript: LessonTranscript) -> str:
     return (transcript.edited_text if transcript.edited_text is not None else transcript.text) or ""

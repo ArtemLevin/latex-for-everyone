@@ -223,13 +223,18 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
         "check_artifact_dirs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+    )
 
     response = client.get("/api/ready")
 
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs"}
+    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription"}
     assert data["checks"]["database"]["status"] == "ok"
     assert data["checks"]["compiler"]["status"] == "ok"
 
@@ -258,6 +263,11 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
         "check_artifact_dirs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+    )
 
     response = client.get("/api/ready")
 
@@ -267,6 +277,60 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
     assert data["checks"]["compiler"]["status"] == "missing"
     assert data["checks"]["latex_packages"]["status"] == "skipped"
     assert data["checks"]["latex_packages"]["details"] == {"reason": "missing"}
+
+
+def test_transcription_status_disabled_provider_is_skipped(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRANSCRIPTION_PROVIDER", "disabled")
+
+    response = client.get("/api/transcription/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "skipped"
+    assert data["details"]["configured_provider"] == "disabled"
+    assert data["details"]["effective_provider"] == "disabled"
+
+
+def test_transcription_status_reports_missing_faster_whisper_runtime(monkeypatch):
+    from app.config import settings
+    from app.services import transcription
+
+    monkeypatch.setattr(settings, "TRANSCRIPTION_PROVIDER", "faster_whisper")
+    monkeypatch.setattr(transcription.importlib.util, "find_spec", lambda module_name: None)
+    monkeypatch.setattr(transcription.shutil, "which", lambda binary: None)
+
+    response = client.get("/api/transcription/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "missing"
+    assert data["details"]["dependency"] == {"module": "faster_whisper", "available": False}
+    assert set(data["details"]["missing_requirements"]) == {"faster_whisper", "ffmpeg", "ffprobe"}
+    assert data["details"]["install_hint"] == "uv sync --group transcription"
+
+
+def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
+    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
+    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
+    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["transcription"]["status"] == "missing"
 
 
 def test_root():
