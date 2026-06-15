@@ -168,7 +168,19 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
     assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id", "ix_lesson_transcripts_review_status"}.issubset(transcript_indexes)
     document_columns = {column["name"] for column in inspector.get_columns("lesson_generated_documents")}
-    assert {"lesson_id", "transcript_id", "document_type", "title", "filename", "storage_path", "status"}.issubset(document_columns)
+    assert {
+        "lesson_id",
+        "transcript_id",
+        "document_type",
+        "title",
+        "filename",
+        "storage_path",
+        "provider",
+        "prompt_template_hash",
+        "source_text_hash",
+        "source_text_kind",
+        "status",
+    }.issubset(document_columns)
     document_indexes = {index["name"] for index in inspector.get_indexes("lesson_generated_documents")}
     assert {
         "ix_lesson_generated_documents_lesson_id",
@@ -1015,10 +1027,19 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
 
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={})
 
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Review the transcript or set allow_unreviewed=true to create draft lesson documents"
+
+    response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"allow_unreviewed": True})
+
     assert response.status_code == 201
     documents = response.json()
     assert {document["document_type"] for document in documents} == {"check_list", "pupil_mistakes"}
-    assert all(document["status"] == "completed" for document in documents)
+    assert all(document["status"] == "draft" for document in documents)
+    assert all(document["provider"] == "fake" for document in documents)
+    assert all(document["source_text_kind"] == "raw" for document in documents)
+    assert all(len(document["source_text_hash"]) == 64 for document in documents)
+    assert all(len(document["prompt_template_hash"]) == 64 for document in documents)
     assert all(document["transcript_id"] == transcript["id"] for document in documents)
     assert all(document["download_url"].endswith(f"/documents/{document['id']}/download") for document in documents)
     assert all("/" not in document["filename"] and ".." not in document["filename"] for document in documents)
@@ -1040,7 +1061,7 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
 
     lesson_response = client.get(f"/api/lessons/{lesson['id']}")
     assert lesson_response.status_code == 200
-    assert lesson_response.json()["status"] == "completed"
+    assert lesson_response.json()["status"] == "transcript_ready"
 
 
 def test_lesson_document_generation_uses_reviewed_transcript_text(monkeypatch, tmp_path):
@@ -1054,6 +1075,9 @@ def test_lesson_document_generation_uses_reviewed_transcript_text(monkeypatch, t
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"transcript_id": transcript["id"]})
 
     assert response.status_code == 201
+    documents = response.json()
+    assert all(document["status"] == "completed" for document in documents)
+    assert all(document["source_text_kind"] == "edited" for document in documents)
     stored_files = list((tmp_path / "lesson_artifacts").rglob("*.tex"))
     combined_latex = "\n".join(path.read_text(encoding="utf-8") for path in stored_files)
     assert r"исправленный y\_2" in combined_latex
@@ -1077,7 +1101,7 @@ def test_lesson_document_download_respects_teacher_scope(monkeypatch, tmp_path):
     from app.dependencies import get_current_teacher_id
 
     lesson, _ = create_transcribed_lesson(monkeypatch, tmp_path)
-    documents = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={}).json()
+    documents = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"allow_unreviewed": True}).json()
 
     app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
     try:

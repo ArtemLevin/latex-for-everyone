@@ -152,6 +152,7 @@ class LessonTranscriptResponse(BaseModel):
 class LessonDocumentGenerateRequest(BaseModel):
     transcript_id: Optional[str] = None
     document_types: list[Literal["check_list", "pupil_mistakes"]] = Field(default_factory=list)
+    allow_unreviewed: bool = False
 
 
 class LessonGeneratedDocumentResponse(BaseModel):
@@ -164,6 +165,10 @@ class LessonGeneratedDocumentResponse(BaseModel):
     title: str
     filename: str
     content_type: str
+    provider: str
+    prompt_template_hash: Optional[str] = None
+    source_text_hash: Optional[str] = None
+    source_text_kind: str
     status: str
     error_message: Optional[str] = None
     created_at: datetime

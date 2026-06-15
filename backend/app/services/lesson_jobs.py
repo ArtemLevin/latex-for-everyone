@@ -269,7 +269,11 @@ class LessonProcessingJobService:
             raise LessonTranscriptNotFoundError("Completed lesson transcript not found")
         requested_types = document_types or list(DOCUMENT_TYPES)
         existing_documents = self.document_service.list_documents(db, lesson=lesson)
-        documents_by_type = {document.document_type: document for document in existing_documents if document.status == "completed"}
+        documents_by_type = {
+            document.document_type: document
+            for document in existing_documents
+            if document.status in {"completed", "draft"}
+        }
         missing_types = [document_type for document_type in requested_types if document_type not in documents_by_type]
 
         generated_documents: list[LessonGeneratedDocument] = []
@@ -280,6 +284,9 @@ class LessonProcessingJobService:
                 lesson=lesson,
                 document_types=missing_types,
                 transcript_id=transcript_id,
+                # Full-pipeline jobs may create draft documents from a fresh raw transcript;
+                # an explicit review later upgrades future documents to completed provenance.
+                allow_unreviewed=True,
             )
         all_documents = [documents_by_type[document_type] for document_type in requested_types if document_type in documents_by_type]
         all_documents.extend(generated_documents)

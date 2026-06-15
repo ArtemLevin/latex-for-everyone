@@ -34,6 +34,12 @@ LESSON_WORKFLOW_COMPAT_TABLE_COLUMNS = {
         "review_status": "VARCHAR(50) DEFAULT 'unreviewed'",
         "reviewed_at": "DATETIME",
     },
+    "lesson_generated_documents": {
+        "provider": "VARCHAR(100) DEFAULT 'unknown'",
+        "prompt_template_hash": "VARCHAR(64)",
+        "source_text_hash": "VARCHAR(64)",
+        "source_text_kind": "VARCHAR(50) DEFAULT 'raw'",
+    },
     "lesson_processing_jobs": {
         "document_types": "JSON DEFAULT '[]'",
     },
