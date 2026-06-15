@@ -102,7 +102,7 @@ frontend-check: ## Run node --check for frontend JavaScript files.
 
 .PHONY: frontend-e2e
 frontend-e2e: ## Run optional Playwright smoke test for the local frontend workflow.
-	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_frontend_e2e.py -q
+	$(PYTHONPATH_BACKEND) $(PYTHON) -m pytest $(BACKEND_DIR)/tests/test_frontend_e2e.py -q
 
 .PHONY: check
 check: compileall frontend-check test ## Run all local checks.

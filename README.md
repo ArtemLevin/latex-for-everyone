@@ -114,7 +114,7 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
-| `make frontend-e2e` | Run the optional Playwright browser smoke for the local frontend workflow. Skips when Playwright/browser binaries are unavailable. |
+| `make frontend-e2e` | Run optional Playwright browser smoke tests for local preview, generation duplicate-submit guard, and lesson review/document controls. Skips when Playwright/browser binaries are unavailable. |
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
@@ -152,6 +152,10 @@ Latexed exposes two operational status endpoints:
 - `GET /api/transcription/status` reports only the configured transcription runtime: selected/effective provider, optional Python package discovery, `ffmpeg`/`ffprobe` availability, model settings, and install hints.
 
 When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. When an enabled transcription provider is missing optional packages or media tools, readiness is also `degraded`; the editor and compile flows can continue, but lesson transcription must be fixed before use. Run `make latex-check` in the target environment to verify the TeX Live runtime.
+
+## Frontend browser smoke tests
+
+`make frontend-e2e` runs optional Playwright smoke tests against the static frontend served from `frontend/main.html`. The suite currently checks local/offline preview, browser-level duplicate AI generation submit protection with mocked `/api/generation/jobs`, and lesson transcript review/document controls with mocked lesson APIs. These tests are intentionally optional: if Playwright or browser binaries are not installed, pytest reports skips rather than failing the backend suite. Use them before merging frontend UX changes that static `node --check` and contract tests cannot fully exercise.
 
 ## Runtime artifacts and cleanup
 
