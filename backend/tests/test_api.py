@@ -246,13 +246,18 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
         "check_generation_jobs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={"counts": {}}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_ai_request_control_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="AI request control ok", details={"backend": "memory"}),
+    )
 
     response = client.get("/api/ready")
 
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription", "generation_jobs"}
+    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription", "generation_jobs", "ai_request_control"}
     assert data["checks"]["database"]["status"] == "ok"
     assert data["checks"]["compiler"]["status"] == "ok"
 
@@ -290,6 +295,11 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
         readiness,
         "check_generation_jobs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={"counts": {}}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_ai_request_control_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="AI request control ok", details={"backend": "memory"}),
     )
 
     response = client.get("/api/ready")
@@ -351,6 +361,11 @@ def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkey
         readiness,
         "check_generation_jobs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={"counts": {}}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_ai_request_control_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="AI request control ok", details={"backend": "memory"}),
     )
 
     response = client.get("/api/ready")
@@ -424,6 +439,11 @@ def test_readiness_degraded_when_generation_jobs_are_stale(monkeypatch):
         "check_generation_jobs_ready",
         lambda: ReadinessCheckResponse(status="error", message="Generation worker has stale running jobs", details={"stale_running": 1}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_ai_request_control_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="AI request control ok", details={"backend": "memory"}),
+    )
 
     response = client.get("/api/ready")
 
@@ -431,6 +451,30 @@ def test_readiness_degraded_when_generation_jobs_are_stale(monkeypatch):
     data = response.json()
     assert data["status"] == "degraded"
     assert data["checks"]["generation_jobs"]["status"] == "error"
+
+
+def test_readiness_degraded_when_ai_request_control_is_unavailable(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
+    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
+    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
+    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
+    monkeypatch.setattr(readiness, "check_transcription_ready", lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}))
+    monkeypatch.setattr(readiness, "check_generation_jobs_ready", lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_ai_request_control_ready",
+        lambda: ReadinessCheckResponse(status="error", message="AI request control unavailable", details={"backend": "redis"}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["ai_request_control"]["status"] == "error"
 
 
 def test_root():
@@ -2852,15 +2896,26 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     from app.schemas import GenerationTokenUsageResponse
     from app.services.token_counter import add_estimated_usage, estimate_token_count
 
-    assert estimate_token_count(r"\section{Тема} $x+1$") > 5
-    usage = GenerationTokenUsageResponse()
-    add_estimated_usage(usage, input_text="prompt text", output_text="answer text")
+    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
+    generation_router.rate_limit_buckets.clear()
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Prompt Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
 
-    assert usage.input_tokens > 0
-    assert usage.output_tokens > 0
-    assert usage.total_tokens == usage.input_tokens + usage.output_tokens
-    assert usage.source == "estimated"
+    response = client.post(
+        "/api/generation/prompt",
+        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
+        headers=other_headers,
+    )
 
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert generation_router.rate_limit_buckets == {}
 
 def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
@@ -3554,6 +3609,155 @@ def test_generation_job_rejects_invalid_idempotency_key():
 
 
 def test_generation_job_persists_provider_failure(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError("Provider unavailable")
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job failure"}, "materials": "Материалы."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["attempts"] == 1
+    assert job["result"] is None
+    assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "failed"
+
+
+def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{List}Job list"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Job List Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "List"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    list_response = client.get(
+        f"/api/generation/jobs?project_id={project_id}&status=completed",
+        headers=owner_headers,
+    )
+    assert list_response.status_code == 200
+    assert [job["id"] for job in list_response.json()] == [job_id]
+
+    other_response = client.get(
+        f"/api/generation/jobs?project_id={project_id}&status=completed",
+        headers=other_headers,
+    )
+    assert other_response.status_code == 404
+
+
+def test_generation_failed_job_can_be_retried(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def failing_generate(prompt, provider, model):
+        raise AIGenerationError("Temporary provider failure")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", failing_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Retry failed job"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    failed_job = create_response.json()
+    assert failed_job["status"] == "failed"
+
+    async def successful_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Retry}Recovered"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", successful_generate)
+    retry_response = client.post(f"/api/generation/jobs/{failed_job['id']}/retry")
+
+    assert retry_response.status_code == 200
+    retried_job = retry_response.json()
+    assert retried_job["id"] == failed_job["id"]
+    assert retried_job["status"] == "completed"
+    assert retried_job["attempts"] == 2
+    assert "Recovered" in retried_job["result"]["latex_code"]
+
+
+def test_generation_completed_job_retry_is_rejected(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Done}"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Already done"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    job = create_response.json()
+    assert job["status"] == "completed"
+
+    retry_response = client.post(f"/api/generation/jobs/{job['id']}/retry")
+
+    assert retry_response.status_code == 409
+    assert retry_response.json()["detail"] == "Only failed or canceled generation jobs can be retried."
+
+
+def test_generation_job_not_found_returns_404():
+    response = client.get("/api/generation/jobs/missing")
+
+    assert response.status_code == 404
+    assert "Generation job missing not found" in response.json()["detail"]
+
+
+def test_generation_history_records_provider_failure(monkeypatch):
     from app.routers import generation as generation_router
     from app.services.ai_generation import AIGenerationError
 

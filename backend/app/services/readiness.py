@@ -12,6 +12,7 @@ from app.config import settings
 from app.database import Base, SessionLocal, engine as default_engine
 from app.models import GenerationJob
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
+from app.services.ai_request_control import RequestControlBackendError, build_ai_request_control_service
 from app.services.transcription import get_transcription_runtime_status
 from app.time_utils import utc_now
 
@@ -140,6 +141,18 @@ def check_transcription_ready() -> ReadinessCheckResponse:
     status = get_transcription_runtime_status()
     return _check_response(str(status["status"]), str(status["message"]), dict(status["details"]))
 
+def check_ai_request_control_ready() -> ReadinessCheckResponse:
+    """Check whether the configured AI request-control backend can be reached."""
+    try:
+        details = build_ai_request_control_service().health_check()
+    except (RequestControlBackendError, ValueError) as exc:
+        return _check_response("error", "AI request-control backend is unavailable", {"error": str(exc)})
+    backend = str(details.get("backend", "memory"))
+    if backend == "memory":
+        return _check_response("ok", "AI request control uses process-local memory", details)
+    return _check_response("ok", "AI request control shared backend is available", details)
+
+
 def check_generation_jobs_ready(session_factory=SessionLocal) -> ReadinessCheckResponse:
     """Report generation worker backlog and stale running jobs without exposing prompts."""
     db = session_factory()
@@ -188,6 +201,8 @@ def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str
         return "degraded"
     if checks.get("generation_jobs") and checks["generation_jobs"].status != "ok":
         return "degraded"
+    if checks.get("ai_request_control") and checks["ai_request_control"].status != "ok":
+        return "degraded"
     return "ready"
 
 def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessResponse:
@@ -198,6 +213,7 @@ def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessRes
     artifact_dirs = check_artifact_dirs_ready()
     transcription = check_transcription_ready()
     generation_jobs = check_generation_jobs_ready()
+    ai_request_control = check_ai_request_control_ready()
     checks = {
         "database": database,
         "compiler": compiler,
@@ -205,5 +221,6 @@ def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessRes
         "artifact_dirs": artifact_dirs,
         "transcription": transcription,
         "generation_jobs": generation_jobs,
+        "ai_request_control": ai_request_control,
     }
     return ReadinessResponse(status=aggregate_readiness_status(checks), checks=checks)

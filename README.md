@@ -400,7 +400,11 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_GENERATION_JOB_TIMEOUT_SECONDS` | `0` | Optional timeout for persisted generation jobs; `0` disables timeout failure marking |
 | `AI_GENERATION_JOB_STALE_AFTER_SECONDS` | `0` | Optional stale-running job recovery threshold based on worker heartbeat/`updated_at`; `0` disables automatic recovery |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
-| `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint in-memory limit for AI endpoints; set `0` to disable |
+| `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint limit for AI endpoints; set `0` to disable |
+| `AI_REQUEST_CONTROL_BACKEND` | `memory` | Request-control backend for AI rate limits and duplicate guards: `memory` for single-process/local, `redis` for shared state across API replicas |
+| `AI_REQUEST_CONTROL_REDIS_URL` | unset | Redis connection URL required when `AI_REQUEST_CONTROL_BACKEND=redis` |
+| `AI_REQUEST_CONTROL_REDIS_PREFIX` | `latexed:ai_request_control` | Redis key prefix for AI request-control rate-limit and in-flight keys |
+| `AI_IN_FLIGHT_TTL_SECONDS` | `300` | Redis duplicate-submit guard TTL; prevents stuck in-flight keys if an API replica dies before cleanup |
 | `AI_DUPLICATE_RETRY_AFTER_SECONDS` | `3` | Retry hint returned when an identical generation request is already in flight |
 | `AI_IDEMPOTENCY_HEADER` | `Idempotency-Key` | Header accepted by `POST /api/generation/jobs` to replay the same persisted job for safe client retries |
 | `AI_IDEMPOTENCY_KEY_MAX_CHARS` | `128` | Maximum idempotency key length; keys may contain ASCII letters/digits plus `.`, `_`, `:`, and `-` |

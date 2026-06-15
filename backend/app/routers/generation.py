@@ -24,7 +24,12 @@ from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user_id
 from app.models import Project
 from app.services.ai_generation import AIGenerationError, AIGenerationService
-from app.services.ai_request_control import AIRequestControlService, DuplicateRequestError, InvalidIdempotencyKeyError
+from app.services.ai_request_control import (
+    DuplicateRequestError,
+    InvalidIdempotencyKeyError,
+    RequestControlBackendError,
+    build_ai_request_control_service,
+)
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_validator import validate_latex_document
 from app.services.generation_history_service import GenerationHistoryNotFoundError, GenerationHistoryService
@@ -50,10 +55,10 @@ generation_orchestrator = GenerationOrchestrator(
     compiler=generation_compiler,
     history_service=generation_history_service,
 )
-request_control_service = AIRequestControlService()
+request_control_service = build_ai_request_control_service()
 # Backwards-compatible aliases keep existing tests focused on endpoint behavior while router code uses the service boundary.
-rate_limit_buckets = request_control_service.rate_limiter.buckets
-active_generation_requests = request_control_service.in_flight.active_requests
+rate_limit_buckets = getattr(request_control_service.rate_limiter, "buckets", {})
+active_generation_requests = getattr(request_control_service.in_flight, "active_requests", {})
 GENERATION_DUPLICATE_RETRY_AFTER_SECONDS = settings.AI_DUPLICATE_RETRY_AFTER_SECONDS
 
 PRESETS: list[GenerationPresetResponse] = [
@@ -111,17 +116,28 @@ def begin_generation_request(request: Request, generation_request: GenerationReq
             detail="AI generation is already running for the same input. Wait for the current request to finish.",
             headers={"Retry-After": str(GENERATION_DUPLICATE_RETRY_AFTER_SECONDS)},
         ) from exc
+    except RequestControlBackendError as exc:
+        logger.exception("ai request-control backend failed during duplicate guard")
+        raise HTTPException(status_code=503, detail="AI request control is temporarily unavailable.") from exc
     return key
 
 
 def finish_generation_request(key: str | None) -> None:
-    request_control_service.finish_in_flight(key)
+    try:
+        request_control_service.finish_in_flight(key)
+    except RequestControlBackendError:
+        # The request is already ending; log cleanup failures so operators can inspect Redis health.
+        logger.exception("ai request-control backend failed during in-flight cleanup")
 
 
 def enforce_ai_rate_limit(request: Request) -> None:
     limit = settings.AI_RATE_LIMIT_PER_MINUTE
     client = get_request_client(request)
-    decision = request_control_service.check_rate_limit(key=f"{client}:{request.url.path}", limit=limit)
+    try:
+        decision = request_control_service.check_rate_limit(key=f"{client}:{request.url.path}", limit=limit)
+    except RequestControlBackendError as exc:
+        logger.exception("ai request-control backend failed during rate-limit check")
+        raise HTTPException(status_code=503, detail="AI request control is temporarily unavailable.") from exc
     if not decision.allowed:
         logger.warning(
             "ai rate limit exceeded client=%s path=%s limit=%s window_seconds=60 retry_after_seconds=%s",

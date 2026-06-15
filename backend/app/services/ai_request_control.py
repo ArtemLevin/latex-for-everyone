@@ -1,11 +1,18 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass
+import hashlib
 import math
 import re
 import time
+import uuid
+from typing import Any, Protocol
+
+from redis import Redis
+from redis.exceptions import RedisError
 
 
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9._:-]+$")
+SUPPORTED_REQUEST_CONTROL_BACKENDS = {"memory", "redis"}
 
 
 @dataclass(frozen=True)
@@ -14,13 +21,26 @@ class RateLimitDecision:
     retry_after_seconds: int = 0
 
 
-class RateLimiter:
-    """In-memory fixed-window limiter behind a service boundary.
+class RateLimitBackend(Protocol):
+    def check(self, *, key: str, limit: int, now: float | None = None) -> RateLimitDecision: ...
 
-    The implementation remains process-local for local/dev simplicity, but all
-    router code now depends on this boundary so PRs can swap in Redis or another
-    shared store without changing endpoint control flow.
-    """
+    def clear(self) -> None: ...
+
+
+class InFlightBackend(Protocol):
+    def begin(self, key: str) -> None: ...
+
+    def finish(self, key: str | None) -> None: ...
+
+    def clear(self) -> None: ...
+
+
+class RequestControlBackendError(RuntimeError):
+    """Raised when a shared request-control backend cannot be used."""
+
+
+class RateLimiter:
+    """In-memory fixed-window limiter for local/dev and single-process deployments."""
 
     def __init__(self, *, window_seconds: int = 60) -> None:
         self.window_seconds = window_seconds
@@ -44,12 +64,65 @@ class RateLimiter:
         self.buckets.clear()
 
 
+class RedisRateLimiter:
+    """Redis-backed sliding-window limiter shared by multiple API replicas."""
+
+    def __init__(self, redis_client: Redis, *, prefix: str, window_seconds: int = 60) -> None:
+        self.redis = redis_client
+        self.prefix = prefix.rstrip(":")
+        self.window_seconds = window_seconds
+
+    def _key(self, key: str) -> str:
+        # Hash untrusted client/path input so Redis keys stay compact and do not leak request paths into key listings.
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return f"{self.prefix}:rate:{digest}"
+
+    def check(self, *, key: str, limit: int, now: float | None = None) -> RateLimitDecision:
+        if limit <= 0:
+            return RateLimitDecision(allowed=True)
+
+        current_time = now if now is not None else time.time()
+        redis_key = self._key(key)
+        cutoff = current_time - self.window_seconds
+        member = f"{current_time:.6f}:{uuid.uuid4().hex}"
+        try:
+            # Keep the window mutation grouped so concurrent workers see a consistent enough shared count.
+            pipe = self.redis.pipeline(transaction=True)
+            pipe.zremrangebyscore(redis_key, 0, cutoff)
+            pipe.zcard(redis_key)
+            _, count = pipe.execute()
+            if int(count) >= limit:
+                oldest = self.redis.zrange(redis_key, 0, 0, withscores=True)
+                if oldest:
+                    retry_after = max(1, math.ceil(self.window_seconds - (current_time - float(oldest[0][1]))))
+                else:
+                    retry_after = self.window_seconds
+                return RateLimitDecision(allowed=False, retry_after_seconds=retry_after)
+
+            pipe = self.redis.pipeline(transaction=True)
+            pipe.zadd(redis_key, {member: current_time})
+            pipe.expire(redis_key, self.window_seconds * 2)
+            pipe.execute()
+            return RateLimitDecision(allowed=True)
+        except RedisError as exc:
+            raise RequestControlBackendError("Redis AI request-control rate limiter failed") from exc
+
+    def clear(self) -> None:
+        pattern = f"{self.prefix}:rate:*"
+        try:
+            keys = list(self.redis.scan_iter(match=pattern, count=100))
+            if keys:
+                self.redis.delete(*keys)
+        except RedisError as exc:
+            raise RequestControlBackendError("Redis AI request-control rate limiter cleanup failed") from exc
+
+
 class DuplicateRequestError(ValueError):
     """Raised when the same in-flight generation payload is already running."""
 
 
 class InFlightRequestRegistry:
-    """Tracks in-flight request fingerprints behind a replaceable boundary."""
+    """Tracks in-flight request fingerprints for a single API process."""
 
     def __init__(self) -> None:
         self.active_requests: dict[str, float] = {}
@@ -67,6 +140,45 @@ class InFlightRequestRegistry:
         self.active_requests.clear()
 
 
+class RedisInFlightRequestRegistry:
+    """Redis-backed duplicate-submit registry shared by API replicas."""
+
+    def __init__(self, redis_client: Redis, *, prefix: str, ttl_seconds: int) -> None:
+        self.redis = redis_client
+        self.prefix = prefix.rstrip(":")
+        self.ttl_seconds = max(1, ttl_seconds)
+
+    def _key(self, key: str) -> str:
+        digest = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        return f"{self.prefix}:inflight:{digest}"
+
+    def begin(self, key: str) -> None:
+        redis_key = self._key(key)
+        try:
+            # SET NX EX gives cross-process duplicate protection and self-heals if a worker dies before finish().
+            if not self.redis.set(redis_key, str(time.time()), nx=True, ex=self.ttl_seconds):
+                raise DuplicateRequestError(key)
+        except RedisError as exc:
+            raise RequestControlBackendError("Redis AI request-control in-flight registry failed") from exc
+
+    def finish(self, key: str | None) -> None:
+        if not key:
+            return
+        try:
+            self.redis.delete(self._key(key))
+        except RedisError as exc:
+            raise RequestControlBackendError("Redis AI request-control in-flight cleanup failed") from exc
+
+    def clear(self) -> None:
+        pattern = f"{self.prefix}:inflight:*"
+        try:
+            keys = list(self.redis.scan_iter(match=pattern, count=100))
+            if keys:
+                self.redis.delete(*keys)
+        except RedisError as exc:
+            raise RequestControlBackendError("Redis AI request-control in-flight cleanup failed") from exc
+
+
 class InvalidIdempotencyKeyError(ValueError):
     """Raised when a client-provided idempotency key is unsafe or too long."""
 
@@ -74,9 +186,37 @@ class InvalidIdempotencyKeyError(ValueError):
 class AIRequestControlService:
     """Coordinates rate-limit, duplicate-submit and idempotency-key concerns."""
 
-    def __init__(self) -> None:
-        self.rate_limiter = RateLimiter()
-        self.in_flight = InFlightRequestRegistry()
+    def __init__(
+        self,
+        *,
+        backend: str = "memory",
+        redis_url: str | None = None,
+        redis_prefix: str = "latexed:ai_request_control",
+        in_flight_ttl_seconds: int = 300,
+        redis_client: Redis | None = None,
+    ) -> None:
+        normalized_backend = backend.strip().lower()
+        if normalized_backend not in SUPPORTED_REQUEST_CONTROL_BACKENDS:
+            raise ValueError(
+                "Unsupported AI request-control backend "
+                f"{backend!r}. Use one of: {', '.join(sorted(SUPPORTED_REQUEST_CONTROL_BACKENDS))}."
+            )
+
+        self.backend = normalized_backend
+        self.redis: Redis | None = None
+        if self.backend == "redis":
+            if redis_client is None and not redis_url:
+                raise ValueError("AI_REQUEST_CONTROL_REDIS_URL is required when AI_REQUEST_CONTROL_BACKEND=redis.")
+            self.redis = redis_client or Redis.from_url(str(redis_url), decode_responses=True)
+            self.rate_limiter: RateLimitBackend = RedisRateLimiter(self.redis, prefix=redis_prefix)
+            self.in_flight: InFlightBackend = RedisInFlightRequestRegistry(
+                self.redis,
+                prefix=redis_prefix,
+                ttl_seconds=in_flight_ttl_seconds,
+            )
+        else:
+            self.rate_limiter = RateLimiter()
+            self.in_flight = InFlightRequestRegistry()
 
     def check_rate_limit(self, *, key: str, limit: int) -> RateLimitDecision:
         return self.rate_limiter.check(key=key, limit=limit)
@@ -99,3 +239,28 @@ class AIRequestControlService:
                 f"{max_chars} ASCII letters, digits, dots, underscores, colons, or hyphens."
             )
         return key
+
+    def health_check(self) -> dict[str, Any]:
+        details: dict[str, Any] = {"backend": self.backend}
+        if self.backend != "redis":
+            details["shared"] = False
+            return details
+        if self.redis is None:
+            raise RequestControlBackendError("Redis AI request-control client is not configured")
+        try:
+            self.redis.ping()
+        except RedisError as exc:
+            raise RequestControlBackendError("Redis AI request-control backend is unavailable") from exc
+        details["shared"] = True
+        return details
+
+
+def build_ai_request_control_service() -> AIRequestControlService:
+    from app.config import settings
+
+    return AIRequestControlService(
+        backend=settings.AI_REQUEST_CONTROL_BACKEND,
+        redis_url=settings.AI_REQUEST_CONTROL_REDIS_URL,
+        redis_prefix=settings.AI_REQUEST_CONTROL_REDIS_PREFIX,
+        in_flight_ttl_seconds=settings.AI_IN_FLIGHT_TTL_SECONDS,
+    )

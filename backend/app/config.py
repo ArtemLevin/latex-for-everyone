@@ -85,6 +85,10 @@ class Settings(BaseSettings):
     AI_GENERATION_JOB_STALE_AFTER_SECONDS: int = 0  # 0 disables stale running-job recovery
     AI_PROVIDER_STATUS_TIMEOUT: int = 10
     AI_RATE_LIMIT_PER_MINUTE: int = 20
+    AI_REQUEST_CONTROL_BACKEND: str = "memory"  # memory or redis
+    AI_REQUEST_CONTROL_REDIS_URL: Optional[str] = None
+    AI_REQUEST_CONTROL_REDIS_PREFIX: str = "latexed:ai_request_control"
+    AI_IN_FLIGHT_TTL_SECONDS: int = 300
     AI_DUPLICATE_RETRY_AFTER_SECONDS: int = 3
     AI_IDEMPOTENCY_HEADER: str = "Idempotency-Key"
     AI_IDEMPOTENCY_KEY_MAX_CHARS: int = 128

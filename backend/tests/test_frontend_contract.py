@@ -138,6 +138,8 @@ def test_operations_runbook_documents_operator_workflows():
         "make clean-artifacts-dry-run",
         "make latex-check",
         "TRANSCRIPTION_PROVIDER",
+        "AI_REQUEST_CONTROL_BACKEND=redis",
+        "ai_request_control",
         "Alert thresholds",
         "systemd generation worker",
         "Docker Compose generation worker",
