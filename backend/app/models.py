@@ -188,6 +188,7 @@ class GenerationJob(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True, index=True)
+    owner_id = Column(String(255), nullable=False, default="local-teacher", index=True)
     provider = Column(String(100), nullable=False)
     model = Column(String(255), nullable=True)
     status = Column(String(50), nullable=False, default="queued", index=True)
@@ -211,6 +212,7 @@ class GenerationHistory(Base):
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     project_id = Column(String(36), ForeignKey("projects.id"), nullable=True, index=True)
+    owner_id = Column(String(255), nullable=False, default="local-teacher", index=True)
     provider = Column(String(100), nullable=False)
     model = Column(String(255), nullable=True)
     status = Column(String(50), nullable=False, default="success")

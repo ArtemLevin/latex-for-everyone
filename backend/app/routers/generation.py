@@ -20,6 +20,8 @@ from app.schemas import (
 )
 from app.config import settings
 from app.database import get_db
+from app.dependencies import get_current_user_id
+from app.models import Project
 from app.services.ai_generation import AIGenerationError, AIGenerationService
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_validator import validate_latex_document
@@ -217,14 +219,28 @@ def build_generation_prompt_response(request: GenerationRequest) -> GenerationPr
     )
 
 
+def ensure_project_access(db: Session, *, project_id: str | None, owner_id: str) -> None:
+    if project_id is None:
+        return
+    project = db.query(Project).filter(Project.id == project_id, Project.owner_id == owner_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+
 @router.get("/presets", response_model=list[GenerationPresetResponse])
 async def list_generation_presets():
     return PRESETS
 
 
 @router.post("/prompt", response_model=GenerationPromptResponse)
-async def preview_generation_prompt(request: Request, generation_request: GenerationRequest):
+async def preview_generation_prompt(
+    request: Request,
+    generation_request: GenerationRequest,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     generation_request = prepare_generation_request(generation_request)
+    ensure_project_access(db, project_id=generation_request.project_id, owner_id=owner_id)
     enforce_ai_rate_limit(request)
     logger.info(
         "ai prompt preview requested provider=%s model=%s topic=%s materials_chars=%s",
@@ -241,15 +257,21 @@ async def list_generation_history_for_project(
     project_id: str,
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return generation_history_service.list_project_history(db, project_id, skip=skip, limit=limit)
+    ensure_project_access(db, project_id=project_id, owner_id=owner_id)
+    return generation_history_service.list_project_history(db, project_id, owner_id=owner_id, skip=skip, limit=limit)
 
 
 @router.get("/history/item/{history_id}", response_model=GenerationHistoryResponse)
-async def get_generation_history_item(history_id: str, db: Session = Depends(get_db)):
+async def get_generation_history_item(
+    history_id: str,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     try:
-        return generation_history_service.get_history_item(db, history_id)
+        return generation_history_service.get_history_item(db, history_id, owner_id=owner_id)
     except GenerationHistoryNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -301,8 +323,14 @@ async def validate_generated_latex(request: Request, validation_request: Generat
 
 
 @router.post("/generate", response_model=GenerationResultResponse)
-async def generate_latex(request: Request, generation_request: GenerationRequest, db: Session = Depends(get_db)):
+async def generate_latex(
+    request: Request,
+    generation_request: GenerationRequest,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     generation_request = prepare_generation_request(generation_request)
+    ensure_project_access(db, project_id=generation_request.project_id, owner_id=owner_id)
     active_request_key = begin_generation_request(request, generation_request)
     try:
         enforce_ai_rate_limit(request)
@@ -322,6 +350,7 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
                 generation_request=generation_request,
                 prompt_response=prompt_response,
                 request_sha=request_sha,
+                owner_id=owner_id,
             )
         except GenerationOrchestrationError as exc:
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
@@ -330,8 +359,14 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
 
 
 @router.post("/jobs", response_model=GenerationJobResponse, status_code=status.HTTP_202_ACCEPTED)
-async def create_generation_job(request: Request, generation_request: GenerationRequest, db: Session = Depends(get_db)):
+async def create_generation_job(
+    request: Request,
+    generation_request: GenerationRequest,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     generation_request = prepare_generation_request(generation_request)
+    ensure_project_access(db, project_id=generation_request.project_id, owner_id=owner_id)
     active_request_key = begin_generation_request(request, generation_request)
     try:
         enforce_ai_rate_limit(request)
@@ -342,6 +377,7 @@ async def create_generation_job(request: Request, generation_request: Generation
             generation_request=generation_request,
             request_hash=request_sha,
             prompt_hash=text_digest(prompt_response.prompt),
+            owner_id=owner_id,
         )
         # Persist the job first; this PR runs it inline, and a later worker can reuse the same job contract.
         job = await generation_job_service.run_job(
@@ -350,6 +386,7 @@ async def create_generation_job(request: Request, generation_request: Generation
             generation_request=generation_request,
             prompt_response=prompt_response,
             request_hash=request_sha,
+            owner_id=owner_id,
             orchestrator=generation_orchestrator,
         )
         return generation_job_service.to_response(job)
@@ -358,9 +395,13 @@ async def create_generation_job(request: Request, generation_request: Generation
 
 
 @router.get("/jobs/{job_id}", response_model=GenerationJobResponse)
-async def get_generation_job(job_id: str, db: Session = Depends(get_db)):
+async def get_generation_job(
+    job_id: str,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     try:
-        job = generation_job_service.get_job(db, job_id=job_id)
+        job = generation_job_service.get_job(db, job_id=job_id, owner_id=owner_id)
     except GenerationJobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return generation_job_service.to_response(job)

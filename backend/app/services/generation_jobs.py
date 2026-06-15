@@ -32,11 +32,13 @@ class GenerationJobService:
         *,
         generation_request: GenerationRequest,
         request_hash: str,
+        owner_id: str,
         prompt_hash: str | None = None,
     ) -> GenerationJob:
         job = GenerationJob(
             id=str(uuid.uuid4()),
             project_id=generation_request.project_id,
+            owner_id=owner_id,
             provider=generation_request.provider or "default",
             model=generation_request.model,
             status="queued",
@@ -59,8 +61,11 @@ class GenerationJobService:
         )
         return job
 
-    def get_job(self, db: Session, *, job_id: str) -> GenerationJob:
-        job = db.query(GenerationJob).filter(GenerationJob.id == job_id).first()
+    def get_job(self, db: Session, *, job_id: str, owner_id: str | None = None) -> GenerationJob:
+        query = db.query(GenerationJob).filter(GenerationJob.id == job_id)
+        if owner_id is not None:
+            query = query.filter(GenerationJob.owner_id == owner_id)
+        job = query.first()
         if not job:
             raise GenerationJobNotFoundError(f"Generation job {job_id} not found")
         return job
@@ -73,6 +78,7 @@ class GenerationJobService:
         generation_request: GenerationRequest,
         prompt_response: GenerationPromptResponse,
         request_hash: str,
+        owner_id: str,
         orchestrator: GenerationOrchestrator,
     ) -> GenerationJob:
         if job.status in TERMINAL_GENERATION_JOB_STATUSES:
@@ -86,6 +92,7 @@ class GenerationJobService:
                 generation_request=generation_request,
                 prompt_response=prompt_response,
                 request_sha=request_hash,
+                owner_id=owner_id,
             )
         except GenerationOrchestrationError as exc:
             self._mark_failed(db, job, exc.detail)

@@ -90,6 +90,7 @@ class GenerationOrchestrator:
         db: Session,
         *,
         generation_request: GenerationRequest,
+        owner_id: str,
         provider: str | None,
         model: str | None,
         prompt: str,
@@ -98,6 +99,7 @@ class GenerationOrchestrator:
         self.history_service.create_failure(
             db,
             project_id=generation_request.project_id,
+            owner_id=owner_id,
             provider=provider or generation_request.provider or "default",
             model=model or generation_request.model,
             fields=generation_request.fields,
@@ -111,6 +113,7 @@ class GenerationOrchestrator:
         db: Session,
         *,
         generation_request: GenerationRequest,
+        owner_id: str,
         provider: str,
         model: str,
         prompt: str,
@@ -123,6 +126,7 @@ class GenerationOrchestrator:
         self.history_service.create_success(
             db,
             project_id=generation_request.project_id,
+            owner_id=owner_id,
             provider=provider,
             model=model,
             fields=generation_request.fields,
@@ -219,6 +223,7 @@ class GenerationOrchestrator:
         generation_request: GenerationRequest,
         prompt_response: GenerationPromptResponse,
         request_sha: str,
+        owner_id: str,
     ) -> GenerationResultResponse:
         token_usage = GenerationTokenUsageResponse()
         add_estimated_usage(token_usage, input_text=prompt_response.prompt)
@@ -244,6 +249,7 @@ class GenerationOrchestrator:
             self._record_generation_failure(
                 db,
                 generation_request=generation_request,
+                owner_id=owner_id,
                 provider=generation_request.provider,
                 model=generation_request.model,
                 prompt=prompt_response.prompt,
@@ -279,6 +285,7 @@ class GenerationOrchestrator:
             self._record_generation_failure(
                 db,
                 generation_request=generation_request,
+                owner_id=owner_id,
                 provider=provider,
                 model=model,
                 prompt=prompt_response.prompt,
@@ -312,6 +319,7 @@ class GenerationOrchestrator:
         self._record_generation_success(
             db,
             generation_request=generation_request,
+            owner_id=owner_id,
             provider=provider,
             model=model,
             prompt=prompt_response.prompt,

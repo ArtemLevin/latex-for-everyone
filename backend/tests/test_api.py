@@ -85,7 +85,7 @@ def test_initialize_database_adds_generation_history_token_columns_for_stale_loc
     main_module.initialize_database()
 
     columns = {column["name"] for column in inspect(stale_engine).get_columns("generation_history")}
-    assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(columns)
+    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(columns)
 
 
 def test_initialize_database_adds_lesson_workflow_columns_for_stale_local_db(monkeypatch, tmp_path):
@@ -153,7 +153,8 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     }.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
-    assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
+    generation_history_indexes = {index["name"] for index in inspector.get_indexes("generation_history")}
+    assert {"ix_generation_history_project_id", "ix_generation_history_owner_id"}.issubset(generation_history_indexes)
     assert "ix_pupils_teacher_id" in {index["name"] for index in inspector.get_indexes("pupils")}
     lesson_indexes = {index["name"] for index in inspector.get_indexes("lessons")}
     assert {"ix_lessons_teacher_id", "ix_lessons_pupil_id", "ix_lessons_lesson_date"}.issubset(lesson_indexes)
@@ -197,11 +198,11 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_processing_jobs_status",
     }.issubset(job_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
-    assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
+    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
     generation_job_columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
-    assert {"project_id", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
+    assert {"project_id", "owner_id", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
     generation_job_indexes = {index["name"] for index in inspector.get_indexes("generation_jobs")}
-    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash"}.issubset(generation_job_indexes)
+    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash", "ix_generation_jobs_owner_id"}.issubset(generation_job_indexes)
 
 
 def test_health_check():
@@ -422,6 +423,26 @@ def test_delete_project():
     # Verify deletion
     response = client.get(f"/api/projects/{project_id}")
     assert response.status_code == 404
+
+
+def test_project_ownership_uses_trusted_user_header():
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    create_response = client.post("/api/projects/", json={"name": "Scoped Project"}, headers=owner_headers)
+    assert create_response.status_code == 201
+    project = create_response.json()
+
+    assert project["owner_id"] == "teacher-a"
+    assert client.get("/api/projects/", headers=owner_headers).json()[0]["id"] == project["id"]
+    assert client.get("/api/projects/", headers=other_headers).json() == []
+    assert client.get(f"/api/projects/{project['id']}", headers=other_headers).status_code == 404
+
+
+def test_blank_trusted_user_header_is_rejected():
+    response = client.get("/api/projects/", headers={"X-Latexed-User": "   "})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid user identity"
 
 
 def create_test_pupil(display_name: str = "Николь") -> dict:
@@ -1262,6 +1283,28 @@ def test_create_file():
     assert data["name"] == "test.tex"
 
 
+def test_direct_file_access_respects_project_owner():
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post("/api/projects/", json={"name": "Scoped File Project"}, headers=owner_headers)
+    project_id = project_response.json()["id"]
+    files_response = client.get(f"/api/files/project/{project_id}", headers=owner_headers)
+    file_id = files_response.json()[0]["id"]
+
+    assert client.get(f"/api/files/{file_id}", headers=owner_headers).status_code == 200
+    assert client.get(f"/api/files/{file_id}", headers=other_headers).status_code == 404
+
+    update_response = client.put(
+        f"/api/files/{file_id}",
+        json={"content": "Cross-user write must be denied"},
+        headers=other_headers,
+    )
+    assert update_response.status_code == 404
+
+    owner_file = client.get(f"/api/files/{file_id}", headers=owner_headers).json()
+    assert owner_file["content"] != "Cross-user write must be denied"
+
+
 def test_list_templates():
     response = client.get("/api/templates/")
     assert response.status_code == 200
@@ -1818,6 +1861,33 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
 
 
+def test_compile_project_respects_project_owner(monkeypatch):
+    from app.routers import compile as compile_router
+
+    called = False
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        nonlocal called
+        called = True
+        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Compile Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post("/api/compile/", json={"project_id": project_id}, headers=other_headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert called is False
+
+
 def test_compile_raw_rejects_too_many_files(monkeypatch):
     from app.config import settings
 
@@ -2232,6 +2302,37 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
         assert archive.read("notes.tex").decode("utf-8") == "Notes"
 
 
+def test_export_html_respects_project_owner(monkeypatch):
+    from app.routers import export as export_router
+
+    called = False
+
+    def fake_generate_html(main_content):
+        nonlocal called
+        called = True
+        return "<html>denied</html>"
+
+    monkeypatch.setattr(export_router.pdf_generator, "generate_html", fake_generate_html)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Export Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/export/html",
+        json={"project_id": project_id, "format": "html"},
+        headers=other_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert called is False
+
+
 def test_export_tex_rejects_path_traversal_filename(tmp_path, monkeypatch):
     from app.config import settings
 
@@ -2516,6 +2617,31 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
     assert response.status_code == 422
     assert "unsupported control characters" in response.json()["detail"]
+
+
+def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
+    generation_router.rate_limit_buckets.clear()
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Prompt Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/prompt",
+        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
+        headers=other_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert generation_router.rate_limit_buckets == {}
 
 
 def test_generation_generate_rejects_oversized_materials_before_provider_call(monkeypatch):
@@ -2855,6 +2981,51 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
     item_response = client.get(f"/api/generation/history/item/{item['id']}")
     assert item_response.status_code == 200
     assert item_response.json()["id"] == item["id"]
+
+
+def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Scoped}Owner-only generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Generation Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    generate_response = client.post(
+        "/api/generation/generate",
+        json={"project_id": project_id, "fields": {"topic": "История"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert generate_response.status_code == 200
+    history_item = client.get(f"/api/generation/history/project/{project_id}", headers=owner_headers).json()[0]
+
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "Job"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    assert client.get(f"/api/generation/history/project/{project_id}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/history/item/{history_item['id']}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
 
 
 def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):

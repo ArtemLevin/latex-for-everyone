@@ -186,7 +186,7 @@ Backend application code uses a shared `utc_now()` helper from `backend/app/time
 
 The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD, safe lesson-audio upload/storage, synchronous transcription, optional `faster-whisper`/legacy transcription adapters, and deterministic lesson-document generation for backend tests; frontend workflow and production AI/provider orchestration remain future work. The current checkout also contains the legacy transcription CLI and backend-owned lesson prompt templates:
 
-- `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
+- `transcribe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Keep it behind the contained legacy adapter; do not build router contracts around this script. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
 - `backend/app/prompts/lesson/check_list.txt` is the parameterized prompt template for a lesson checklist document. The former hardcoded student-like text has been replaced with template placeholders.
 - `backend/app/prompts/lesson/pupil_mistakes.txt` is the parameterized prompt template for a personalized mistakes-review document.
 
@@ -214,11 +214,17 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 
 ## Lesson backend foundation
 
-The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
+The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. Current ownership uses the MVP identity resolver described below: local development falls back to `LOCAL_USER_ID=local-teacher`, and trusted deployments can pass `X-Latexed-User` (or the header named by `TRUSTED_USER_HEADER`) from an authenticated reverse proxy. Project, file, compile/export, AI-generation, pupil, lesson, transcript, document, and processing-job queries are scoped through this identity so direct cross-user IDs return 404 instead of leaking resource existence.
 
 This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings` with checksum metadata and best-effort duration probing, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, transcript review endpoints for list/get/update before document generation, review-aware lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts, and processing-job endpoints for start/list/poll status. Lesson jobs can run inline for local/dev compatibility or be queued for background execution via persisted job ids. The transcription default provider is disabled, `faster_whisper` is an optional runtime install for production transcription, document generation defaults to a deterministic fake provider for backend coverage, and production external-worker orchestration remains future work; a lightweight frontend sidebar panel is available under the `Уроки` tab.
 
 The browser UI includes a lightweight `Уроки` sidebar tab loaded by `frontend/js/10-lessons.js`. It lets a teacher create/select pupils and lessons, record audio with `MediaRecorder` when available or upload an audio file manually, start transcription/document generation or the full processing job, review/edit transcript text before generation, and open generated document download links. The recording panel now chooses a supported audio MIME type, requires an explicit consent checkbox before microphone capture, shows recording state/timer/size metrics, and renders an audio preview before upload. When the backend is offline, the tab shows a degraded state instead of breaking the editor.
+
+## Auth and ownership MVP
+
+Latexed currently uses a trusted-header MVP instead of a full login/session system. In local single-user mode, requests without an identity header use `LOCAL_USER_ID=local-teacher`, preserving the existing development workflow. In a multi-user deployment, terminate real authentication at a trusted reverse proxy and pass the normalized user id to the backend in `X-Latexed-User` or in the header configured by `TRUSTED_USER_HEADER`. Do not expose this header directly to untrusted clients without a proxy that strips spoofed incoming values.
+
+The backend rejects blank or control-character identities, persists new projects with the resolved `owner_id`, and uses the same identity as the lesson `teacher_id`. Direct-ID access to another user's projects, files, compile history, generation history/jobs, exports, pupils, lessons, transcripts, documents, and processing jobs is intentionally reported as `404` to avoid revealing whether the resource exists.
 
 ## Frontend/backend integration
 
@@ -347,6 +353,8 @@ Deprecated compatibility routes are still available for compile history:
 | `AUTO_CREATE_TABLES` | `true` | Create SQLAlchemy tables on app startup for local/dev convenience; set `false` in production and use Alembic migrations |
 | `DEBUG` | `false` | Debug mode |
 | `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
+| `LOCAL_USER_ID` | `local-teacher` | Local single-user fallback identity used when no trusted user header is present |
+| `TRUSTED_USER_HEADER` | `X-Latexed-User` | Header name populated by a trusted auth proxy with the current user id; blank/control-character values are rejected |
 | `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; override with exact public/reverse-proxy hostnames in production |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
