@@ -112,4 +112,6 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "/generation/jobs/{id}/cancel" in readme
     assert "/generation/jobs/{id}/retry" in readme
+    assert "make generation-worker" in readme
+    assert "backend/scripts/run_generation_jobs.py" in readme
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js

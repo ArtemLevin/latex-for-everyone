@@ -130,6 +130,15 @@ docker-down: ## Stop docker compose services.
 docker-logs: ## Follow docker compose logs.
 	cd $(BACKEND_DIR) && docker-compose logs -f
 
+# ---- Workers ---------------------------------------------------------------
+.PHONY: generation-worker
+generation-worker: ## Run queued AI generation jobs for AI_GENERATION_JOB_EXECUTION_MODE=external.
+	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py
+
+.PHONY: generation-worker-once
+generation-worker-once: ## Run at most one queued AI generation job and exit.
+	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --once
+
 # ---- Cleanup ---------------------------------------------------------------
 .PHONY: clean
 clean: ## Remove local test databases and Python/test caches.
