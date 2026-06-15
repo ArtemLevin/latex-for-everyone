@@ -383,6 +383,44 @@ class GenerationJobResponse(BaseModel):
     updated_at: datetime
 
 
+class GenerationJobStatusCountsResponse(BaseModel):
+    queued: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+    canceled: int = 0
+
+
+class GenerationJobStaleSampleResponse(BaseModel):
+    id: str
+    project_id: Optional[str] = None
+    status: str
+    stage: str
+    attempts: int
+    started_at: Optional[datetime] = None
+    updated_at: datetime
+
+
+class GenerationJobOperatorStatusResponse(BaseModel):
+    execution_mode: str
+    stale_after_seconds: int
+    counts: GenerationJobStatusCountsResponse
+    backlog: int
+    stale_running: int
+    stale_samples: list[GenerationJobStaleSampleResponse] = Field(default_factory=list)
+
+
+class GenerationJobRecoverStaleRequest(BaseModel):
+    stale_after_seconds: Optional[int] = Field(default=None, ge=0)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class GenerationJobRecoverStaleResponse(BaseModel):
+    recovered_count: int
+    recovered_job_ids: list[str] = Field(default_factory=list)
+    stale_after_seconds: int
+
+
 class GenerationPresetResponse(BaseModel):
     id: str
     name: str

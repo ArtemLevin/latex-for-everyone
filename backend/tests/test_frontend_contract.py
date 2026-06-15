@@ -118,4 +118,6 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "--recover-stale-only" in readme
     assert "`generation_jobs` check" in readme
     assert "stale-running count" in readme
+    assert "/generation/jobs/operator/status" in readme
+    assert "/generation/jobs/operator/recover-stale" in readme
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js

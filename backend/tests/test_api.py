@@ -2866,236 +2866,6 @@ def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
 
-    def send_first_request():
-        first_result["response"] = client.post("/api/generation/generate", json=payload)
-
-    thread = threading.Thread(target=send_first_request)
-    thread.start()
-    try:
-        assert started.wait(timeout=5), "first generation request did not reach provider"
-
-        duplicate_response = client.post("/api/generation/generate", json=payload)
-
-        assert duplicate_response.status_code == 409
-        assert duplicate_response.headers["Retry-After"] == str(
-            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
-        )
-        assert duplicate_response.json()["detail"] == (
-            "AI generation is already running for the same input. Wait for the current request to finish."
-        )
-        assert calls == 1
-        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
-    finally:
-        release.set()
-        thread.join(timeout=5)
-        generation_router.rate_limit_buckets.clear()
-        generation_router.active_generation_requests.clear()
-
-    assert not thread.is_alive()
-    assert first_result["response"].status_code == 200
-    assert calls == 1
-
-
-def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    started = threading.Event()
-    release = threading.Event()
-    calls = 0
-
-    async def fake_generate(prompt, provider, model):
-        nonlocal calls
-        calls += 1
-        started.set()
-        assert release.wait(timeout=5), "timed out waiting to release first generation request"
-        return (
-            "```latex\n"
-            r"\section{Duplicate guard}Only one provider call"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    generation_router.active_generation_requests.clear()
-
-def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
-    from app.config import settings
-    from app.services.ai_generation import AIGenerationService
-
-    def send_first_request():
-        first_result["response"] = client.post("/api/generation/generate", json=payload)
-
-    thread = threading.Thread(target=send_first_request)
-    thread.start()
-    try:
-        assert started.wait(timeout=5), "first generation request did not reach provider"
-
-        duplicate_response = client.post("/api/generation/generate", json=payload)
-
-        assert duplicate_response.status_code == 409
-        assert duplicate_response.headers["Retry-After"] == str(
-            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
-        )
-        assert duplicate_response.json()["detail"] == (
-            "AI generation is already running for the same input. Wait for the current request to finish."
-        )
-        assert calls == 1
-        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
-    finally:
-        release.set()
-        thread.join(timeout=5)
-        generation_router.rate_limit_buckets.clear()
-        generation_router.active_generation_requests.clear()
-
-    assert not thread.is_alive()
-    assert first_result["response"].status_code == 200
-    assert calls == 1
-
-
-def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    started = threading.Event()
-    release = threading.Event()
-    calls = 0
-
-    async def fake_generate(prompt, provider, model):
-        nonlocal calls
-        calls += 1
-        started.set()
-        assert release.wait(timeout=5), "timed out waiting to release first generation request"
-        return (
-            "```latex\n"
-            r"\section{Duplicate guard}Only one provider call"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    generation_router.active_generation_requests.clear()
-
-def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
-    from app.config import settings
-    from app.services.ai_generation import AIGenerationService
-
-    def send_first_request():
-        first_result["response"] = client.post("/api/generation/generate", json=payload)
-
-    thread = threading.Thread(target=send_first_request)
-    thread.start()
-    try:
-        assert started.wait(timeout=5), "first generation request did not reach provider"
-
-        duplicate_response = client.post("/api/generation/generate", json=payload)
-
-        assert duplicate_response.status_code == 409
-        assert duplicate_response.headers["Retry-After"] == str(
-            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
-        )
-        assert duplicate_response.json()["detail"] == (
-            "AI generation is already running for the same input. Wait for the current request to finish."
-        )
-        assert calls == 1
-        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
-    finally:
-        release.set()
-        thread.join(timeout=5)
-        generation_router.rate_limit_buckets.clear()
-        generation_router.active_generation_requests.clear()
-
-    assert not thread.is_alive()
-    assert first_result["response"].status_code == 200
-    assert calls == 1
-
-
-def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    started = threading.Event()
-    release = threading.Event()
-    calls = 0
-
-    async def fake_generate(prompt, provider, model):
-        nonlocal calls
-        calls += 1
-        started.set()
-        assert release.wait(timeout=5), "timed out waiting to release first generation request"
-        return (
-            "```latex\n"
-            r"\section{Duplicate guard}Only one provider call"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    generation_router.active_generation_requests.clear()
-
-    payload = {
-        "fields": {"topic": "Дубликаты", "content_source_mode": "materials_only"},
-        "materials": "Пользовательские материалы должны отправляться только один раз.",
-    }
-    first_result = {}
-
-    def send_first_request():
-        first_result["response"] = client.post("/api/generation/generate", json=payload)
-
-    thread = threading.Thread(target=send_first_request)
-    thread.start()
-    try:
-        assert started.wait(timeout=5), "first generation request did not reach provider"
-
-        duplicate_response = client.post("/api/generation/generate", json=payload)
-
-        assert duplicate_response.status_code == 409
-        assert duplicate_response.headers["Retry-After"] == str(
-            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
-        )
-        assert duplicate_response.json()["detail"] == (
-            "AI generation is already running for the same input. Wait for the current request to finish."
-        )
-        assert calls == 1
-        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
-    finally:
-        release.set()
-        thread.join(timeout=5)
-        generation_router.rate_limit_buckets.clear()
-        generation_router.active_generation_requests.clear()
-
-    assert not thread.is_alive()
-    assert first_result["response"].status_code == 200
-    assert calls == 1
-
-
-def test_estimated_token_counter_splits_text_and_latex_commands():
-    from app.schemas import GenerationTokenUsageResponse
-    from app.services.token_counter import add_estimated_usage, estimate_token_count
-
-    assert estimate_token_count(r"\section{Тема} $x+1$") > 5
-    usage = GenerationTokenUsageResponse()
-    add_estimated_usage(usage, input_text="prompt text", output_text="answer text")
-
-    assert usage.input_tokens > 0
-    assert usage.output_tokens > 0
-    assert usage.total_tokens == usage.input_tokens + usage.output_tokens
-    assert usage.source == "estimated"
-
-
-def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
-    from app.config import settings
-    from app.services.ai_generation import AIGenerationService
-
     monkeypatch.setattr(settings, "AI_PROVIDER", "ollama")
     monkeypatch.setattr(settings, "OLLAMA_MODEL", "qwen2.5:3b")
 
@@ -3311,6 +3081,628 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
 
 def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
     from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Scoped}Owner-only generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Generation Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    generate_response = client.post(
+        "/api/generation/generate",
+        json={"project_id": project_id, "fields": {"topic": "История"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert generate_response.status_code == 200
+    history_item = client.get(f"/api/generation/history/project/{project_id}", headers=owner_headers).json()[0]
+
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "Job"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    assert client.get(f"/api/generation/history/project/{project_id}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/history/item/{history_item['id']}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
+
+
+def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Job}Persisted generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job API"}, "materials": "Материалы для job."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "completed"
+    assert job["stage"] == "completed"
+    assert job["attempts"] == 1
+    assert job["request_hash"]
+    assert job["prompt_hash"]
+    assert job["queue_wait_seconds"] is not None
+    assert job["run_duration_seconds"] is not None
+    assert job["total_duration_seconds"] is not None
+    assert job["result"]["status"] == "success"
+    assert "Persisted generation result" in job["result"]["latex_code"]
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["id"] == job["id"]
+    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
+
+
+def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        return (
+            "```latex\n"
+            r"\section{Idempotent}Single provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    payload = {"fields": {"topic": "Idempotency"}, "materials": "Материал."}
+    headers = {"Idempotency-Key": "generation-job-retry-1"}
+
+    first_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+    second_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert second_response.json()["id"] == first_response.json()["id"]
+    assert second_response.json()["idempotency_key"] == "generation-job-retry-1"
+    assert calls == 1
+
+
+def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Idempotent}Original"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    headers = {"Idempotency-Key": "generation-job-retry-2"}
+
+    first_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Первый"}, "materials": "Материал."},
+        headers=headers,
+    )
+    second_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Другой"}, "materials": "Материал."},
+        headers=headers,
+    )
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 409
+    assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
+
+
+def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Background}Completed from background task"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Background"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "queued"
+    assert job["stage"] == "queued"
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    completed_job = status_response.json()
+    assert completed_job["status"] == "completed"
+    assert "Completed from background task" in completed_job["result"]["latex_code"]
+
+
+def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        return (
+            "```latex\n"
+            r"\section{External}Should not run in request"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "External"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "queued"
+    assert job["stage"] == "queued"
+    assert job["queue_wait_seconds"] is None
+    assert calls == 0
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "queued"
+
+
+def test_generation_worker_runs_queued_external_job(monkeypatch):
+    import asyncio
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services import generation_job_worker
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Worker}Processed queued job"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_job_worker.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Worker"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    job = create_response.json()
+    assert job["status"] == "queued"
+
+    db = SessionTesting()
+    try:
+        processed = asyncio.run(generation_job_worker.run_generation_job_once(db=db, job_id=job["id"]))
+    finally:
+        db.close()
+
+    assert processed is not None
+    assert processed.status == "completed"
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    completed = status_response.json()
+    assert completed["status"] == "completed"
+    assert completed["run_duration_seconds"] is not None
+    assert "Processed queued job" in completed["result"]["latex_code"]
+
+
+def test_generation_worker_recovers_stale_running_job(monkeypatch):
+    from datetime import timedelta
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services import generation_job_worker
+    from app.time_utils import utc_now
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Stale}Recovered job"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Stale"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    job_id = create_response.json()["id"]
+
+    db = SessionTesting()
+    try:
+        job = generation_job_worker.generation_job_service.get_job(db, job_id=job_id)
+        stale_time = utc_now() - timedelta(seconds=300)
+        job.status = "running"
+        job.stage = "generating"
+        job.started_at = stale_time
+        job.updated_at = stale_time
+        db.add(job)
+        db.commit()
+
+        recovered = generation_job_worker.recover_stale_generation_jobs(
+            db=db,
+            stale_after_seconds=60,
+        )
+        recovered_job = generation_job_worker.generation_job_service.get_job(db, job_id=job_id)
+        recovered_state = {
+            "status": recovered_job.status,
+            "stage": recovered_job.stage,
+            "started_at": recovered_job.started_at,
+            "error_message": recovered_job.error_message,
+        }
+    finally:
+        db.close()
+
+    assert recovered == 1
+    assert recovered_state["status"] == "queued"
+    assert recovered_state["stage"] == "queued"
+    assert recovered_state["started_at"] is None
+    assert recovered_state["error_message"] == "Recovered from stale running state; queued for worker retry."
+
+
+def test_generation_operator_status_and_recover_stale_are_owner_scoped(monkeypatch):
+    from datetime import timedelta
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services.generation_job_worker import generation_job_service
+    from app.time_utils import utc_now
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Operator}Queued"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_STALE_AFTER_SECONDS", 60)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    owner_headers = {"X-Latexed-User": "operator-a"}
+    other_headers = {"X-Latexed-User": "operator-b"}
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Operator"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+
+    db = SessionTesting()
+    try:
+        job = generation_job_service.get_job(db, job_id=job_id)
+        stale_time = utc_now() - timedelta(seconds=300)
+        job.status = "running"
+        job.stage = "generating"
+        job.updated_at = stale_time
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
+
+    status_response = client.get("/api/generation/jobs/operator/status", headers=owner_headers)
+    assert status_response.status_code == 200
+    status_payload = status_response.json()
+    assert status_payload["counts"]["running"] == 1
+    assert status_payload["backlog"] == 1
+    assert status_payload["stale_running"] == 1
+    assert [sample["id"] for sample in status_payload["stale_samples"]] == [job_id]
+
+    other_status_response = client.get("/api/generation/jobs/operator/status", headers=other_headers)
+    assert other_status_response.status_code == 200
+    assert other_status_response.json()["backlog"] == 0
+
+    recover_response = client.post(
+        "/api/generation/jobs/operator/recover-stale",
+        json={"stale_after_seconds": 60},
+        headers=owner_headers,
+    )
+    assert recover_response.status_code == 200
+    recover_payload = recover_response.json()
+    assert recover_payload["recovered_count"] == 1
+    assert recover_payload["recovered_job_ids"] == [job_id]
+
+    recovered_job = client.get(f"/api/generation/jobs/{job_id}", headers=owner_headers).json()
+    assert recovered_job["status"] == "queued"
+    assert recovered_job["error_message"] == "Recovered from stale running state; queued for worker retry."
+
+
+def test_generation_job_cancel_queued_background_job(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def noop_background_runner(job_id):
+        return None
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
+    monkeypatch.setattr(generation_router, "run_generation_job_background", noop_background_runner)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Cancel"}, "materials": "Материал."},
+    )
+
+    assert create_response.status_code == 202
+    job = create_response.json()
+    assert job["status"] == "queued"
+
+    cancel_response = client.post(f"/api/generation/jobs/{job['id']}/cancel")
+
+    assert cancel_response.status_code == 200
+    canceled = cancel_response.json()
+    assert canceled["status"] == "canceled"
+    assert canceled["stage"] == "canceled"
+    assert canceled["error_message"] == "Generation job was canceled by user request."
+
+
+def test_generation_job_timeout_marks_job_failed(monkeypatch):
+    import asyncio
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def slow_generate(prompt, provider, model):
+        await asyncio.sleep(0.05)
+        return (
+            "```latex\n"
+            r"\section{Too slow}"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "inline")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", slow_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Timeout"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["error_message"] == "AI generation job timed out."
+
+
+def test_generation_job_rejects_invalid_idempotency_key():
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Bad key"}, "materials": "Материал."},
+        headers={"Idempotency-Key": "bad key with spaces"},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid idempotency key" in response.json()["detail"]
+
+
+def test_generation_job_persists_provider_failure(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError("Provider unavailable")
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job failure"}, "materials": "Материалы."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["attempts"] == 1
+    assert job["result"] is None
+    assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "failed"
+
+
+def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{List}Job list"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Job List Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "List"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    list_response = client.get(
+        f"/api/generation/jobs?project_id={project_id}&status=completed",
+        headers=owner_headers,
+    )
+    assert list_response.status_code == 200
+    assert [job["id"] for job in list_response.json()] == [job_id]
+
+    other_response = client.get(
+        f"/api/generation/jobs?project_id={project_id}&status=completed",
+        headers=other_headers,
+    )
+    assert other_response.status_code == 404
+
+
+def test_generation_failed_job_can_be_retried(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def failing_generate(prompt, provider, model):
+        raise AIGenerationError("Temporary provider failure")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", failing_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Retry failed job"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    failed_job = create_response.json()
+    assert failed_job["status"] == "failed"
+
+    async def successful_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Retry}Recovered"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", successful_generate)
+    retry_response = client.post(f"/api/generation/jobs/{failed_job['id']}/retry")
+
+    assert retry_response.status_code == 200
+    retried_job = retry_response.json()
+    assert retried_job["id"] == failed_job["id"]
+    assert retried_job["status"] == "completed"
+    assert retried_job["attempts"] == 2
+    assert "Recovered" in retried_job["result"]["latex_code"]
+
+
+def test_generation_completed_job_retry_is_rejected(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Done}"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Already done"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    job = create_response.json()
+    assert job["status"] == "completed"
+
+    retry_response = client.post(f"/api/generation/jobs/{job['id']}/retry")
+
+    assert retry_response.status_code == 409
+    assert retry_response.json()["detail"] == "Only failed or canceled generation jobs can be retried."
+
+
+def test_generation_job_not_found_returns_404():
+    response = client.get("/api/generation/jobs/missing")
+
+    assert response.status_code == 404
+    assert "Generation job missing not found" in response.json()["detail"]
+
+
+def test_generation_history_records_provider_failure(monkeypatch):
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):

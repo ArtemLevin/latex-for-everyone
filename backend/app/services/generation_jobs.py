@@ -3,6 +3,7 @@ import logging
 import uuid
 from datetime import timedelta
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import GenerationJob
@@ -159,6 +160,50 @@ class GenerationJobService:
                     stale_after_seconds,
                 )
         return recovered
+
+    def get_operator_status(
+        self,
+        db: Session,
+        *,
+        owner_id: str,
+        stale_after_seconds: int,
+        stale_sample_limit: int = 10,
+    ) -> dict:
+        rows = (
+            db.query(GenerationJob.status, func.count(GenerationJob.id))
+            .filter(GenerationJob.owner_id == owner_id)
+            .group_by(GenerationJob.status)
+            .all()
+        )
+        counts = {status: count for status, count in rows}
+        normalized_counts = {
+            "queued": counts.get("queued", 0),
+            "running": counts.get("running", 0),
+            "completed": counts.get("completed", 0),
+            "failed": counts.get("failed", 0),
+            "canceled": counts.get("canceled", 0),
+        }
+        stale_samples = []
+        stale_running = 0
+        if stale_after_seconds > 0:
+            cutoff = utc_now() - timedelta(seconds=stale_after_seconds)
+            stale_query = db.query(GenerationJob).filter(
+                GenerationJob.owner_id == owner_id,
+                GenerationJob.status == "running",
+                GenerationJob.updated_at < cutoff,
+            )
+            stale_running = stale_query.count()
+            stale_samples = (
+                stale_query.order_by(GenerationJob.updated_at.asc())
+                .limit(stale_sample_limit)
+                .all()
+            )
+        return {
+            "counts": normalized_counts,
+            "backlog": normalized_counts["queued"] + normalized_counts["running"],
+            "stale_running": stale_running,
+            "stale_samples": stale_samples,
+        }
 
     async def run_job(
         self,

@@ -10,7 +10,11 @@ from app.schemas import (
     GenerationProviderStatusResponse,
     GenerationRequest,
     GenerationHistoryResponse,
+    GenerationJobOperatorStatusResponse,
+    GenerationJobRecoverStaleRequest,
+    GenerationJobRecoverStaleResponse,
     GenerationJobResponse,
+    GenerationJobStaleSampleResponse,
     GenerationResultResponse,
     GenerationValidationRequest,
     GenerationValidationResponse,
@@ -490,6 +494,70 @@ async def list_generation_jobs(
         limit=limit,
     )
     return [generation_job_service.to_response(job) for job in jobs]
+
+
+@router.get("/jobs/operator/status", response_model=GenerationJobOperatorStatusResponse)
+async def get_generation_jobs_operator_status(
+    stale_sample_limit: int = Query(10, ge=0, le=50),
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    summary = generation_job_service.get_operator_status(
+        db,
+        owner_id=owner_id,
+        stale_after_seconds=settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS,
+        stale_sample_limit=stale_sample_limit,
+    )
+    return GenerationJobOperatorStatusResponse(
+        execution_mode=settings.AI_GENERATION_JOB_EXECUTION_MODE,
+        stale_after_seconds=settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS,
+        counts=summary["counts"],
+        backlog=summary["backlog"],
+        stale_running=summary["stale_running"],
+        stale_samples=[
+            GenerationJobStaleSampleResponse(
+                id=job.id,
+                project_id=job.project_id,
+                status=job.status,
+                stage=job.stage,
+                attempts=job.attempts,
+                started_at=job.started_at,
+                updated_at=job.updated_at,
+            )
+            for job in summary["stale_samples"]
+        ],
+    )
+    return [generation_job_service.to_response(job) for job in jobs]
+
+
+@router.post("/jobs/operator/recover-stale", response_model=GenerationJobRecoverStaleResponse)
+async def recover_stale_generation_jobs(
+    request_body: GenerationJobRecoverStaleRequest = GenerationJobRecoverStaleRequest(),
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    stale_after_seconds = (
+        request_body.stale_after_seconds
+        if request_body.stale_after_seconds is not None
+        else settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS
+    )
+    recovered = generation_job_service.recover_stale_running_jobs(
+        db,
+        stale_after_seconds=stale_after_seconds,
+        owner_id=owner_id,
+        limit=request_body.limit,
+    )
+    logger.warning(
+        "generation operator recovered stale jobs owner_id=%s count=%s stale_after_seconds=%s",
+        owner_id,
+        len(recovered),
+        stale_after_seconds,
+    )
+    return GenerationJobRecoverStaleResponse(
+        recovered_count=len(recovered),
+        recovered_job_ids=[job.id for job in recovered],
+        stale_after_seconds=stale_after_seconds,
+    )
 
 
 @router.get("/jobs/{job_id}", response_model=GenerationJobResponse)
