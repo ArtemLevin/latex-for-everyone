@@ -1,3 +1,4 @@
+import logging
 import uuid
 from dataclasses import dataclass
 
@@ -9,6 +10,9 @@ from app.schemas import LessonProcessingJobCreate
 from app.services.lesson_documents import DOCUMENT_TYPES, LessonDocumentGenerationService, LessonTranscriptNotFoundError
 from app.services.transcription import RecordingNotFoundError, TranscriptionService
 from app.time_utils import utc_now
+
+
+logger = logging.getLogger(__name__)
 
 
 TERMINAL_JOB_STATUSES = {"completed", "failed", "canceled"}
@@ -73,6 +77,7 @@ class LessonProcessingJobService:
         return job
 
     def create_job(self, db: Session, *, lesson: Lesson, request: LessonProcessingJobCreate) -> LessonProcessingJob:
+        logger.info("lesson job create requested lesson_id=%s teacher_id=%s job_type=%s recording_id=%s transcript_id=%s document_types=%s", lesson.id, lesson.teacher_id, request.job_type, request.recording_id, request.transcript_id, list(request.document_types))
         self._ensure_no_active_job(db, lesson=lesson, job_type=request.job_type)
         job = LessonProcessingJob(
             id=str(uuid.uuid4()),
@@ -90,22 +95,27 @@ class LessonProcessingJobService:
         db.add(job)
         db.commit()
         db.refresh(job)
+        logger.info("lesson job queued job_id=%s lesson_id=%s job_type=%s stage=%s", job.id, lesson.id, job.job_type, job.stage)
         return job
 
     async def create_and_run_job(self, db: Session, *, lesson: Lesson, request: LessonProcessingJobCreate) -> LessonProcessingJob:
+        logger.info("lesson job create_and_run requested lesson_id=%s job_type=%s", lesson.id, request.job_type)
         job = self.create_job(db, lesson=lesson, request=request)
         await self.run_job(db, lesson=lesson, job=job, request=request)
         db.refresh(job)
         return job
 
     async def run_existing_job(self, db: Session, *, job_id: str) -> LessonProcessingJob:
+        logger.info("lesson job run_existing requested job_id=%s", job_id)
         job = db.query(LessonProcessingJob).filter(LessonProcessingJob.id == job_id).first()
         if not job:
             raise LessonJobNotFoundError("Lesson processing job not found")
         if job.status in TERMINAL_JOB_STATUSES:
+            logger.info("lesson job run_existing skipped terminal job_id=%s status=%s", job.id, job.status)
             return job
         lesson = db.query(Lesson).filter(Lesson.id == job.lesson_id, Lesson.teacher_id == job.teacher_id).first()
         if not lesson:
+            logger.warning("lesson job run_existing lesson missing job_id=%s lesson_id=%s teacher_id=%s", job.id, job.lesson_id, job.teacher_id)
             self._mark_failed(db, job, "Lesson not found")
             return job
         request = self._request_from_job(job)
@@ -114,6 +124,7 @@ class LessonProcessingJobService:
         return job
 
     async def run_job(self, db: Session, *, lesson: Lesson, job: LessonProcessingJob, request: LessonProcessingJobCreate) -> LessonProcessingJob:
+        logger.info("lesson job run started job_id=%s lesson_id=%s job_type=%s", job.id, lesson.id, request.job_type)
         self._mark_running(db, job, stage="starting")
         try:
             if request.job_type == "transcribe":
@@ -148,7 +159,9 @@ class LessonProcessingJobService:
                     document_types=request.document_types,
                 )
             self._mark_completed(db, job)
+            logger.info("lesson job run completed job_id=%s lesson_id=%s job_type=%s document_count=%s transcript_id=%s", job.id, lesson.id, job.job_type, len(job.document_ids or []), job.transcript_id)
         except Exception as exc:
+            logger.exception("lesson job run failed job_id=%s lesson_id=%s job_type=%s error_type=%s", job.id, lesson.id, job.job_type, type(exc).__name__)
             self._mark_failed(db, job, str(exc) or "Lesson processing job failed")
         return job
 
@@ -183,12 +196,14 @@ class LessonProcessingJobService:
         job.attempts += 1
         db.commit()
         db.refresh(job)
+        logger.info("lesson job marked running job_id=%s stage=%s attempts=%s", job.id, job.stage, job.attempts)
 
     def _mark_stage(self, db: Session, job: LessonProcessingJob, *, stage: str) -> None:
         job.stage = stage
         job.updated_at = utc_now()
         db.commit()
         db.refresh(job)
+        logger.info("lesson job stage changed job_id=%s stage=%s", job.id, stage)
 
     def _mark_completed(self, db: Session, job: LessonProcessingJob) -> None:
         now = utc_now()
@@ -199,6 +214,7 @@ class LessonProcessingJobService:
         job.error_message = None
         db.commit()
         db.refresh(job)
+        logger.info("lesson job marked completed job_id=%s finished_at=%s", job.id, job.finished_at)
 
     def _mark_failed(self, db: Session, job: LessonProcessingJob, message: str) -> None:
         now = utc_now()
@@ -209,6 +225,7 @@ class LessonProcessingJobService:
         job.error_message = " ".join(message.split())[:500]
         db.commit()
         db.refresh(job)
+        logger.warning("lesson job marked failed job_id=%s message_chars=%s", job.id, len(job.error_message or ""))
 
     async def _run_transcription_stage(
         self,
@@ -218,6 +235,7 @@ class LessonProcessingJobService:
         job: LessonProcessingJob,
         recording_id: str | None,
     ) -> LessonTranscript:
+        logger.info("lesson job transcription stage started job_id=%s lesson_id=%s recording_id=%s", job.id, lesson.id, recording_id)
         self._mark_stage(db, job, stage="transcribing")
         transcript = self.transcription_service.transcribe_lesson(
             db,
@@ -231,7 +249,9 @@ class LessonProcessingJobService:
         db.commit()
         db.refresh(job)
         if transcript.status != "completed":
+            logger.warning("lesson job transcription stage failed job_id=%s transcript_id=%s status=%s", job.id, transcript.id, transcript.status)
             raise RecordingNotFoundError(transcript.error_message or "Transcription failed")
+        logger.info("lesson job transcription stage completed job_id=%s transcript_id=%s recording_id=%s", job.id, transcript.id, transcript.recording_id)
         return transcript
 
     async def _run_document_stage(
@@ -243,21 +263,30 @@ class LessonProcessingJobService:
         transcript_id: str | None,
         document_types: list[str],
     ) -> list[LessonGeneratedDocument]:
+        logger.info("lesson job document stage started job_id=%s lesson_id=%s transcript_id=%s requested_types=%s", job.id, lesson.id, transcript_id, document_types)
         self._mark_stage(db, job, stage="generating_documents")
         if transcript_id and not self._transcript_exists(db, lesson=lesson, transcript_id=transcript_id):
             raise LessonTranscriptNotFoundError("Completed lesson transcript not found")
         requested_types = document_types or list(DOCUMENT_TYPES)
         existing_documents = self.document_service.list_documents(db, lesson=lesson)
-        documents_by_type = {document.document_type: document for document in existing_documents if document.status == "completed"}
+        documents_by_type = {
+            document.document_type: document
+            for document in existing_documents
+            if document.status in {"completed", "draft"}
+        }
         missing_types = [document_type for document_type in requested_types if document_type not in documents_by_type]
 
         generated_documents: list[LessonGeneratedDocument] = []
+        logger.info("lesson job document stage planned job_id=%s requested_types=%s existing_types=%s missing_types=%s", job.id, requested_types, sorted(documents_by_type), missing_types)
         if missing_types:
             generated_documents = await self.document_service.generate_documents(
                 db,
                 lesson=lesson,
                 document_types=missing_types,
                 transcript_id=transcript_id,
+                # Full-pipeline jobs may create draft documents from a fresh raw transcript;
+                # an explicit review later upgrades future documents to completed provenance.
+                allow_unreviewed=True,
             )
         all_documents = [documents_by_type[document_type] for document_type in requested_types if document_type in documents_by_type]
         all_documents.extend(generated_documents)
@@ -269,6 +298,7 @@ class LessonProcessingJobService:
         job.updated_at = utc_now()
         db.commit()
         db.refresh(job)
+        logger.info("lesson job document stage completed job_id=%s document_ids=%s transcript_id=%s", job.id, job.document_ids, job.transcript_id)
         return all_documents
 
     def _latest_completed_transcript(self, db: Session, *, lesson: Lesson) -> LessonTranscript | None:
@@ -299,8 +329,10 @@ async def run_lesson_processing_job_once(job_id: str) -> None:
     entrypoints later because it receives only the persisted job id.
     """
 
+    logger.info("lesson background job runner opening db session job_id=%s", job_id)
     db = SessionLocal()
     try:
         await LessonProcessingJobService().run_existing_job(db, job_id=job_id)
     finally:
         db.close()
+        logger.info("lesson background job runner closed db session job_id=%s", job_id)
