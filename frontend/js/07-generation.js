@@ -62,7 +62,9 @@
         'regenerateSafeBtn',
         'regenerateRichBtn',
         'insertLastGeneratedBtn',
-        'generateLatexBtn'
+        'generateLatexBtn',
+        'cancelGenerationJobBtn',
+        'retryGenerationJobBtn'
     ];
 
     function setGenerationActionButtonsDisabled(isDisabled, activeButtonId = '') {
@@ -244,6 +246,14 @@
         const errors = validation.errors?.length ? ` Ошибки: ${validation.errors.join(' ')}` : '';
         const warnings = validation.warnings?.length ? ` Предупреждения: ${validation.warnings.join(' ')}` : '';
         return `${validation.valid ? 'LaTeX прошел структурную проверку.' : 'LaTeX не прошел структурную проверку.'}${errors}${warnings}`;
+    }
+
+
+    function setGenerationJobActionsVisible({ cancel = false, retry = false } = {}) {
+        const cancelButton = document.getElementById('cancelGenerationJobBtn');
+        if (cancelButton) cancelButton.style.display = cancel ? 'inline-flex' : 'none';
+        const retryButton = document.getElementById('retryGenerationJobBtn');
+        if (retryButton) retryButton.style.display = retry ? 'inline-flex' : 'none';
     }
 
     function setGenerationRetryActionsVisible(visible, allowInsert = false) {
@@ -536,17 +546,27 @@
 
     async function waitForGenerationJob(job) {
         let currentJob = job;
+        currentGenerationJob = currentJob;
         for (let attempt = 0; attempt < 120; attempt += 1) {
+            currentGenerationJob = currentJob;
             if (currentJob.status === 'completed' && currentJob.result) {
+                setGenerationJobActionsVisible();
                 return currentJob.result;
             }
             if (currentJob.status === 'failed') {
+                setGenerationJobActionsVisible({ retry: true });
                 throw new Error(currentJob.error_message || 'AI generation job failed.');
             }
+            if (currentJob.status === 'canceled') {
+                setGenerationJobActionsVisible({ retry: true });
+                throw new Error(currentJob.error_message || 'AI generation job was canceled.');
+            }
+            setGenerationJobActionsVisible({ cancel: true });
             setGenerationStatus(`AI-генерация: ${currentJob.status} · ${currentJob.stage}`);
             await sleep(1000);
             currentJob = await apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`);
         }
+        setGenerationJobActionsVisible({ retry: Boolean(currentGenerationJob) });
         throw new Error('AI generation job did not finish before the polling timeout.');
     }
 
@@ -567,6 +587,7 @@
             },
             body: JSON.stringify(request)
         });
+        currentGenerationJob = job;
         return waitForGenerationJob(job);
     }
 
@@ -600,6 +621,8 @@
         setGenerationActionButtonsDisabled(true, loadingButtonId);
         setButtonLoading(loadingButtonId, true, 'Генерация...');
         setGenerationRetryActionsVisible(false);
+        setGenerationJobActionsVisible();
+        currentGenerationJob = null;
         startGenerationFunWait();
         document.getElementById('statusText').textContent = 'AI-генерация — творим чудо...';
 
@@ -689,4 +712,34 @@
             return;
         }
         await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+    }
+
+
+    async function cancelCurrentGenerationJob() {
+        if (!currentGenerationJob) {
+            showToast('Нет активного AI job для отмены', 'error');
+            return;
+        }
+        const job = await apiRequest(`/generation/jobs/${encodeURIComponent(currentGenerationJob.id)}/cancel`, { method: 'POST' });
+        currentGenerationJob = job;
+        setGenerationJobActionsVisible({ retry: true });
+        setGenerationStatus('AI generation job отменён.', 'error');
+        showToast('AI generation job отменён', 'success');
+    }
+
+    async function retryCurrentGenerationJob() {
+        if (!currentGenerationJob) {
+            showToast('Нет AI job для повтора', 'error');
+            return;
+        }
+        setGenerationJobActionsVisible({ cancel: true });
+        const job = await apiRequest(`/generation/jobs/${encodeURIComponent(currentGenerationJob.id)}/retry`, { method: 'POST' });
+        currentGenerationJob = job;
+        const result = await waitForGenerationJob(job);
+        lastGenerationResult = result;
+        lastGenerationRawOutput = result.raw_output || '';
+        renderGenerationResultDetails(result);
+        setGenerationStatus('AI generation job повторён. Проверьте результат перед вставкой.', 'success');
+        setGenerationRetryActionsVisible(true, Boolean(result.latex_code));
+        showToast('AI job повторён', 'success');
     }

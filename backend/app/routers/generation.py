@@ -24,7 +24,7 @@ from app.services.ai_request_control import AIRequestControlService, DuplicateRe
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_validator import validate_latex_document
 from app.services.generation_history_service import GenerationHistoryNotFoundError, GenerationHistoryService
-from app.services.generation_jobs import GenerationJobNotFoundError, GenerationJobService
+from app.services.generation_jobs import GenerationJobNotFoundError, GenerationJobRetryError, GenerationJobService
 from app.services.prompt_builder import build_latex_generation_prompt
 from app.services.generation_orchestrator import (
     GenerationOrchestrationError,
@@ -253,6 +253,40 @@ async def run_generation_job_background(job_id: str) -> None:
         db.close()
 
 
+def build_generation_request_from_job(job) -> GenerationRequest:
+    return GenerationRequest(**job.request_payload)
+
+
+async def run_generation_job_by_mode(
+    *,
+    db: Session,
+    job,
+    generation_request: GenerationRequest,
+    prompt_response: GenerationPromptResponse,
+    owner_id: str,
+    background_tasks: BackgroundTasks,
+) -> GenerationJobResponse:
+    execution_mode = settings.AI_GENERATION_JOB_EXECUTION_MODE.lower()
+    if execution_mode == "background":
+        background_tasks.add_task(run_generation_job_background, job.id)
+        logger.info("generation job scheduled background job_id=%s owner_id=%s", job.id, owner_id)
+        return generation_job_service.to_response(job)
+    if execution_mode != "inline":
+        logger.warning("unknown generation job execution mode mode=%s; falling back to inline", execution_mode)
+
+    job = await generation_job_service.run_job(
+        db,
+        job=job,
+        generation_request=generation_request,
+        prompt_response=prompt_response,
+        request_hash=job.request_hash,
+        owner_id=owner_id,
+        orchestrator=generation_orchestrator,
+        timeout_seconds=settings.AI_GENERATION_JOB_TIMEOUT_SECONDS,
+    )
+    return generation_job_service.to_response(job)
+
+
 @router.get("/presets", response_model=list[GenerationPresetResponse])
 async def list_generation_presets():
     return PRESETS
@@ -414,33 +448,44 @@ async def create_generation_job(
         prompt_response = build_generation_prompt_response(generation_request)
         job = generation_job_service.create_job(
             db,
+            job=job,
             generation_request=generation_request,
             request_hash=request_sha,
             prompt_hash=text_digest(prompt_response.prompt),
             owner_id=owner_id,
             idempotency_key=idempotency_key,
         )
-        execution_mode = settings.AI_GENERATION_JOB_EXECUTION_MODE.lower()
-        if execution_mode == "background":
-            background_tasks.add_task(run_generation_job_background, job.id)
-            logger.info("generation job scheduled background job_id=%s owner_id=%s", job.id, owner_id)
-            return generation_job_service.to_response(job)
-        if execution_mode != "inline":
-            logger.warning("unknown generation job execution mode mode=%s; falling back to inline", execution_mode)
-
-        job = await generation_job_service.run_job(
-            db,
+        return await run_generation_job_by_mode(
+            db=db,
             job=job,
             generation_request=generation_request,
             prompt_response=prompt_response,
-            request_hash=request_sha,
             owner_id=owner_id,
-            orchestrator=generation_orchestrator,
-            timeout_seconds=settings.AI_GENERATION_JOB_TIMEOUT_SECONDS,
+            background_tasks=background_tasks,
         )
-        return generation_job_service.to_response(job)
     finally:
         finish_generation_request(active_request_key)
+
+
+@router.get("/jobs", response_model=list[GenerationJobResponse])
+async def list_generation_jobs(
+    project_id: str | None = Query(default=None),
+    job_status: str | None = Query(default=None, alias="status"),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    ensure_project_access(db, project_id=project_id, owner_id=owner_id)
+    jobs = generation_job_service.list_jobs(
+        db,
+        owner_id=owner_id,
+        project_id=project_id,
+        status=job_status,
+        skip=skip,
+        limit=limit,
+    )
+    return [generation_job_service.to_response(job) for job in jobs]
 
 
 @router.get("/jobs/{job_id}", response_model=GenerationJobResponse)
@@ -454,6 +499,34 @@ async def get_generation_job(
     except GenerationJobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return generation_job_service.to_response(job)
+
+
+@router.post("/jobs/{job_id}/retry", response_model=GenerationJobResponse)
+async def retry_generation_job(
+    request: Request,
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    enforce_ai_rate_limit(request)
+    try:
+        job = generation_job_service.retry_job(db, job_id=job_id, owner_id=owner_id)
+    except GenerationJobRetryError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except GenerationJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    generation_request = build_generation_request_from_job(job)
+    prompt_response = build_generation_prompt_response(generation_request)
+    return await run_generation_job_by_mode(
+        db=db,
+        job=job,
+        generation_request=generation_request,
+        prompt_response=prompt_response,
+        owner_id=owner_id,
+        background_tasks=background_tasks,
+    )
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=GenerationJobResponse)

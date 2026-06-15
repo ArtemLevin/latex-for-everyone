@@ -541,6 +541,8 @@
                     <button type="button" class="btn btn-secondary" id="regenerateSafeBtn" onclick="regenerateWithLatexMode('safe')" style="display: none;">Перегенерировать safe</button>
                     <button type="button" class="btn btn-secondary" id="regenerateRichBtn" onclick="regenerateWithLatexMode('rich')" style="display: none;">Перегенерировать rich</button>
                     <button type="button" class="btn btn-secondary" id="insertLastGeneratedBtn" onclick="insertLastGeneratedLatex()" style="display: none;">Вставить всё равно</button>
+                    <button type="button" class="btn btn-secondary" id="cancelGenerationJobBtn" onclick="cancelCurrentGenerationJob()" style="display: none;">Отменить job</button>
+                    <button type="button" class="btn btn-secondary" id="retryGenerationJobBtn" onclick="retryCurrentGenerationJob()" style="display: none;">Повторить job</button>
                     <button type="button" class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
                     <button type="button" class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
                         <span>Сгенерировать и вставить</span>

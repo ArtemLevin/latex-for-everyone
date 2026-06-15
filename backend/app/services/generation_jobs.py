@@ -19,6 +19,10 @@ class GenerationJobNotFoundError(ValueError):
     """Raised when a persisted generation job does not exist."""
 
 
+class GenerationJobRetryError(ValueError):
+    """Raised when a job cannot be retried from its current state."""
+
+
 class GenerationJobService:
     """Persistence boundary for generation jobs.
 
@@ -62,6 +66,24 @@ class GenerationJobService:
             request_hash,
         )
         return job
+
+
+    def list_jobs(
+        self,
+        db: Session,
+        *,
+        owner_id: str,
+        project_id: str | None = None,
+        status: str | None = None,
+        skip: int = 0,
+        limit: int = 20,
+    ) -> list[GenerationJob]:
+        query = db.query(GenerationJob).filter(GenerationJob.owner_id == owner_id)
+        if project_id is not None:
+            query = query.filter(GenerationJob.project_id == project_id)
+        if status is not None:
+            query = query.filter(GenerationJob.status == status)
+        return query.order_by(GenerationJob.created_at.desc()).offset(skip).limit(limit).all()
 
     def get_job(self, db: Session, *, job_id: str, owner_id: str | None = None) -> GenerationJob:
         query = db.query(GenerationJob).filter(GenerationJob.id == job_id)
@@ -125,6 +147,24 @@ class GenerationJobService:
         self._mark_completed(db, job, result)
         return job
 
+
+
+    def retry_job(self, db: Session, *, job_id: str, owner_id: str) -> GenerationJob:
+        job = self.get_job(db, job_id=job_id, owner_id=owner_id)
+        if job.status not in {"failed", "canceled"}:
+            raise GenerationJobRetryError("Only failed or canceled generation jobs can be retried.")
+        job.status = "queued"
+        job.stage = "queued"
+        job.result_payload = None
+        job.error_message = None
+        job.started_at = None
+        job.finished_at = None
+        job.updated_at = utc_now()
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        logger.info("generation job retry queued job_id=%s owner_id=%s attempts=%s", job.id, owner_id, job.attempts)
+        return job
 
     def cancel_job(self, db: Session, *, job_id: str, owner_id: str) -> GenerationJob:
         job = self.get_job(db, job_id=job_id, owner_id=owner_id)

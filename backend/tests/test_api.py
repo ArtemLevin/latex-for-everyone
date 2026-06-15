@@ -3277,6 +3277,121 @@ def test_generation_job_persists_provider_failure(monkeypatch):
     assert status_response.json()["status"] == "failed"
 
 
+def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{List}Job list"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Job List Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "List"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    list_response = client.get(
+        f"/api/generation/jobs?project_id={project_id}&status=completed",
+        headers=owner_headers,
+    )
+    assert list_response.status_code == 200
+    assert [job["id"] for job in list_response.json()] == [job_id]
+
+    other_response = client.get(
+        f"/api/generation/jobs?project_id={project_id}&status=completed",
+        headers=other_headers,
+    )
+    assert other_response.status_code == 404
+
+
+def test_generation_failed_job_can_be_retried(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def failing_generate(prompt, provider, model):
+        raise AIGenerationError("Temporary provider failure")
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", failing_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Retry failed job"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    failed_job = create_response.json()
+    assert failed_job["status"] == "failed"
+
+    async def successful_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Retry}Recovered"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", successful_generate)
+    retry_response = client.post(f"/api/generation/jobs/{failed_job['id']}/retry")
+
+    assert retry_response.status_code == 200
+    retried_job = retry_response.json()
+    assert retried_job["id"] == failed_job["id"]
+    assert retried_job["status"] == "completed"
+    assert retried_job["attempts"] == 2
+    assert "Recovered" in retried_job["result"]["latex_code"]
+
+
+def test_generation_completed_job_retry_is_rejected(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Done}"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Already done"}, "materials": "Материал."},
+    )
+    assert create_response.status_code == 202
+    job = create_response.json()
+    assert job["status"] == "completed"
+
+    retry_response = client.post(f"/api/generation/jobs/{job['id']}/retry")
+
+    assert retry_response.status_code == 409
+    assert retry_response.json()["detail"] == "Only failed or canceled generation jobs can be retried."
+
+
 def test_generation_job_not_found_returns_404():
     response = client.get("/api/generation/jobs/missing")
 

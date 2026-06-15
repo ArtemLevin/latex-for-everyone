@@ -340,7 +340,9 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | POST | `/api/generation/validate` | Validate generated or edited LaTeX structure before compile |
 | POST | `/api/generation/generate` | Generate LaTeX through Ollama or an OpenAI-compatible vendor |
 | POST | `/api/generation/jobs` | Create/run a durable generation job; supports the configured idempotency header for safe client retries |
+| GET | `/api/generation/jobs` | List current-owner generation jobs with optional `project_id`, `status`, `skip`, and `limit` filters |
 | GET | `/api/generation/jobs/{id}` | Poll a generation job in the current owner scope |
+| POST | `/api/generation/jobs/{id}/retry` | Retry a failed or canceled generation job using its stored request payload |
 | POST | `/api/generation/jobs/{id}/cancel` | Cancel a queued/running generation job in the current owner scope |
 
 Deprecated compatibility routes are still available for compile history:
@@ -413,7 +415,7 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
 
-Generation jobs are durable even in `inline` mode: every `POST /api/generation/jobs` stores a job row before provider execution. Set `AI_GENERATION_JOB_EXECUTION_MODE=background` to return queued jobs immediately and run provider work through FastAPI background tasks; this is suitable for local/dev and is the service boundary for a future external worker. Use `POST /api/generation/jobs/{id}/cancel` to mark queued/running jobs as canceled, and set `AI_GENERATION_JOB_TIMEOUT_SECONDS` when a deployment needs persisted timeout failures for slow or stuck provider calls.
+Generation jobs are durable even in `inline` mode: every `POST /api/generation/jobs` stores a job row before provider execution. Set `AI_GENERATION_JOB_EXECUTION_MODE=background` to return queued jobs immediately and run provider work through FastAPI background tasks; this is suitable for local/dev and is the service boundary for a future external worker. Use `GET /api/generation/jobs` for an operator-safe list of current-owner jobs, `POST /api/generation/jobs/{id}/retry` to rerun failed/canceled jobs from stored request metadata, `POST /api/generation/jobs/{id}/cancel` to mark queued/running jobs as canceled, and set `AI_GENERATION_JOB_TIMEOUT_SECONDS` when a deployment needs persisted timeout failures for slow or stuck provider calls.
 
 Lesson document generation records provenance for each artifact: provider, prompt hash, source transcript hash, and whether raw or edited transcript text was used. Reviewed transcripts produce `completed` documents; raw/unreviewed transcripts must be explicitly confirmed with `allow_unreviewed=true` and produce `draft` documents so teachers can distinguish generated materials that still need review.
 
