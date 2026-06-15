@@ -2761,6 +2761,68 @@ def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_incr
     assert calls == 1
 
 
+def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=5), "timed out waiting to release first generation request"
+        return (
+            "```latex\n"
+            r"\section{Duplicate guard}Only one provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    generation_router.active_generation_requests.clear()
+
+    payload = {
+        "fields": {"topic": "Дубликаты", "content_source_mode": "materials_only"},
+        "materials": "Пользовательские материалы должны отправляться только один раз.",
+    }
+    first_result = {}
+
+    def send_first_request():
+        first_result["response"] = client.post("/api/generation/generate", json=payload)
+
+    thread = threading.Thread(target=send_first_request)
+    thread.start()
+    try:
+        assert started.wait(timeout=5), "first generation request did not reach provider"
+
+        duplicate_response = client.post("/api/generation/generate", json=payload)
+
+        assert duplicate_response.status_code == 409
+        assert duplicate_response.headers["Retry-After"] == str(
+            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
+        )
+        assert duplicate_response.json()["detail"] == (
+            "AI generation is already running for the same input. Wait for the current request to finish."
+        )
+        assert calls == 1
+        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        generation_router.rate_limit_buckets.clear()
+        generation_router.active_generation_requests.clear()
+
+    assert not thread.is_alive()
+    assert first_result["response"].status_code == 200
+    assert calls == 1
+
+
 def test_estimated_token_counter_splits_text_and_latex_commands():
     from app.schemas import GenerationTokenUsageResponse
     from app.services.token_counter import add_estimated_usage, estimate_token_count
