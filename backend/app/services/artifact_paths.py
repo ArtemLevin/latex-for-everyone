@@ -36,6 +36,14 @@ class ArtifactDownloadTarget:
     content_disposition_type: str = "attachment"
 
 
+@dataclass(frozen=True)
+class ArtifactCleanupPolicy:
+    name: str
+    root: Path
+    suffixes: frozenset[str]
+    recursive: bool = False
+
+
 def compile_pdf_root() -> Path:
     return Path(settings.COMPILE_WORK_DIR) / "pdfs"
 
@@ -44,8 +52,27 @@ def export_root() -> Path:
     return Path(settings.UPLOAD_DIR) / "exports"
 
 
+def lesson_artifact_root() -> Path:
+    if settings.LESSON_ARTIFACT_ROOT:
+        return Path(settings.LESSON_ARTIFACT_ROOT)
+    return Path(settings.UPLOAD_DIR) / "lessons"
+
+
 def trusted_artifact_roots() -> tuple[Path, ...]:
-    return (compile_pdf_root(), export_root())
+    return (compile_pdf_root(), export_root(), lesson_artifact_root())
+
+
+def artifact_cleanup_policies() -> tuple[ArtifactCleanupPolicy, ...]:
+    return (
+        ArtifactCleanupPolicy("compile_pdf", compile_pdf_root(), frozenset({".pdf"})),
+        ArtifactCleanupPolicy("export", export_root(), frozenset(EXPORT_MEDIA_TYPES)),
+        ArtifactCleanupPolicy(
+            "lesson",
+            lesson_artifact_root(),
+            frozenset({".webm", ".wav", ".mp3", ".m4a", ".ogg", ".mp4", ".tex"}),
+            recursive=True,
+        ),
+    )
 
 
 def _artifact_config(kind: ArtifactKind) -> tuple[Path, dict[str, str], str]:
