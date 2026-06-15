@@ -34,6 +34,7 @@ class GenerationJobService:
         request_hash: str,
         owner_id: str,
         prompt_hash: str | None = None,
+        idempotency_key: str | None = None,
     ) -> GenerationJob:
         job = GenerationJob(
             id=str(uuid.uuid4()),
@@ -45,6 +46,7 @@ class GenerationJobService:
             stage="queued",
             request_hash=request_hash,
             prompt_hash=prompt_hash,
+            idempotency_key=idempotency_key,
             request_payload=generation_request.model_dump(mode="json"),
             attempts=0,
         )
@@ -69,6 +71,15 @@ class GenerationJobService:
         if not job:
             raise GenerationJobNotFoundError(f"Generation job {job_id} not found")
         return job
+
+
+    def get_job_by_idempotency_key(self, db: Session, *, owner_id: str, idempotency_key: str) -> GenerationJob | None:
+        return (
+            db.query(GenerationJob)
+            .filter(GenerationJob.owner_id == owner_id, GenerationJob.idempotency_key == idempotency_key)
+            .order_by(GenerationJob.created_at.desc())
+            .first()
+        )
 
     async def run_job(
         self,
@@ -111,6 +122,7 @@ class GenerationJobService:
             stage=job.stage,
             request_hash=job.request_hash,
             prompt_hash=job.prompt_hash,
+            idempotency_key=job.idempotency_key,
             result=result,
             error_message=job.error_message,
             attempts=job.attempts,

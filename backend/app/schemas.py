@@ -370,6 +370,7 @@ class GenerationJobResponse(BaseModel):
     stage: str
     request_hash: str
     prompt_hash: Optional[str] = None
+    idempotency_key: Optional[str] = None
     result: Optional[GenerationResultResponse] = None
     error_message: Optional[str] = None
     attempts: int

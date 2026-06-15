@@ -65,12 +65,12 @@ GENERATION_HISTORY_COMPAT_COLUMNS = {
 
 GENERATION_RUNTIME_COMPAT_TABLE_COLUMNS = {
     "generation_history": GENERATION_HISTORY_COMPAT_COLUMNS,
-    "generation_jobs": {"owner_id": "VARCHAR(255) DEFAULT 'local-teacher'"},
+    "generation_jobs": {"owner_id": "VARCHAR(255) DEFAULT 'local-teacher'", "idempotency_key": "VARCHAR(128)"},
 }
 
 GENERATION_RUNTIME_COMPAT_INDEXES = {
     "generation_history": {"ix_generation_history_owner_id": "owner_id"},
-    "generation_jobs": {"ix_generation_jobs_owner_id": "owner_id"},
+    "generation_jobs": {"ix_generation_jobs_owner_id": "owner_id", "ix_generation_jobs_idempotency_key": "idempotency_key"},
 }
 
 

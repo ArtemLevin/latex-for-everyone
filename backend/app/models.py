@@ -195,6 +195,7 @@ class GenerationJob(Base):
     stage = Column(String(50), nullable=False, default="queued")
     request_hash = Column(String(64), nullable=False, index=True)
     prompt_hash = Column(String(64), nullable=True)
+    idempotency_key = Column(String(128), nullable=True, index=True)
     request_payload = Column(JSON, nullable=False)
     result_payload = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)

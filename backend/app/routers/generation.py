@@ -1,8 +1,5 @@
-from collections import defaultdict, deque
 import json
 import logging
-import math
-import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
@@ -23,6 +20,7 @@ from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.models import Project
 from app.services.ai_generation import AIGenerationError, AIGenerationService
+from app.services.ai_request_control import AIRequestControlService, DuplicateRequestError, InvalidIdempotencyKeyError
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_validator import validate_latex_document
 from app.services.generation_history_service import GenerationHistoryNotFoundError, GenerationHistoryService
@@ -48,9 +46,11 @@ generation_orchestrator = GenerationOrchestrator(
     compiler=generation_compiler,
     history_service=generation_history_service,
 )
-rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
-active_generation_requests: dict[str, float] = {}
-GENERATION_DUPLICATE_RETRY_AFTER_SECONDS = 3
+request_control_service = AIRequestControlService()
+# Backwards-compatible aliases keep existing tests focused on endpoint behavior while router code uses the service boundary.
+rate_limit_buckets = request_control_service.rate_limiter.buckets
+active_generation_requests = request_control_service.in_flight.active_requests
+GENERATION_DUPLICATE_RETRY_AFTER_SECONDS = settings.AI_DUPLICATE_RETRY_AFTER_SECONDS
 
 PRESETS: list[GenerationPresetResponse] = [
     GenerationPresetResponse(
@@ -90,7 +90,9 @@ def get_generation_duplicate_key(request: Request, generation_request: Generatio
 
 def begin_generation_request(request: Request, generation_request: GenerationRequest) -> str:
     key = get_generation_duplicate_key(request, generation_request)
-    if key in active_generation_requests:
+    try:
+        request_control_service.begin_in_flight(key)
+    except DuplicateRequestError as exc:
         logger.warning(
             "ai duplicate generation submit rejected client=%s path=%s request_sha=%s materials_chars=%s topic=%s retry_after_seconds=%s",
             get_request_client(request),
@@ -104,42 +106,41 @@ def begin_generation_request(request: Request, generation_request: GenerationReq
             status_code=409,
             detail="AI generation is already running for the same input. Wait for the current request to finish.",
             headers={"Retry-After": str(GENERATION_DUPLICATE_RETRY_AFTER_SECONDS)},
-        )
-    active_generation_requests[key] = time.monotonic()
+        ) from exc
     return key
 
 
 def finish_generation_request(key: str | None) -> None:
-    if key:
-        active_generation_requests.pop(key, None)
+    request_control_service.finish_in_flight(key)
 
 
 def enforce_ai_rate_limit(request: Request) -> None:
     limit = settings.AI_RATE_LIMIT_PER_MINUTE
-    if limit <= 0:
-        return
-
     client = get_request_client(request)
-    key = f"{client}:{request.url.path}"
-    now = time.monotonic()
-    bucket = rate_limit_buckets[key]
-    while bucket and now - bucket[0] >= 60:
-        bucket.popleft()
-    if len(bucket) >= limit:
-        retry_after = max(1, math.ceil(60 - (now - bucket[0])))
+    decision = request_control_service.check_rate_limit(key=f"{client}:{request.url.path}", limit=limit)
+    if not decision.allowed:
         logger.warning(
             "ai rate limit exceeded client=%s path=%s limit=%s window_seconds=60 retry_after_seconds=%s",
             client,
             request.url.path,
             limit,
-            retry_after,
+            decision.retry_after_seconds,
         )
         raise HTTPException(
             status_code=429,
-            detail=f"AI rate limit exceeded. Try again in {retry_after} seconds.",
-            headers={"Retry-After": str(retry_after)},
+            detail=f"AI rate limit exceeded. Try again in {decision.retry_after_seconds} seconds.",
+            headers={"Retry-After": str(decision.retry_after_seconds)},
         )
-    bucket.append(now)
+
+
+def get_idempotency_key(request: Request) -> str | None:
+    try:
+        return request_control_service.normalize_idempotency_key(
+            request.headers.get(settings.AI_IDEMPOTENCY_HEADER),
+            max_chars=settings.AI_IDEMPOTENCY_KEY_MAX_CHARS,
+        )
+    except InvalidIdempotencyKeyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 def enforce_text_limit(label: str, value: str, max_chars: int) -> None:
@@ -367,10 +368,23 @@ async def create_generation_job(
 ):
     generation_request = prepare_generation_request(generation_request)
     ensure_project_access(db, project_id=generation_request.project_id, owner_id=owner_id)
+    request_sha = generation_request_fingerprint(generation_request)
+    idempotency_key = get_idempotency_key(request)
+    if idempotency_key:
+        existing_job = generation_job_service.get_job_by_idempotency_key(
+            db,
+            owner_id=owner_id,
+            idempotency_key=idempotency_key,
+        )
+        if existing_job:
+            if existing_job.request_hash != request_sha:
+                raise HTTPException(status_code=409, detail="Idempotency key was already used for a different generation request.")
+            logger.info("generation job idempotency replay job_id=%s owner_id=%s request_sha=%s", existing_job.id, owner_id, request_sha)
+            return generation_job_service.to_response(existing_job)
+
     active_request_key = begin_generation_request(request, generation_request)
     try:
         enforce_ai_rate_limit(request)
-        request_sha = generation_request_fingerprint(generation_request)
         prompt_response = build_generation_prompt_response(generation_request)
         job = generation_job_service.create_job(
             db,
@@ -378,6 +392,7 @@ async def create_generation_job(
             request_hash=request_sha,
             prompt_hash=text_digest(prompt_response.prompt),
             owner_id=owner_id,
+            idempotency_key=idempotency_key,
         )
         # Persist the job first; this PR runs it inline, and a later worker can reuse the same job contract.
         job = await generation_job_service.run_job(

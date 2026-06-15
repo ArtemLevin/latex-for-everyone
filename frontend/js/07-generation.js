@@ -1,5 +1,5 @@
     // ==================== AI GENERATION ====================
-    const GENERATION_MATERIALS_MAX_CHARS = 20000;
+    const GENERATION_MATERIALS_MAX_CHARS = 50000;
 
     function getGenerationFieldValue(id) {
         const element = document.getElementById(id);
@@ -550,9 +550,21 @@
         throw new Error('AI generation job did not finish before the polling timeout.');
     }
 
+
+    function createGenerationIdempotencyKey() {
+        // A stable key per submit lets the backend return the same job if the HTTP request is retried.
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
     async function runGenerationJob(request) {
         const job = await apiRequest('/generation/jobs', {
             method: 'POST',
+            headers: {
+                'Idempotency-Key': createGenerationIdempotencyKey()
+            },
             body: JSON.stringify(request)
         });
         return waitForGenerationJob(job);

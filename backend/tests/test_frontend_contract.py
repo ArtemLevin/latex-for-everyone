@@ -85,7 +85,7 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "generationRequestInFlight = false" in generation_js
     assert "generationRateLimitedUntil = retryAfter > 0" in generation_js
     assert "const waitMs = generationRateLimitedUntil - Date.now()" in generation_js
-    assert "const GENERATION_MATERIALS_MAX_CHARS = 20000" in generation_js
+    assert "const GENERATION_MATERIALS_MAX_CHARS = 50000" in generation_js
     assert "function normalizeGenerationMaterialsForRequest" in generation_js
     assert "function validateGenerationMaterialsBeforeSubmit" in generation_js
     assert "updateGenerationMaterialsDiagnostics()" in (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
@@ -98,5 +98,7 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "async function runGenerationJob" in generation_js
     assert "async function waitForGenerationJob" in generation_js
     assert "apiRequest('/generation/jobs'" in generation_js
+    assert "createGenerationIdempotencyKey" in generation_js
+    assert "'Idempotency-Key': createGenerationIdempotencyKey()" in generation_js
     assert "apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`)" in generation_js
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js

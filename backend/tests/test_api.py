@@ -200,9 +200,9 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
     generation_job_columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
-    assert {"project_id", "owner_id", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
+    assert {"project_id", "owner_id", "idempotency_key", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
     generation_job_indexes = {index["name"] for index in inspector.get_indexes("generation_jobs")}
-    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash", "ix_generation_jobs_owner_id"}.issubset(generation_job_indexes)
+    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash", "ix_generation_jobs_owner_id", "ix_generation_jobs_idempotency_key"}.issubset(generation_job_indexes)
 
 
 def test_health_check():
@@ -2591,6 +2591,15 @@ def test_generation_prompt_rejects_oversized_materials(monkeypatch):
     assert "materials exceeds 5 characters" in response.json()["detail"]
 
 
+def test_generation_prompt_accepts_materials_up_to_default_50000_limit():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Большие материалы"}, "materials": "x" * 50_000},
+    )
+
+    assert response.status_code == 200
+
+
 def test_generation_prompt_normalizes_materials_and_escapes_prompt_boundaries():
     response = client.post(
         "/api/generation/prompt",
@@ -3063,6 +3072,84 @@ def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
     assert status_response.status_code == 200
     assert status_response.json()["id"] == job["id"]
     assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
+
+
+def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        return (
+            "```latex\n"
+            r"\section{Idempotent}Single provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    payload = {"fields": {"topic": "Idempotency"}, "materials": "Материал."}
+    headers = {"Idempotency-Key": "generation-job-retry-1"}
+
+    first_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+    second_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert second_response.json()["id"] == first_response.json()["id"]
+    assert second_response.json()["idempotency_key"] == "generation-job-retry-1"
+    assert calls == 1
+
+
+def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Idempotent}Original"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    headers = {"Idempotency-Key": "generation-job-retry-2"}
+
+    first_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Первый"}, "materials": "Материал."},
+        headers=headers,
+    )
+    second_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Другой"}, "materials": "Материал."},
+        headers=headers,
+    )
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 409
+    assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
+
+
+def test_generation_job_rejects_invalid_idempotency_key():
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Bad key"}, "materials": "Материал."},
+        headers={"Idempotency-Key": "bad key with spaces"},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid idempotency key" in response.json()["detail"]
 
 
 def test_generation_job_persists_provider_failure(monkeypatch):

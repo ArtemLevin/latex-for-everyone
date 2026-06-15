@@ -339,6 +339,8 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | GET | `/api/generation/providers/status` | Check selected Ollama or OpenAI-compatible provider/model availability |
 | POST | `/api/generation/validate` | Validate generated or edited LaTeX structure before compile |
 | POST | `/api/generation/generate` | Generate LaTeX through Ollama or an OpenAI-compatible vendor |
+| POST | `/api/generation/jobs` | Create/run a durable generation job; supports the configured idempotency header for safe client retries |
+| GET | `/api/generation/jobs/{id}` | Poll a generation job in the current owner scope |
 
 Deprecated compatibility routes are still available for compile history:
 
@@ -388,8 +390,11 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds; increase for slow local Ollama models such as 14B+ |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
 | `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint in-memory limit for AI endpoints; set `0` to disable |
-| `AI_MAX_MATERIALS_CHARS` | `20000` | Maximum size of user materials accepted by AI prompt/generate endpoints |
-| `AI_MAX_PROMPT_CHARS` | `60000` | Maximum generated prompt size before a provider call is allowed |
+| `AI_DUPLICATE_RETRY_AFTER_SECONDS` | `3` | Retry hint returned when an identical generation request is already in flight |
+| `AI_IDEMPOTENCY_HEADER` | `Idempotency-Key` | Header accepted by `POST /api/generation/jobs` to replay the same persisted job for safe client retries |
+| `AI_IDEMPOTENCY_KEY_MAX_CHARS` | `128` | Maximum idempotency key length; keys may contain ASCII letters/digits plus `.`, `_`, `:`, and `-` |
+| `AI_MAX_MATERIALS_CHARS` | `50000` | Maximum size of user materials accepted by AI prompt/generate endpoints |
+| `AI_MAX_PROMPT_CHARS` | `200000` | Maximum generated prompt size before a provider call is allowed |
 | `AI_MAX_RAW_OUTPUT_CHARS` | `200000` | Maximum provider raw output / LaTeX validation payload size |
 | `AI_EXPOSE_PROVIDER_ERRORS` | `false` | Expose upstream provider error details to clients; keep `false` in production |
 | `AI_COMPILE_CHECK_ENABLED` | `true` | Run a best-effort backend compile check after AI generation when `pdflatex` is available |
