@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File 
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_project
+from app.dependencies import get_current_user_id, get_project
 from app.models import Project
 from app.schemas import FileCreate, FileResponse, FileUpdate, MessageResponse
 from app.services.file_service import (
@@ -51,10 +51,11 @@ async def create_file(
 @router.get("/{file_id}", response_model=FileResponse)
 async def get_file(
     file_id: str,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     try:
-        return file_service.get_file(db, file_id)
+        return file_service.get_file(db, file_id, owner_id=owner_id)
     except FileNotFoundError as exc:
         raise map_file_service_error(exc) from exc
 
@@ -63,10 +64,11 @@ async def get_file(
 async def update_file(
     file_data: FileUpdate,
     file_id: str,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     try:
-        return file_service.update_file(db, file_id, file_data)
+        return file_service.update_file(db, file_id, file_data, owner_id=owner_id)
     except (FileConflictError, FileNotFoundError, InvalidFileNameError) as exc:
         raise map_file_service_error(exc) from exc
 
@@ -74,10 +76,11 @@ async def update_file(
 @router.delete("/{file_id}", response_model=MessageResponse)
 async def delete_file(
     file_id: str,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     try:
-        file_name = file_service.delete_file(db, file_id)
+        file_name = file_service.delete_file(db, file_id, owner_id=owner_id)
     except (FileConflictError, FileNotFoundError) as exc:
         raise map_file_service_error(exc) from exc
 
@@ -88,10 +91,11 @@ async def delete_file(
 async def upload_file(
     file_id: str,
     file: UploadFile = FastAPIFile(...),
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     try:
-        file_service.replace_file_content(db, file_id, await file.read())
+        file_service.replace_file_content(db, file_id, await file.read(), owner_id=owner_id)
     except FileNotFoundError as exc:
         raise map_file_service_error(exc) from exc
 
