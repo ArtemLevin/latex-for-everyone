@@ -1,7 +1,39 @@
     // ==================== AI GENERATION ====================
+    const GENERATION_MATERIALS_MAX_CHARS = 20000;
+
     function getGenerationFieldValue(id) {
         const element = document.getElementById(id);
         return element ? element.value.trim() : '';
+    }
+
+    function getGenerationRawFieldValue(id) {
+        const element = document.getElementById(id);
+        return element ? element.value : '';
+    }
+
+    function normalizeGenerationMaterialsForRequest(materials) {
+        // Keep user-authored line breaks, but make pasted CRLF/CR text match backend normalization.
+        return String(materials || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    }
+
+    function updateGenerationMaterialsDiagnostics() {
+        const hint = document.getElementById('generationMaterialsHint');
+        if (!hint) return true;
+        const materials = normalizeGenerationMaterialsForRequest(getGenerationRawFieldValue('generationMaterials'));
+        const remaining = GENERATION_MATERIALS_MAX_CHARS - materials.length;
+        const lines = materials ? materials.split('\n').length : 0;
+        hint.textContent = `Материалы: ${materials.length}/${GENERATION_MATERIALS_MAX_CHARS} символов, строк: ${lines}.`;
+        hint.classList.toggle('error', remaining < 0);
+        return remaining >= 0;
+    }
+
+    function validateGenerationMaterialsBeforeSubmit() {
+        if (updateGenerationMaterialsDiagnostics()) return true;
+        const message = `Материалы слишком большие: максимум ${GENERATION_MATERIALS_MAX_CHARS} символов.`;
+        setGenerationStatus(message, 'error');
+        setGenerationDetails([message], 'error');
+        showToast(message, 'error');
+        return false;
     }
 
     function setGenerationStatus(message, type = '') {
@@ -118,6 +150,7 @@
         modal.classList.add('active');
         setGenerationDetails();
         setGenerationRetryActionsVisible(false);
+        updateGenerationMaterialsDiagnostics();
 
         if (backendAvailable) {
             try {
@@ -175,7 +208,7 @@
                 priority_method: getGenerationFieldValue('generationPriorityMethod') || 'нейросеть выбирает самостоятельно по отношению к уровню и классу',
                 graph_analytic: getGenerationFieldValue('generationGraphAnalytic') || 'по ситуации'
             },
-            materials: getGenerationFieldValue('generationMaterials')
+            materials: normalizeGenerationMaterialsForRequest(getGenerationRawFieldValue('generationMaterials'))
         };
     }
 
@@ -501,6 +534,9 @@
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
             showToast('Запустите backend для AI-генерации', 'error');
+            return;
+        }
+        if (!validateGenerationMaterialsBeforeSubmit()) {
             return;
         }
         if (generationRequestInFlight) {

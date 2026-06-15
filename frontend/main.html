@@ -512,7 +512,8 @@
                     </div>
                     <div class="generation-field full">
                         <label for="generationMaterials">Материалы / условия задач</label>
-                        <textarea id="generationMaterials" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
+                        <textarea id="generationMaterials" oninput="updateGenerationMaterialsDiagnostics()" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
+                        <div class="generation-hint" id="generationMaterialsHint">Материалы: 0/20000 символов, строк: 0.</div>
                     </div>
                     <div class="generation-field">
                         <label for="generationInsertMode">Куда вставить результат</label>

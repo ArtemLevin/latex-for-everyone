@@ -158,6 +158,34 @@ def enforce_text_limit(label: str, value: str, max_chars: int) -> None:
         )
 
 
+def normalize_generation_materials(materials: str) -> str:
+    # Preserve meaningful line breaks while making pasted Windows/macOS text deterministic for limits and hashing.
+    return materials.replace("\r\n", "\n").replace("\r", "\n").strip()
+
+
+def reject_unsupported_materials_control_chars(materials: str) -> None:
+    unsupported = sorted({ord(char) for char in materials if ord(char) < 32 and char not in {"\n", "\t"}})
+    if unsupported:
+        logger.warning(
+            "ai materials rejected unsupported_control_chars count=%s codes=%s",
+            len(unsupported),
+            unsupported[:8],
+        )
+        raise HTTPException(
+            status_code=422,
+            detail="materials contain unsupported control characters; keep only printable text, tabs, and line breaks.",
+        )
+
+
+def prepare_generation_request(generation_request: GenerationRequest) -> GenerationRequest:
+    normalized_materials = normalize_generation_materials(generation_request.materials)
+    reject_unsupported_materials_control_chars(normalized_materials)
+    enforce_text_limit("materials", normalized_materials, settings.AI_MAX_MATERIALS_CHARS)
+    if normalized_materials == generation_request.materials:
+        return generation_request
+    return generation_request.model_copy(update={"materials": normalized_materials})
+
+
 def provider_error_detail(exc: AIGenerationError) -> str:
     if settings.DEBUG or settings.AI_EXPOSE_PROVIDER_ERRORS or exc.status_code < 500 or exc.status_code == 504:
         return str(exc)
@@ -257,7 +285,7 @@ async def compile_check_and_repair(
 
 
 def build_generation_prompt_response(request: GenerationRequest) -> GenerationPromptResponse:
-    enforce_text_limit("materials", request.materials, settings.AI_MAX_MATERIALS_CHARS)
+    request = prepare_generation_request(request)
     prompt = build_latex_generation_prompt(request.fields, request.materials)
     enforce_text_limit("prompt", prompt, settings.AI_MAX_PROMPT_CHARS)
     warnings = []
@@ -270,15 +298,16 @@ def build_generation_prompt_response(request: GenerationRequest) -> GenerationPr
         warnings.append("Материалы не переданы: prompt запрещает домысливать исходные задания.")
 
     logger.info(
-        "ai prompt built provider=%s model=%s topic=%s materials_chars=%s prompt_chars=%s prompt_sha=%s warnings=%s prompt_preview=%s",
+        "ai prompt built provider=%s model=%s topic=%s materials_chars=%s materials_lines=%s materials_sha=%s prompt_chars=%s prompt_sha=%s warnings=%s",
         request.provider or "default",
         request.model or "default",
         request.fields.topic or "-",
         len(request.materials),
+        request.materials.count("\n") + 1 if request.materials else 0,
+        text_digest(request.materials) if request.materials else "-",
         len(prompt),
         text_digest(prompt),
         len(warnings),
-        text_preview(prompt),
     )
 
     return GenerationPromptResponse(
@@ -348,6 +377,7 @@ async def list_generation_presets():
 
 @router.post("/prompt", response_model=GenerationPromptResponse)
 async def preview_generation_prompt(request: Request, generation_request: GenerationRequest):
+    generation_request = prepare_generation_request(generation_request)
     enforce_ai_rate_limit(request)
     logger.info(
         "ai prompt preview requested provider=%s model=%s topic=%s materials_chars=%s",
@@ -425,6 +455,7 @@ async def validate_generated_latex(request: Request, validation_request: Generat
 
 @router.post("/generate", response_model=GenerationResultResponse)
 async def generate_latex(request: Request, generation_request: GenerationRequest, db: Session = Depends(get_db)):
+    generation_request = prepare_generation_request(generation_request)
     active_request_key = begin_generation_request(request, generation_request)
     try:
         enforce_ai_rate_limit(request)
