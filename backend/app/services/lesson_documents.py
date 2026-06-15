@@ -1,3 +1,4 @@
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +12,9 @@ from app.services.audio_storage import lesson_artifact_root, resolve_inside_root
 from app.services.latex_document_builder import build_latex_document
 from app.services.transcription import effective_transcript_text
 from app.time_utils import utc_now
+
+
+logger = logging.getLogger(__name__)
 
 
 DOCUMENT_TYPES = ("check_list", "pupil_mistakes")
@@ -114,6 +118,7 @@ class LessonPromptService:
         return template
 
     def render(self, document_type: str, context: LessonDocumentContext) -> str:
+        logger.info("lesson prompt render started document_type=%s lesson_id=%s transcript_id=%s", document_type, context.lesson.id, context.transcript.id)
         template = self.load(document_type)
         replacements = {
             "{{ pupil_display_name }}": context.pupil.display_name,
@@ -124,6 +129,7 @@ class LessonPromptService:
         rendered = template
         for placeholder, value in replacements.items():
             rendered = rendered.replace(placeholder, value)
+        logger.info("lesson prompt render completed document_type=%s lesson_id=%s prompt_chars=%s transcript_chars=%s", document_type, context.lesson.id, len(rendered), len(effective_transcript_text(context.transcript)))
         return rendered
 
 
@@ -221,25 +227,34 @@ class LessonDocumentGenerationService:
         document_types: list[str] | None = None,
         transcript_id: str | None = None,
     ) -> list[LessonGeneratedDocument]:
+        logger.info("lesson documents generation requested lesson_id=%s transcript_id=%s requested_types=%s provider=%s", lesson.id, transcript_id, document_types, getattr(self.provider, "provider_name", "unknown"))
         transcript = self.get_transcript(db, lesson=lesson, transcript_id=transcript_id)
+        logger.info("lesson documents transcript selected lesson_id=%s transcript_id=%s review_status=%s text_chars=%s", lesson.id, transcript.id, transcript.review_status, len(effective_transcript_text(transcript)))
         if not lesson.pupil:
             raise LessonDocumentProviderError("Lesson pupil is unavailable")
         selected_types = document_types or configured_document_types()
         context = LessonDocumentContext(lesson=lesson, pupil=lesson.pupil, transcript=transcript)
         documents: list[LessonGeneratedDocument] = []
+        logger.info("lesson documents selected types lesson_id=%s selected_types=%s", lesson.id, selected_types)
         for document_type in selected_types:
+            logger.info("lesson document generation stage started lesson_id=%s document_type=%s", lesson.id, document_type)
             prompt = self.prompt_service.render(document_type, context)
+            logger.info("lesson document provider call started lesson_id=%s document_type=%s prompt_chars=%s", lesson.id, document_type, len(prompt))
             draft = await self.provider.generate(document_type=document_type, prompt=prompt, context=context)
+            logger.info("lesson document provider call completed lesson_id=%s document_type=%s title_chars=%s section_count=%s", lesson.id, document_type, len(draft.title), len(draft.sections))
             documents.append(self._persist_document(db, context=context, draft=draft))
         lesson.status = "completed"
         lesson.updated_at = utc_now()
         db.commit()
+        logger.info("lesson documents db commit completed lesson_id=%s document_count=%s", lesson.id, len(documents))
         for document in documents:
             db.refresh(document)
+            logger.info("lesson document refreshed lesson_id=%s document_id=%s document_type=%s storage_path=%s", lesson.id, document.id, document.document_type, document.storage_path)
         return documents
 
     def _persist_document(self, db: Session, *, context: LessonDocumentContext, draft: LessonDocumentDraft) -> LessonGeneratedDocument:
         document_id = str(uuid.uuid4())
+        logger.info("lesson document persist started lesson_id=%s transcript_id=%s document_id=%s document_type=%s", context.lesson.id, context.transcript.id, document_id, draft.document_type)
         topic_slug = slugify_filename_part(context.lesson.topic)
         filename = f"{draft.document_type}_{topic_slug}_{document_id}.tex"
         lesson_date = context.lesson.lesson_date.date().isoformat()
@@ -252,8 +267,11 @@ class LessonDocumentGenerationService:
             filename,
         )
         target_path = resolve_inside_root(lesson_artifact_root(), *relative_parts)
+        logger.info("lesson document path resolved lesson_id=%s document_id=%s relative_path=%s", context.lesson.id, document_id, Path(*relative_parts).as_posix())
         target_path.parent.mkdir(parents=True, exist_ok=True)
-        target_path.write_text(build_lesson_latex_document(draft, context), encoding="utf-8")
+        latex_document = build_lesson_latex_document(draft, context)
+        target_path.write_text(latex_document, encoding="utf-8")
+        logger.info("lesson document artifact written lesson_id=%s document_id=%s latex_chars=%s", context.lesson.id, document_id, len(latex_document))
         document = LessonGeneratedDocument(
             id=document_id,
             lesson_id=context.lesson.id,
@@ -267,6 +285,7 @@ class LessonDocumentGenerationService:
             error_message=None,
         )
         db.add(document)
+        logger.info("lesson document db add prepared lesson_id=%s document_id=%s filename=%s", context.lesson.id, document_id, filename)
         return document
 
     def resolve_document_path(self, document: LessonGeneratedDocument) -> Path:
