@@ -65,6 +65,7 @@ async def run_generation_job_once(
                 return None
 
         generation_request, prompt_response = build_prompt_response_from_job(job)
+        generation_job_service.heartbeat_job(session, job)
         logger.info(
             "generation worker claimed job_id=%s owner_id=%s project_id=%s request_sha=%s prompt_sha=%s",
             job.id,
@@ -88,12 +89,38 @@ async def run_generation_job_once(
             session.close()
 
 
+def recover_stale_generation_jobs(
+    *,
+    db: Session | None = None,
+    owner_id: str | None = None,
+    stale_after_seconds: int | None = None,
+    limit: int = 100,
+) -> int:
+    owns_session = db is None
+    session = db or SessionLocal()
+    threshold = stale_after_seconds if stale_after_seconds is not None else settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS
+    try:
+        recovered = generation_job_service.recover_stale_running_jobs(
+            session,
+            stale_after_seconds=threshold,
+            owner_id=owner_id,
+            limit=limit,
+        )
+        if recovered:
+            logger.warning("generation worker recovered stale jobs count=%s owner_id=%s", len(recovered), owner_id or "-")
+        return len(recovered)
+    finally:
+        if owns_session:
+            session.close()
+
+
 async def run_generation_worker_loop(
     *,
     poll_interval_seconds: float = 2.0,
     max_jobs: int = 0,
     owner_id: str | None = None,
     timeout_seconds: int | None = None,
+    stale_after_seconds: int | None = None,
 ) -> int:
     processed = 0
     logger.info(
@@ -103,6 +130,7 @@ async def run_generation_worker_loop(
         max_jobs,
     )
     while True:
+        recover_stale_generation_jobs(owner_id=owner_id, stale_after_seconds=stale_after_seconds)
         job = await run_generation_job_once(owner_id=owner_id, timeout_seconds=timeout_seconds)
         if job and job.status != "queued":
             processed += 1

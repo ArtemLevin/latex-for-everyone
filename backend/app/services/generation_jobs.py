@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+from datetime import timedelta
 
 from sqlalchemy.orm import Session
 
@@ -107,6 +108,57 @@ class GenerationJobService:
         if owner_id is not None:
             query = query.filter(GenerationJob.owner_id == owner_id)
         return query.order_by(GenerationJob.created_at.asc()).first()
+
+    def heartbeat_job(self, db: Session, job: GenerationJob) -> GenerationJob:
+        job.updated_at = utc_now()
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        logger.debug("generation job heartbeat job_id=%s status=%s stage=%s", job.id, job.status, job.stage)
+        return job
+
+    def recover_stale_running_jobs(
+        self,
+        db: Session,
+        *,
+        stale_after_seconds: int,
+        owner_id: str | None = None,
+        limit: int = 100,
+    ) -> list[GenerationJob]:
+        if stale_after_seconds <= 0:
+            return []
+
+        cutoff = utc_now() - timedelta(seconds=stale_after_seconds)
+        query = db.query(GenerationJob).filter(
+            GenerationJob.status == "running",
+            GenerationJob.updated_at < cutoff,
+        )
+        if owner_id is not None:
+            query = query.filter(GenerationJob.owner_id == owner_id)
+
+        recovered = query.order_by(GenerationJob.updated_at.asc()).limit(limit).all()
+        for job in recovered:
+            # Running jobs older than the heartbeat threshold are returned to the queue rather than
+            # marked failed so an external worker crash can be retried without user intervention.
+            job.status = "queued"
+            job.stage = "queued"
+            job.error_message = "Recovered from stale running state; queued for worker retry."
+            job.started_at = None
+            job.finished_at = None
+            job.updated_at = utc_now()
+            db.add(job)
+        if recovered:
+            db.commit()
+            for job in recovered:
+                db.refresh(job)
+                logger.warning(
+                    "generation job recovered stale running state job_id=%s owner_id=%s attempts=%s stale_after_seconds=%s",
+                    job.id,
+                    job.owner_id,
+                    job.attempts,
+                    stale_after_seconds,
+                )
+        return recovered
 
     async def run_job(
         self,

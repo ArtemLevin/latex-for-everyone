@@ -139,6 +139,10 @@ generation-worker: ## Run queued AI generation jobs for AI_GENERATION_JOB_EXECUT
 generation-worker-once: ## Run at most one queued AI generation job and exit.
 	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --once
 
+.PHONY: generation-worker-recover-stale
+generation-worker-recover-stale: ## Requeue stale running AI generation jobs and exit.
+	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --recover-stale-only
+
 # ---- Cleanup ---------------------------------------------------------------
 .PHONY: clean
 clean: ## Remove local test databases and Python/test caches.
