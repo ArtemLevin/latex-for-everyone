@@ -21,7 +21,7 @@ frontend/css/       Frontend styles
 frontend/js/        Frontend state, API, editor, compile/export, AI UI scripts
 ```
 
-Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md). The current service-state analysis and development roadmap are maintained in [`PLAN.md`](PLAN.md).
+Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md). The current service-state analysis and development roadmap are maintained in [`PLAN.md`](PLAN.md). Production and local troubleshooting guidance is maintained in [`docs/operations.md`](docs/operations.md).
 
 ## Quick start
 
@@ -114,11 +114,15 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
-| `make frontend-e2e` | Run the optional Playwright browser smoke for the local frontend workflow. Skips when Playwright/browser binaries are unavailable. |
+| `make frontend-e2e` | Run optional Playwright browser smoke tests for local preview, generation duplicate-submit guard, and lesson review/document controls. Skips when Playwright/browser binaries are unavailable. |
+| `make generation-worker` | Run the external AI generation worker loop for queued jobs. |
+| `make generation-worker-once` | Claim and run at most one queued AI generation job, useful for smoke tests and one-shot workers. |
+| `make generation-worker-recover-stale` | Requeue stale running AI generation jobs when stale recovery is configured. |
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
-| `make clean-artifacts` | Remove generated compile/export artifacts from default `/tmp` runtime dirs. |
+| `make clean-artifacts-dry-run` | Report stale trusted runtime artifacts that cleanup would remove. |
+| `make clean-artifacts` | Safely remove stale trusted runtime artifacts using `ARTIFACT_TTL_SECONDS`. |
 | `make docker-up` | Build and start Docker Compose services. |
 | `make docker-down` | Stop Docker Compose services. |
 | `make clean` | Remove local DB files and Python/test caches. |
@@ -147,9 +151,14 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
 Latexed exposes two operational status endpoints:
 
 - `GET /api/health` is a lightweight liveness check. It means the backend process is running and can answer HTTP requests.
-- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, and `artifact_dirs`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, `artifact_dirs`, and optional `transcription`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+- `GET /api/transcription/status` reports only the configured transcription runtime: selected/effective provider, optional Python package discovery, `ffmpeg`/`ffprobe` availability, model settings, and install hints.
 
-When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. Run `make latex-check` in the target environment to verify the TeX Live runtime.
+When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. When an enabled transcription provider is missing optional packages or media tools, readiness is also `degraded`; the editor and compile flows can continue, but lesson transcription must be fixed before use. Run `make latex-check` in the target environment to verify the TeX Live runtime.
+
+## Frontend browser smoke tests
+
+`make frontend-e2e` runs optional Playwright smoke tests against the static frontend served from `frontend/main.html`. The suite currently checks local/offline preview, browser-level duplicate AI generation submit protection with mocked `/api/generation/jobs`, and lesson transcript review/document controls with mocked lesson APIs. These tests are intentionally optional: if Playwright or browser binaries are not installed, pytest reports skips rather than failing the backend suite. Use them before merging frontend UX changes that static `node --check` and contract tests cannot fully exercise.
 
 ## Runtime artifacts and cleanup
 
@@ -166,9 +175,11 @@ Generated artifact locations are intentionally separated by purpose:
 - uploaded user files and temporary upload state live under `${UPLOAD_DIR}`;
 - lesson audio recordings live under `${LESSON_ARTIFACT_ROOT}` when set, otherwise under `${UPLOAD_DIR}/lessons`.
 
-Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Automatic best-effort cleanup uses `ARTIFACT_TTL_SECONDS` and removes only old allowlisted compile/export artifact files from trusted runtime roots; custom lesson-audio retention remains an explicit follow-up, while the default lesson root is removed by `make clean-artifacts` because it is under `/tmp/latexed_uploads`.
+Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Cleanup uses the same trusted-root policy and never treats the broad upload directory as a wildcard root. The configured cleanup roots are `${COMPILE_WORK_DIR}/pdfs`, `${UPLOAD_DIR}/exports`, and `${LESSON_ARTIFACT_ROOT}` or `${UPLOAD_DIR}/lessons`; lesson cleanup is recursive but suffix-allowlisted to known audio/document artifact types.
 
-Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
+Automatic and manual cleanup use `ARTIFACT_TTL_SECONDS`; set it to `0` to disable age-based cleanup. `make clean-artifacts-dry-run` prints a JSON report with files that would be deleted, skipped counts, byte totals, errors, and duration. `make clean-artifacts` runs the same safe cleanup with `--commit`; use it only when no backend process is actively writing artifacts. Production cron/systemd timers should call `backend/scripts/clean_artifacts.py` first without `--commit`, review the report in logs, and then schedule `--commit` with an explicit retention window.
+
+Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
 
 ## Timestamp policy
 
@@ -178,7 +189,7 @@ Backend application code uses a shared `utc_now()` helper from `backend/app/time
 
 The lesson workflow is implemented incrementally. The backend now has pupil/lesson CRUD, safe lesson-audio upload/storage, synchronous transcription, optional `faster-whisper`/legacy transcription adapters, and deterministic lesson-document generation for backend tests; frontend workflow and production AI/provider orchestration remain future work. The current checkout also contains the legacy transcription CLI and backend-owned lesson prompt templates:
 
-- `transcibe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Its filename intentionally reflects the current legacy typo; do not build backend API contracts around that spelling. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
+- `transcribe.py` is a standalone Whisper/ffmpeg-oriented CLI script. Keep it behind the contained legacy adapter; do not build router contracts around this script. It imports `whisper`, shells out to `ffmpeg`/`ffprobe`, defines local audio extensions and default model/language values, and is not a FastAPI service.
 - `backend/app/prompts/lesson/check_list.txt` is the parameterized prompt template for a lesson checklist document. The former hardcoded student-like text has been replaced with template placeholders.
 - `backend/app/prompts/lesson/pupil_mistakes.txt` is the parameterized prompt template for a personalized mistakes-review document.
 
@@ -206,11 +217,17 @@ When changing `backend/app/models.py`, create or update an Alembic revision in t
 
 ## Lesson backend foundation
 
-The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. The temporary ownership boundary is a placeholder `teacher_id` of `local-teacher`; all pupil and lesson queries are scoped through the `get_current_teacher_id()` dependency so a future auth integration can replace that dependency without changing the public CRUD contract.
+The first lesson-workflow implementation slice is backend-only. It adds `Pupil` and `Lesson` persistence, Alembic migration coverage, typed Pydantic schemas, service-layer CRUD, and `/api/pupils` plus `/api/lessons` routers. Current ownership uses the MVP identity resolver described below: local development falls back to `LOCAL_USER_ID=local-teacher`, and trusted deployments can pass `X-Latexed-User` (or the header named by `TRUSTED_USER_HEADER`) from an authenticated reverse proxy. Project, file, compile/export, AI-generation, pupil, lesson, transcript, document, and processing-job queries are scoped through this identity so direct cross-user IDs return 404 instead of leaking resource existence.
 
-This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings` with checksum metadata and best-effort duration probing, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, transcript review endpoints for list/get/update before document generation, lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts, and processing-job endpoints for start/list/poll status. Lesson jobs can run inline for local/dev compatibility or be queued for background execution via persisted job ids. The transcription default provider is disabled, `faster_whisper` is an optional runtime install for production transcription, document generation defaults to a deterministic fake provider for backend coverage, and production external-worker orchestration remains future work; a lightweight frontend sidebar panel is available under the `Уроки` tab.
+This foundation now includes safe audio upload metadata/storage under `POST /api/lessons/{lesson_id}/recordings` with checksum metadata and best-effort duration probing, a synchronous transcription adapter endpoint at `POST /api/lessons/{lesson_id}/transcribe`, transcript review endpoints for list/get/update before document generation, review-aware lesson document generation/download endpoints for checklist and mistakes-review `.tex` artifacts, and processing-job endpoints for start/list/poll status. Lesson jobs can run inline for local/dev compatibility or be queued for background execution via persisted job ids. The transcription default provider is disabled, `faster_whisper` is an optional runtime install for production transcription, document generation defaults to a deterministic fake provider for backend coverage, and production external-worker orchestration remains future work; a lightweight frontend sidebar panel is available under the `Уроки` tab.
 
 The browser UI includes a lightweight `Уроки` sidebar tab loaded by `frontend/js/10-lessons.js`. It lets a teacher create/select pupils and lessons, record audio with `MediaRecorder` when available or upload an audio file manually, start transcription/document generation or the full processing job, review/edit transcript text before generation, and open generated document download links. The recording panel now chooses a supported audio MIME type, requires an explicit consent checkbox before microphone capture, shows recording state/timer/size metrics, and renders an audio preview before upload. When the backend is offline, the tab shows a degraded state instead of breaking the editor.
+
+## Auth and ownership MVP
+
+Latexed currently uses a trusted-header MVP instead of a full login/session system. In local single-user mode, requests without an identity header use `LOCAL_USER_ID=local-teacher`, preserving the existing development workflow. In a multi-user deployment, terminate real authentication at a trusted reverse proxy and pass the normalized user id to the backend in `X-Latexed-User` or in the header configured by `TRUSTED_USER_HEADER`. Do not expose this header directly to untrusted clients without a proxy that strips spoofed incoming values.
+
+The backend rejects blank or control-character identities, persists new projects with the resolved `owner_id`, and uses the same identity as the lesson `teacher_id`. Direct-ID access to another user's projects, files, compile history, generation history/jobs, exports, pupils, lessons, transcripts, documents, and processing jobs is intentionally reported as `404` to avoid revealing whether the resource exists.
 
 ## Frontend/backend integration
 
@@ -276,7 +293,8 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Liveness check: backend process is responding |
-| GET | `/api/ready` | Readiness check: database, compiler, LaTeX packages, and runtime artifact directories |
+| GET | `/api/ready` | Readiness check: database, compiler, LaTeX packages, runtime artifact directories, transcription runtime, and generation worker backlog/stale jobs |
+| GET | `/api/transcription/status` | Transcription runtime diagnostics for the configured provider and optional dependencies |
 | GET | `/api/projects/` | List projects |
 | POST | `/api/projects/` | Create project |
 | GET | `/api/projects/{id}` | Get project details |
@@ -297,7 +315,7 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | GET | `/api/lessons/{id}/transcripts` | List raw/reviewed transcript records for a lesson |
 | GET | `/api/lessons/{id}/transcripts/{transcript_id}` | Fetch one transcript in lesson scope |
 | PATCH | `/api/lessons/{id}/transcripts/{transcript_id}` | Save reviewed transcript text while preserving the raw transcription output |
-| POST | `/api/lessons/{id}/documents/generate` | Generate checklist and mistakes-review `.tex` artifacts from a completed transcript |
+| POST | `/api/lessons/{id}/documents/generate` | Generate checklist and mistakes-review `.tex` artifacts from a completed transcript; unreviewed transcripts require `allow_unreviewed=true` and produce draft documents with provenance metadata |
 | GET | `/api/lessons/{id}/documents` | List generated lesson documents |
 | GET | `/api/lessons/{id}/documents/{document_id}/download` | Download a generated document that belongs to the scoped lesson |
 | POST | `/api/lessons/{id}/processing-jobs` | Start a lesson processing job (`full_pipeline`, `transcribe`, or `generate_documents`) and persist status |
@@ -324,6 +342,13 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | GET | `/api/generation/providers/status` | Check selected Ollama or OpenAI-compatible provider/model availability |
 | POST | `/api/generation/validate` | Validate generated or edited LaTeX structure before compile |
 | POST | `/api/generation/generate` | Generate LaTeX through Ollama or an OpenAI-compatible vendor |
+| POST | `/api/generation/jobs` | Create/run a durable generation job; supports the configured idempotency header for safe client retries |
+| GET | `/api/generation/jobs` | List current-owner generation jobs with optional `project_id`, `status`, `skip`, and `limit` filters |
+| GET | `/api/generation/jobs/{id}` | Poll a generation job in the current owner scope |
+| POST | `/api/generation/jobs/{id}/retry` | Retry a failed or canceled generation job using its stored request payload |
+| POST | `/api/generation/jobs/{id}/cancel` | Cancel a queued/running generation job in the current owner scope |
+| GET | `/api/generation/jobs/operator/status` | Owner-scoped operator summary with job counts, backlog and stale job samples without prompts/materials |
+| POST | `/api/generation/jobs/operator/recover-stale` | Owner-scoped stale-running job recovery trigger |
 
 Deprecated compatibility routes are still available for compile history:
 
@@ -338,6 +363,8 @@ Deprecated compatibility routes are still available for compile history:
 | `AUTO_CREATE_TABLES` | `true` | Create SQLAlchemy tables on app startup for local/dev convenience; set `false` in production and use Alembic migrations |
 | `DEBUG` | `false` | Debug mode |
 | `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
+| `LOCAL_USER_ID` | `local-teacher` | Local single-user fallback identity used when no trusted user header is present |
+| `TRUSTED_USER_HEADER` | `X-Latexed-User` | Header name populated by a trusted auth proxy with the current user id; blank/control-character values are rejected |
 | `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; override with exact public/reverse-proxy hostnames in production |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
@@ -347,7 +374,7 @@ Deprecated compatibility routes are still available for compile history:
 | `MAX_LATEX_TOTAL_CHARS` | `2000000` | Maximum total characters allowed across a compile/export payload; set `0` to disable |
 | `MAX_COMPILER_OUTPUT_CHARS` | `20000` | Maximum compiler output/log characters returned through API responses/history; set `0` to disable truncation |
 | `LATEX_ALLOWED_EXTENSIONS` | `.tex,.bib,.cls,.sty` | Comma-separated allowlist for user-provided LaTeX project files accepted by compile/export payloads |
-| `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for generated compile/export artifacts; set `0` to disable automatic cleanup |
+| `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for trusted compile/export/lesson artifacts; set `0` to disable automatic cleanup |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
 | `LESSON_ARTIFACT_ROOT` | empty (`${UPLOAD_DIR}/lessons`) | Trusted root for lesson audio artifacts; leave empty to derive from `UPLOAD_DIR` |
 | `MAX_LESSON_AUDIO_SIZE` | `104857600` | Maximum lesson audio upload size in bytes |
@@ -369,10 +396,16 @@ Deprecated compatibility routes are still available for compile history:
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
 | `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds; increase for slow local Ollama models such as 14B+ |
+| `AI_GENERATION_JOB_EXECUTION_MODE` | `inline` | Persisted generation job execution mode: `inline` runs before returning; `background` schedules in-process background execution; `external` leaves jobs queued for a separate worker/queue adapter |
+| `AI_GENERATION_JOB_TIMEOUT_SECONDS` | `0` | Optional timeout for persisted generation jobs; `0` disables timeout failure marking |
+| `AI_GENERATION_JOB_STALE_AFTER_SECONDS` | `0` | Optional stale-running job recovery threshold based on worker heartbeat/`updated_at`; `0` disables automatic recovery |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
 | `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint in-memory limit for AI endpoints; set `0` to disable |
-| `AI_MAX_MATERIALS_CHARS` | `20000` | Maximum size of user materials accepted by AI prompt/generate endpoints |
-| `AI_MAX_PROMPT_CHARS` | `60000` | Maximum generated prompt size before a provider call is allowed |
+| `AI_DUPLICATE_RETRY_AFTER_SECONDS` | `3` | Retry hint returned when an identical generation request is already in flight |
+| `AI_IDEMPOTENCY_HEADER` | `Idempotency-Key` | Header accepted by `POST /api/generation/jobs` to replay the same persisted job for safe client retries |
+| `AI_IDEMPOTENCY_KEY_MAX_CHARS` | `128` | Maximum idempotency key length; keys may contain ASCII letters/digits plus `.`, `_`, `:`, and `-` |
+| `AI_MAX_MATERIALS_CHARS` | `50000` | Maximum size of user materials accepted by AI prompt/generate endpoints |
+| `AI_MAX_PROMPT_CHARS` | `200000` | Maximum generated prompt size before a provider call is allowed |
 | `AI_MAX_RAW_OUTPUT_CHARS` | `200000` | Maximum provider raw output / LaTeX validation payload size |
 | `AI_EXPOSE_PROVIDER_ERRORS` | `false` | Expose upstream provider error details to clients; keep `false` in production |
 | `AI_COMPILE_CHECK_ENABLED` | `true` | Run a best-effort backend compile check after AI generation when `pdflatex` is available |
@@ -388,7 +421,11 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
 
-Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper.
+Generation jobs are durable even in `inline` mode: every `POST /api/generation/jobs` stores a job row before provider execution. Set `AI_GENERATION_JOB_EXECUTION_MODE=background` to return queued jobs immediately and run provider work through FastAPI background tasks; this is suitable for local/dev. Set `AI_GENERATION_JOB_EXECUTION_MODE=external` when a deployment has a separate worker/queue adapter: the API persists a queued job and returns immediately, while the external worker claims queued rows and runs them through the same `GenerationJobService`/`GenerationOrchestrator` boundary. Run `make generation-worker` for a continuous worker loop or `make generation-worker-once` for a one-shot claim/run cycle; both call `backend/scripts/run_generation_jobs.py`, which also supports `--job-id`, `--owner-id`, `--max-jobs`, `--poll-interval-seconds`, `--timeout-seconds`, `--recover-stale`, `--recover-stale-only`, and `--stale-after-seconds`. Configure `AI_GENERATION_JOB_STALE_AFTER_SECONDS` (or pass `--stale-after-seconds`) to requeue `running` jobs whose worker heartbeat is older than the threshold; leave it at `0` to disable automatic stale recovery. `/api/ready` includes a `generation_jobs` check with queued/running/completed/failed/canceled counts, backlog, stale-running count, execution mode, and stale threshold so operators can see worker pressure before starting recovery. For a more detailed owner-scoped operator view, use `GET /api/generation/jobs/operator/status`; it returns counts and stale job samples containing IDs/timestamps only, never full prompts/materials. Use `POST /api/generation/jobs/operator/recover-stale` to requeue stale running jobs for the current owner. Job responses include operational timing metrics (`queue_wait_seconds`, `run_duration_seconds`, and `total_duration_seconds`) so operators can distinguish queue delay from provider/compile runtime. Use `GET /api/generation/jobs` for an operator-safe list of current-owner jobs, `POST /api/generation/jobs/{id}/retry` to rerun failed/canceled jobs from stored request metadata, `POST /api/generation/jobs/{id}/cancel` to mark queued/running jobs as canceled, and set `AI_GENERATION_JOB_TIMEOUT_SECONDS` when a deployment needs persisted timeout failures for slow or stuck provider calls. The frontend generation modal includes a lightweight “История jobs” panel backed by `GET /api/generation/jobs` for recent current-project job diagnostics.
+
+Lesson document generation records provenance for each artifact: provider, prompt hash, source transcript hash, and whether raw or edited transcript text was used. Reviewed transcripts produce `completed` documents; raw/unreviewed transcripts must be explicitly confirmed with `allow_unreviewed=true` and produce `draft` documents so teachers can distinguish generated materials that still need review.
+
+Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. Install it with `uv sync --group transcription` or `uv pip install faster-whisper==1.2.1`, and make sure system `ffmpeg` and `ffprobe` are on `PATH`. The legacy `TRANSCRIPTION_PROVIDER=legacy_whisper` adapter requires `uv sync --group legacy-transcription` or `uv pip install openai-whisper==20250625`, plus system `ffmpeg`/`ffprobe` and the repository `transcribe.py` adapter. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper. Use `GET /api/transcription/status` or the `transcription` section of `GET /api/ready` before enabling lesson transcription in a deployment; missing optional packages or media binaries are reported with `missing_requirements` and an `install_hint`. If `/api/lessons/{id}/transcribe` logs `provider=disabled` or returns a failed transcript with `Transcription provider is disabled`, the backend is running in the safe no-provider mode; set `TRANSCRIPTION_PROVIDER=faster_whisper` after installing the optional runtime, or set `TRANSCRIPTION_PROVIDER=fake` only for local UI smoke tests.
 
 ## Logging and observability
 

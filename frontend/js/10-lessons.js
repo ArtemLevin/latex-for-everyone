@@ -232,6 +232,7 @@ function renderLessonSidebar(message = '') {
         ? lessonDocuments.map(doc => `
             <a class="lesson-doc-link" href="${escapeHtml(resolveApiUrl(doc.download_url))}" target="_blank" rel="noopener">
                 ${escapeHtml(doc.title || doc.document_type)}
+                <span class="lesson-muted">${escapeHtml(doc.status || 'unknown')} · ${escapeHtml(doc.source_text_kind || 'source')}</span>
             </a>
         `).join('')
         : '<div class="lesson-muted">Документы ещё не созданы</div>';
@@ -552,14 +553,21 @@ async function transcribeLesson() {
 async function generateLessonDocuments() {
     if (!selectedLessonId) return showToast('Сначала выберите занятие', 'error');
     try {
+        const selectedTranscript = lessonTranscripts.find(transcript => transcript.id === selectedLessonTranscriptId) || lessonTranscripts[0] || null;
+        const allowUnreviewed = selectedTranscript && selectedTranscript.review_status !== 'reviewed'
+            ? window.confirm('Transcript ещё не подтверждён. Создать draft-документы из текущего текста?')
+            : false;
+        if (selectedTranscript && selectedTranscript.review_status !== 'reviewed' && !allowUnreviewed) return;
         const documents = await lessonApiRequest(`/lessons/${selectedLessonId}/documents/generate`, {
             method: 'POST',
-            body: JSON.stringify({ transcript_id: selectedLessonTranscriptId || null })
+            // Backend records draft provenance unless the teacher explicitly reviewed the transcript.
+            body: JSON.stringify({ transcript_id: selectedLessonTranscriptId || null, allow_unreviewed: allowUnreviewed })
         });
         lessonDocuments = documents;
         await loadLessonTranscripts();
-        renderLessonSidebar('Документы созданы.');
-        showToast('Документы урока готовы', 'success');
+        const hasDrafts = documents.some(document => document.status === 'draft');
+        renderLessonSidebar(hasDrafts ? 'Draft-документы созданы из неподтверждённого transcript.' : 'Документы созданы.');
+        showToast(hasDrafts ? 'Draft-документы урока готовы' : 'Документы урока готовы', 'success');
     } catch (error) {
         showToast(`Ошибка генерации документов: ${error.message}`, 'error');
     }

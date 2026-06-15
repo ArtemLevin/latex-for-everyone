@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import get_project
+from app.dependencies import get_current_user_id, get_project
 from app.models import Project
 from app.schemas import (
     MessageResponse,
@@ -30,19 +30,21 @@ async def list_projects(
     skip: int = Query(0, ge=0),
     limit: int = Query(20, ge=1, le=100),
     search: Optional[str] = None,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return project_service.list_projects(db, skip=skip, limit=limit, search=search)
+    return project_service.list_projects(db, owner_id=owner_id, skip=skip, limit=limit, search=search)
 
 
 @router.post("/", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def create_project(
     project_data: ProjectCreate,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     from app.routers.templates import get_template_content
 
-    return project_service.create_project(db, project_data, template_resolver=get_template_content)
+    return project_service.create_project(db, project_data, owner_id=owner_id, template_resolver=get_template_content)
 
 
 @router.get("/{project_id}", response_model=ProjectDetailResponse)
@@ -105,6 +107,7 @@ async def restore_snapshot(
 @router.post("/{project_id}/duplicate", response_model=ProjectResponse, status_code=status.HTTP_201_CREATED)
 async def duplicate_project(
     project: Project = Depends(get_project),
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    return project_service.duplicate_project(db, project)
+    return project_service.duplicate_project(db, project, owner_id=owner_id)
