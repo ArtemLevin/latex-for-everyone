@@ -34,6 +34,7 @@ from app.services.lesson_documents import (
     LessonDocumentProviderError,
     LessonPromptError,
     LessonTranscriptNotFoundError,
+    LessonTranscriptReviewRequiredError,
 )
 from app.services.lesson_jobs import (
     LessonJobConflictError,
@@ -83,6 +84,8 @@ def map_lesson_document_error(exc: Exception) -> HTTPException:
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
     if isinstance(exc, LessonPromptError):
         return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Lesson prompt template is not available")
+    if isinstance(exc, LessonTranscriptReviewRequiredError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     if isinstance(exc, LessonDocumentProviderError):
         return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected lesson document error")
@@ -320,11 +323,12 @@ async def generate_lesson_documents(
             lesson=lesson,
             document_types=request_data.document_types or None,
             transcript_id=request_data.transcript_id,
+            allow_unreviewed=request_data.allow_unreviewed,
         )
         return [document_response(document) for document in documents]
     except LessonNotFoundError as exc:
         raise map_lesson_service_error(exc) from exc
-    except (LessonTranscriptNotFoundError, LessonPromptError, LessonDocumentProviderError) as exc:
+    except (LessonTranscriptNotFoundError, LessonTranscriptReviewRequiredError, LessonPromptError, LessonDocumentProviderError) as exc:
         raise map_lesson_document_error(exc) from exc
 
 

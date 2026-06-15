@@ -24,8 +24,8 @@ TemplateResolver = Callable[[str], dict[str, str] | None]
 class ProjectService:
     """Business rules for project, snapshot and duplication workflows."""
 
-    def list_projects(self, db: Session, *, skip: int, limit: int, search: str | None = None) -> list[Project]:
-        query = db.query(Project)
+    def list_projects(self, db: Session, *, owner_id: str, skip: int, limit: int, search: str | None = None) -> list[Project]:
+        query = db.query(Project).filter(Project.owner_id == owner_id)
         if search:
             query = query.filter(Project.name.ilike(f"%{search}%"))
         return query.order_by(Project.updated_at.desc()).offset(skip).limit(limit).all()
@@ -35,10 +35,12 @@ class ProjectService:
         db: Session,
         project_data: ProjectCreate,
         *,
+        owner_id: str,
         template_resolver: TemplateResolver | None = None,
     ) -> Project:
         project = Project(
             name=project_data.name,
+            owner_id=owner_id,
             is_public=project_data.is_public,
         )
         db.add(project)
@@ -128,9 +130,10 @@ class ProjectService:
         project.updated_at = utc_now()
         db.commit()
 
-    def duplicate_project(self, db: Session, project: Project) -> Project:
+    def duplicate_project(self, db: Session, project: Project, *, owner_id: str) -> Project:
         new_project = Project(
             name=f"{project.name} (копия)",
+            owner_id=owner_id,
             is_public=False,
         )
         db.add(new_project)

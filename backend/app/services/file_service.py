@@ -62,14 +62,17 @@ class FileService:
         db.refresh(new_file)
         return new_file
 
-    def get_file(self, db: Session, file_id: str) -> File:
-        file = db.query(File).filter(File.id == file_id).first()
+    def get_file(self, db: Session, file_id: str, *, owner_id: str | None = None) -> File:
+        query = db.query(File).filter(File.id == file_id)
+        if owner_id is not None:
+            query = query.join(Project).filter(Project.owner_id == owner_id)
+        file = query.first()
         if not file:
             raise FileNotFoundError("File not found")
         return file
 
-    def update_file(self, db: Session, file_id: str, file_data: FileUpdate) -> File:
-        file = self.get_file(db, file_id)
+    def update_file(self, db: Session, file_id: str, file_data: FileUpdate, *, owner_id: str | None = None) -> File:
+        file = self.get_file(db, file_id, owner_id=owner_id)
         update_data = file_data.model_dump(exclude_unset=True)
 
         if "name" in update_data:
@@ -87,8 +90,8 @@ class FileService:
         db.refresh(file)
         return file
 
-    def delete_file(self, db: Session, file_id: str) -> str:
-        file = self.get_file(db, file_id)
+    def delete_file(self, db: Session, file_id: str, *, owner_id: str | None = None) -> str:
+        file = self.get_file(db, file_id, owner_id=owner_id)
         file_count = db.query(File).filter(File.project_id == file.project_id).count()
         if file_count <= 1:
             raise FileConflictError("Cannot delete the last file in project")
@@ -98,8 +101,8 @@ class FileService:
         db.commit()
         return file_name
 
-    def replace_file_content(self, db: Session, file_id: str, content: bytes) -> None:
-        file = self.get_file(db, file_id)
+    def replace_file_content(self, db: Session, file_id: str, content: bytes, *, owner_id: str | None = None) -> None:
+        file = self.get_file(db, file_id, owner_id=owner_id)
         file.content = content.decode("utf-8")
         file.updated_at = utc_now()
         db.commit()

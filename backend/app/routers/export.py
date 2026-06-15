@@ -3,6 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 from app.config import settings
+from app.dependencies import get_current_user_id
 from app.models import Project
 from app.schemas import ExportRequest, ExportResponse, PDFGenerationResult
 from app.services.artifact_cleanup import cleanup_old_files
@@ -57,10 +58,11 @@ def validate_export_entry_name(name: str) -> str:
 @router.post("/pdf", response_model=ExportResponse)
 async def export_pdf(
     request: ExportRequest,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     logger.info("export pdf requested project_id=%s content_files=%s", request.project_id, len(request.content or {}))
-    project = db.query(Project).filter(Project.id == request.project_id).first()
+    project = db.query(Project).filter(Project.id == request.project_id, Project.owner_id == owner_id).first()
     if not project:
         logger.warning("export pdf project not found project_id=%s", request.project_id)
         raise HTTPException(status_code=404, detail="Project not found")
@@ -106,10 +108,11 @@ async def export_pdf(
 @router.post("/html", response_model=ExportResponse)
 async def export_html(
     request: ExportRequest,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     logger.info("export html requested project_id=%s content_files=%s", request.project_id, len(request.content or {}))
-    project = db.query(Project).filter(Project.id == request.project_id).first()
+    project = db.query(Project).filter(Project.id == request.project_id, Project.owner_id == owner_id).first()
     if not project:
         logger.warning("export html project not found project_id=%s", request.project_id)
         raise HTTPException(status_code=404, detail="Project not found")
@@ -156,10 +159,11 @@ async def export_html(
 @router.post("/tex", response_model=ExportResponse)
 async def export_tex(
     request: ExportRequest,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     logger.info("export tex requested project_id=%s content_files=%s", request.project_id, len(request.content or {}))
-    project = db.query(Project).filter(Project.id == request.project_id).first()
+    project = db.query(Project).filter(Project.id == request.project_id, Project.owner_id == owner_id).first()
     if not project:
         logger.warning("export tex project not found project_id=%s", request.project_id)
         raise HTTPException(status_code=404, detail="Project not found")
