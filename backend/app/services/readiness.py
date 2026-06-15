@@ -9,6 +9,7 @@ from sqlalchemy import Engine, inspect, text
 from app.config import settings
 from app.database import Base, engine as default_engine
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
+from app.services.transcription import get_transcription_runtime_status
 
 REQUIRED_TABLES = frozenset(Base.metadata.tables.keys())
 LATEX_PACKAGE_FILES = {
@@ -17,10 +18,8 @@ LATEX_PACKAGE_FILES = {
 }
 KPSEWHICH_TIMEOUT_SECONDS = 3
 
-
 def _check_response(status: str, message: str, details: dict[str, Any] | None = None) -> ReadinessCheckResponse:
     return ReadinessCheckResponse(status=status, message=message, details=details or {})
-
 
 def check_database_ready(db_engine: Engine = default_engine) -> ReadinessCheckResponse:
     """Check that the database is reachable and contains the expected app tables."""
@@ -43,7 +42,6 @@ def check_database_ready(db_engine: Engine = default_engine) -> ReadinessCheckRe
     except Exception as exc:  # noqa: BLE001 - readiness should report failures instead of raising
         return _check_response("error", "Database readiness check failed", {"error": str(exc)})
 
-
 def check_compiler_ready() -> ReadinessCheckResponse:
     """Check whether the configured LaTeX compiler binary can be found on PATH."""
     compiler = settings.LATEX_COMPILER
@@ -52,7 +50,6 @@ def check_compiler_ready() -> ReadinessCheckResponse:
     if not compiler_path:
         return _check_response("missing", f"{compiler} was not found on PATH", details)
     return _check_response("ok", f"{compiler} found", details)
-
 
 def _kpsewhich_exists(filename: str) -> bool:
     result = subprocess.run(
@@ -63,7 +60,6 @@ def _kpsewhich_exists(filename: str) -> bool:
         timeout=KPSEWHICH_TIMEOUT_SECONDS,
     )
     return result.returncode == 0 and bool(result.stdout.strip())
-
 
 def check_latex_packages_ready(compiler_check: ReadinessCheckResponse | None = None) -> ReadinessCheckResponse:
     """Check Russian babel/T2A package availability when the compiler is installed."""
@@ -105,7 +101,6 @@ def check_latex_packages_ready(compiler_check: ReadinessCheckResponse | None = N
 
     return _check_response("ok", "Russian/T2A LaTeX support is available", details)
 
-
 def _check_directory_writable(directory: Path) -> dict[str, Any]:
     resolved = directory.resolve()
     resolved.mkdir(parents=True, exist_ok=True)
@@ -113,7 +108,6 @@ def _check_directory_writable(directory: Path) -> dict[str, Any]:
         probe.write(b"ok")
         probe.flush()
     return {"status": "ok", "path": str(resolved)}
-
 
 def check_artifact_dirs_ready() -> ReadinessCheckResponse:
     """Check that runtime artifact directories exist and are writable."""
@@ -137,6 +131,10 @@ def check_artifact_dirs_ready() -> ReadinessCheckResponse:
         return _check_response("error", "One or more runtime artifact directories are not writable", details)
     return _check_response("ok", "Runtime artifact directories are writable", details)
 
+def check_transcription_ready() -> ReadinessCheckResponse:
+    """Check optional lesson transcription runtime without loading Whisper models."""
+    status = get_transcription_runtime_status()
+    return _check_response(str(status["status"]), str(status["message"]), dict(status["details"]))
 
 def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str:
     """Aggregate individual readiness checks into ready/degraded/not_ready."""
@@ -146,8 +144,9 @@ def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str
         return "degraded"
     if checks["latex_packages"].status == "skipped" and checks["compiler"].status != "ok":
         return "degraded"
+    if checks.get("transcription") and checks["transcription"].status not in {"ok", "skipped"}:
+        return "degraded"
     return "ready"
-
 
 def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessResponse:
     """Run all readiness checks and return the public API response model."""
@@ -155,10 +154,12 @@ def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessRes
     compiler = check_compiler_ready()
     latex_packages = check_latex_packages_ready(compiler)
     artifact_dirs = check_artifact_dirs_ready()
+    transcription = check_transcription_ready()
     checks = {
         "database": database,
         "compiler": compiler,
         "latex_packages": latex_packages,
         "artifact_dirs": artifact_dirs,
+        "transcription": transcription,
     }
     return ReadinessResponse(status=aggregate_readiness_status(checks), checks=checks)
