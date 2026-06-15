@@ -1,15 +1,19 @@
 import shutil
 import subprocess
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import Engine, inspect, text
+from sqlalchemy import func
 
 from app.config import settings
-from app.database import Base, engine as default_engine
+from app.database import Base, SessionLocal, engine as default_engine
+from app.models import GenerationJob
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services.transcription import get_transcription_runtime_status
+from app.time_utils import utc_now
 
 REQUIRED_TABLES = frozenset(Base.metadata.tables.keys())
 LATEX_PACKAGE_FILES = {
@@ -136,6 +140,42 @@ def check_transcription_ready() -> ReadinessCheckResponse:
     status = get_transcription_runtime_status()
     return _check_response(str(status["status"]), str(status["message"]), dict(status["details"]))
 
+def check_generation_jobs_ready(session_factory=SessionLocal) -> ReadinessCheckResponse:
+    """Report generation worker backlog and stale running jobs without exposing prompts."""
+    db = session_factory()
+    try:
+        rows = db.query(GenerationJob.status, func.count(GenerationJob.id)).group_by(GenerationJob.status).all()
+        counts = {status: count for status, count in rows}
+        details: dict[str, Any] = {
+            "execution_mode": settings.AI_GENERATION_JOB_EXECUTION_MODE,
+            "stale_after_seconds": settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS,
+            "counts": {
+                "queued": counts.get("queued", 0),
+                "running": counts.get("running", 0),
+                "completed": counts.get("completed", 0),
+                "failed": counts.get("failed", 0),
+                "canceled": counts.get("canceled", 0),
+            },
+        }
+        stale_running = 0
+        if settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS > 0:
+            cutoff = utc_now() - timedelta(seconds=settings.AI_GENERATION_JOB_STALE_AFTER_SECONDS)
+            stale_running = (
+                db.query(func.count(GenerationJob.id))
+                .filter(GenerationJob.status == "running", GenerationJob.updated_at < cutoff)
+                .scalar()
+                or 0
+            )
+        details["stale_running"] = stale_running
+        details["backlog"] = details["counts"]["queued"] + details["counts"]["running"]
+        if stale_running:
+            return _check_response("error", "Generation worker has stale running jobs", details)
+        return _check_response("ok", "Generation job backlog is observable", details)
+    except Exception as exc:  # noqa: BLE001 - readiness should report failures instead of raising
+        return _check_response("error", "Generation job readiness check failed", {"error": str(exc)})
+    finally:
+        db.close()
+
 def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str:
     """Aggregate individual readiness checks into ready/degraded/not_ready."""
     if checks["database"].status != "ok" or checks["artifact_dirs"].status != "ok":
@@ -146,6 +186,8 @@ def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str
         return "degraded"
     if checks.get("transcription") and checks["transcription"].status not in {"ok", "skipped"}:
         return "degraded"
+    if checks.get("generation_jobs") and checks["generation_jobs"].status != "ok":
+        return "degraded"
     return "ready"
 
 def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessResponse:
@@ -155,11 +197,13 @@ def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessRes
     latex_packages = check_latex_packages_ready(compiler)
     artifact_dirs = check_artifact_dirs_ready()
     transcription = check_transcription_ready()
+    generation_jobs = check_generation_jobs_ready()
     checks = {
         "database": database,
         "compiler": compiler,
         "latex_packages": latex_packages,
         "artifact_dirs": artifact_dirs,
         "transcription": transcription,
+        "generation_jobs": generation_jobs,
     }
     return ReadinessResponse(status=aggregate_readiness_status(checks), checks=checks)

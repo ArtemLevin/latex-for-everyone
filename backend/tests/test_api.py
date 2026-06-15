@@ -241,13 +241,18 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
         "check_transcription_ready",
         lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_generation_jobs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={"counts": {}}),
+    )
 
     response = client.get("/api/ready")
 
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription"}
+    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription", "generation_jobs"}
     assert data["checks"]["database"]["status"] == "ok"
     assert data["checks"]["compiler"]["status"] == "ok"
 
@@ -280,6 +285,11 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
         readiness,
         "check_transcription_ready",
         lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_generation_jobs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={"counts": {}}),
     )
 
     response = client.get("/api/ready")
@@ -337,6 +347,11 @@ def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkey
         "check_transcription_ready",
         lambda: ReadinessCheckResponse(status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_generation_jobs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={"counts": {}}),
+    )
 
     response = client.get("/api/ready")
 
@@ -344,6 +359,78 @@ def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkey
     data = response.json()
     assert data["status"] == "degraded"
     assert data["checks"]["transcription"]["status"] == "missing"
+
+
+def test_generation_job_readiness_reports_backlog_and_stale_running(monkeypatch):
+    from datetime import timedelta
+    from app.config import settings
+    from app.routers import generation as generation_router
+    from app.services import readiness
+    from app.services.generation_job_worker import generation_job_service
+    from app.time_utils import utc_now
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Readiness}Queued"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_STALE_AFTER_SECONDS", 60)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Readiness"}, "materials": "Материал."},
+    )
+    assert response.status_code == 202
+    job_id = response.json()["id"]
+
+    db = SessionTesting()
+    try:
+        job = generation_job_service.get_job(db, job_id=job_id)
+        stale_time = utc_now() - timedelta(seconds=300)
+        job.status = "running"
+        job.stage = "generating"
+        job.updated_at = stale_time
+        db.add(job)
+        db.commit()
+    finally:
+        db.close()
+
+    readiness_response = readiness.check_generation_jobs_ready(SessionTesting)
+
+    assert readiness_response.status == "error"
+    assert readiness_response.details["counts"]["running"] == 1
+    assert readiness_response.details["stale_running"] == 1
+    assert readiness_response.details["backlog"] == 1
+
+
+def test_readiness_degraded_when_generation_jobs_are_stale(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
+    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
+    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
+    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
+    monkeypatch.setattr(readiness, "check_transcription_ready", lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_generation_jobs_ready",
+        lambda: ReadinessCheckResponse(status="error", message="Generation worker has stale running jobs", details={"stale_running": 1}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["generation_jobs"]["status"] == "error"
 
 
 def test_root():
@@ -2730,6 +2817,54 @@ def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_incr
         "materials": "Пользовательские материалы должны отправляться только один раз.",
     }
     first_result = {}
+
+    def send_first_request():
+        first_result["response"] = client.post("/api/generation/generate", json=payload)
+
+    thread = threading.Thread(target=send_first_request)
+    thread.start()
+    try:
+        assert started.wait(timeout=5), "first generation request did not reach provider"
+
+        duplicate_response = client.post("/api/generation/generate", json=payload)
+
+        assert duplicate_response.status_code == 409
+        assert duplicate_response.headers["Retry-After"] == str(
+            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
+        )
+        assert duplicate_response.json()["detail"] == (
+            "AI generation is already running for the same input. Wait for the current request to finish."
+        )
+        assert calls == 1
+        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        generation_router.rate_limit_buckets.clear()
+        generation_router.active_generation_requests.clear()
+
+    assert not thread.is_alive()
+    assert first_result["response"].status_code == 200
+    assert calls == 1
+
+
+def test_estimated_token_counter_splits_text_and_latex_commands():
+    from app.schemas import GenerationTokenUsageResponse
+    from app.services.token_counter import add_estimated_usage, estimate_token_count
+
+    assert estimate_token_count(r"\section{Тема} $x+1$") > 5
+    usage = GenerationTokenUsageResponse()
+    add_estimated_usage(usage, input_text="prompt text", output_text="answer text")
+
+    assert usage.input_tokens > 0
+    assert usage.output_tokens > 0
+    assert usage.total_tokens == usage.input_tokens + usage.output_tokens
+    assert usage.source == "estimated"
+
+
+def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
+    from app.config import settings
+    from app.services.ai_generation import AIGenerationService
 
     def send_first_request():
         first_result["response"] = client.post("/api/generation/generate", json=payload)
