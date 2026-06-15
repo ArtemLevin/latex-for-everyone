@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.schemas import (
@@ -16,7 +16,7 @@ from app.schemas import (
     GenerationValidationResponse,
 )
 from app.config import settings
-from app.database import get_db
+from app.database import SessionLocal, get_db
 from app.dependencies import get_current_user_id
 from app.models import Project
 from app.services.ai_generation import AIGenerationError, AIGenerationService
@@ -228,6 +228,31 @@ def ensure_project_access(db: Session, *, project_id: str | None, owner_id: str)
         raise HTTPException(status_code=404, detail="Project not found")
 
 
+async def run_generation_job_background(job_id: str) -> None:
+    db = SessionLocal()
+    try:
+        try:
+            job = generation_job_service.get_job(db, job_id=job_id)
+        except GenerationJobNotFoundError:
+            logger.warning("generation background job missing job_id=%s", job_id)
+            return
+
+        generation_request = GenerationRequest(**job.request_payload)
+        prompt_response = build_generation_prompt_response(generation_request)
+        await generation_job_service.run_job(
+            db,
+            job=job,
+            generation_request=generation_request,
+            prompt_response=prompt_response,
+            request_hash=job.request_hash,
+            owner_id=job.owner_id,
+            orchestrator=generation_orchestrator,
+            timeout_seconds=settings.AI_GENERATION_JOB_TIMEOUT_SECONDS,
+        )
+    finally:
+        db.close()
+
+
 @router.get("/presets", response_model=list[GenerationPresetResponse])
 async def list_generation_presets():
     return PRESETS
@@ -363,6 +388,7 @@ async def generate_latex(
 async def create_generation_job(
     request: Request,
     generation_request: GenerationRequest,
+    background_tasks: BackgroundTasks,
     owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -394,7 +420,14 @@ async def create_generation_job(
             owner_id=owner_id,
             idempotency_key=idempotency_key,
         )
-        # Persist the job first; this PR runs it inline, and a later worker can reuse the same job contract.
+        execution_mode = settings.AI_GENERATION_JOB_EXECUTION_MODE.lower()
+        if execution_mode == "background":
+            background_tasks.add_task(run_generation_job_background, job.id)
+            logger.info("generation job scheduled background job_id=%s owner_id=%s", job.id, owner_id)
+            return generation_job_service.to_response(job)
+        if execution_mode != "inline":
+            logger.warning("unknown generation job execution mode mode=%s; falling back to inline", execution_mode)
+
         job = await generation_job_service.run_job(
             db,
             job=job,
@@ -403,6 +436,7 @@ async def create_generation_job(
             request_hash=request_sha,
             owner_id=owner_id,
             orchestrator=generation_orchestrator,
+            timeout_seconds=settings.AI_GENERATION_JOB_TIMEOUT_SECONDS,
         )
         return generation_job_service.to_response(job)
     finally:
@@ -417,6 +451,19 @@ async def get_generation_job(
 ):
     try:
         job = generation_job_service.get_job(db, job_id=job_id, owner_id=owner_id)
+    except GenerationJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return generation_job_service.to_response(job)
+
+
+@router.post("/jobs/{job_id}/cancel", response_model=GenerationJobResponse)
+async def cancel_generation_job(
+    job_id: str,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    try:
+        job = generation_job_service.cancel_job(db, job_id=job_id, owner_id=owner_id)
     except GenerationJobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return generation_job_service.to_response(job)

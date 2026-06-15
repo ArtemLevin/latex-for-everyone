@@ -341,6 +341,7 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | POST | `/api/generation/generate` | Generate LaTeX through Ollama or an OpenAI-compatible vendor |
 | POST | `/api/generation/jobs` | Create/run a durable generation job; supports the configured idempotency header for safe client retries |
 | GET | `/api/generation/jobs/{id}` | Poll a generation job in the current owner scope |
+| POST | `/api/generation/jobs/{id}/cancel` | Cancel a queued/running generation job in the current owner scope |
 
 Deprecated compatibility routes are still available for compile history:
 
@@ -388,6 +389,8 @@ Deprecated compatibility routes are still available for compile history:
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
 | `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds; increase for slow local Ollama models such as 14B+ |
+| `AI_GENERATION_JOB_EXECUTION_MODE` | `inline` | Persisted generation job execution mode: `inline` runs before returning; `background` returns a queued job and schedules in-process background execution |
+| `AI_GENERATION_JOB_TIMEOUT_SECONDS` | `0` | Optional timeout for persisted generation jobs; `0` disables timeout failure marking |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
 | `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint in-memory limit for AI endpoints; set `0` to disable |
 | `AI_DUPLICATE_RETRY_AFTER_SECONDS` | `3` | Retry hint returned when an identical generation request is already in flight |
@@ -409,6 +412,8 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_API_KEY` | empty | API key for vendor generation |
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
+
+Generation jobs are durable even in `inline` mode: every `POST /api/generation/jobs` stores a job row before provider execution. Set `AI_GENERATION_JOB_EXECUTION_MODE=background` to return queued jobs immediately and run provider work through FastAPI background tasks; this is suitable for local/dev and is the service boundary for a future external worker. Use `POST /api/generation/jobs/{id}/cancel` to mark queued/running jobs as canceled, and set `AI_GENERATION_JOB_TIMEOUT_SECONDS` when a deployment needs persisted timeout failures for slow or stuck provider calls.
 
 Lesson document generation records provenance for each artifact: provider, prompt hash, source transcript hash, and whether raw or edited transcript text was used. Reviewed transcripts produce `completed` documents; raw/unreviewed transcripts must be explicitly confirmed with `allow_unreviewed=true` and produce `draft` documents so teachers can distinguish generated materials that still need review.
 

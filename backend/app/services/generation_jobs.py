@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import uuid
 
@@ -21,9 +22,8 @@ class GenerationJobNotFoundError(ValueError):
 class GenerationJobService:
     """Persistence boundary for generation jobs.
 
-    Jobs run inline in this PR so the API contract is durable immediately; a
-    later worker can call the same service methods without changing response
-    shapes or frontend polling semantics.
+    The service supports both inline execution and background dispatch; routers
+    decide when to schedule work while this class owns status transitions.
     """
 
     def create_job(
@@ -72,7 +72,6 @@ class GenerationJobService:
             raise GenerationJobNotFoundError(f"Generation job {job_id} not found")
         return job
 
-
     def get_job_by_idempotency_key(self, db: Session, *, owner_id: str, idempotency_key: str) -> GenerationJob | None:
         return (
             db.query(GenerationJob)
@@ -91,6 +90,7 @@ class GenerationJobService:
         request_hash: str,
         owner_id: str,
         orchestrator: GenerationOrchestrator,
+        timeout_seconds: int = 0,
     ) -> GenerationJob:
         if job.status in TERMINAL_GENERATION_JOB_STATUSES:
             logger.info("generation job run skipped terminal job_id=%s status=%s", job.id, job.status)
@@ -98,17 +98,48 @@ class GenerationJobService:
 
         self._mark_running(db, job, stage="generating")
         try:
-            result = await orchestrator.generate(
+            generate_coro = orchestrator.generate(
                 db=db,
                 generation_request=generation_request,
                 prompt_response=prompt_response,
                 request_sha=request_hash,
                 owner_id=owner_id,
             )
+            # Timeout is enforced at the persisted-job boundary so both inline
+            # and background execution modes return the same failure state.
+            if timeout_seconds > 0:
+                result = await asyncio.wait_for(generate_coro, timeout=timeout_seconds)
+            else:
+                result = await generate_coro
+        except asyncio.TimeoutError:
+            self._mark_failed(db, job, "AI generation job timed out.")
+            return job
         except GenerationOrchestrationError as exc:
             self._mark_failed(db, job, exc.detail)
             return job
+
+        db.refresh(job)
+        if job.status == "canceled":
+            logger.info("generation job completion skipped because job was canceled job_id=%s", job.id)
+            return job
         self._mark_completed(db, job, result)
+        return job
+
+
+    def cancel_job(self, db: Session, *, job_id: str, owner_id: str) -> GenerationJob:
+        job = self.get_job(db, job_id=job_id, owner_id=owner_id)
+        if job.status in TERMINAL_GENERATION_JOB_STATUSES:
+            logger.info("generation job cancel ignored terminal job_id=%s status=%s", job.id, job.status)
+            return job
+        job.status = "canceled"
+        job.stage = "canceled"
+        job.error_message = "Generation job was canceled by user request."
+        job.finished_at = utc_now()
+        job.updated_at = utc_now()
+        db.add(job)
+        db.commit()
+        db.refresh(job)
+        logger.info("generation job canceled job_id=%s owner_id=%s", job.id, owner_id)
         return job
 
     def to_response(self, job: GenerationJob) -> GenerationJobResponse:

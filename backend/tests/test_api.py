@@ -3141,6 +3141,104 @@ def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
     assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
 
 
+def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Background}Completed from background task"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Background"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "queued"
+    assert job["stage"] == "queued"
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    completed_job = status_response.json()
+    assert completed_job["status"] == "completed"
+    assert "Completed from background task" in completed_job["result"]["latex_code"]
+
+
+def test_generation_job_cancel_queued_background_job(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def noop_background_runner(job_id):
+        return None
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
+    monkeypatch.setattr(generation_router, "run_generation_job_background", noop_background_runner)
+    generation_router.rate_limit_buckets.clear()
+
+    create_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Cancel"}, "materials": "Материал."},
+    )
+
+    assert create_response.status_code == 202
+    job = create_response.json()
+    assert job["status"] == "queued"
+
+    cancel_response = client.post(f"/api/generation/jobs/{job['id']}/cancel")
+
+    assert cancel_response.status_code == 200
+    canceled = cancel_response.json()
+    assert canceled["status"] == "canceled"
+    assert canceled["stage"] == "canceled"
+    assert canceled["error_message"] == "Generation job was canceled by user request."
+
+
+def test_generation_job_timeout_marks_job_failed(monkeypatch):
+    import asyncio
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def slow_generate(prompt, provider, model):
+        await asyncio.sleep(0.05)
+        return (
+            "```latex\n"
+            r"\section{Too slow}"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "inline")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", slow_generate)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Timeout"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["error_message"] == "AI generation job timed out."
+
+
 def test_generation_job_rejects_invalid_idempotency_key():
     response = client.post(
         "/api/generation/jobs",

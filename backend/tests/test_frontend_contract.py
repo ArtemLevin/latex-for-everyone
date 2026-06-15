@@ -101,4 +101,5 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "createGenerationIdempotencyKey" in generation_js
     assert "'Idempotency-Key': createGenerationIdempotencyKey()" in generation_js
     assert "apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`)" in generation_js
+    assert "/generation/jobs/{id}/cancel" in (REPO_ROOT / "README.md").read_text(encoding="utf-8")
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js
