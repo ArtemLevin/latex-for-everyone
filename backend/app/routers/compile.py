@@ -2,6 +2,7 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException
 from app.models import Project, CompileHistory
+from app.dependencies import get_current_user_id
 from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, LatexCompileResult, RawCompileRequest
 from app.services.artifact_paths import (
     ArtifactPathError,
@@ -44,6 +45,7 @@ def enforce_compile_payload_limits(files: dict[str, str]) -> None:
 @router.post("/", response_model=CompileResponse)
 async def compile_project(
     request: CompileRequest,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     logger.info(
@@ -53,7 +55,7 @@ async def compile_project(
         bool(request.main_file_content),
         len(request.all_files or {}),
     )
-    project = db.query(Project).filter(Project.id == request.project_id).first()
+    project = db.query(Project).filter(Project.id == request.project_id, Project.owner_id == owner_id).first()
     if not project:
         logger.warning("compile project not found project_id=%s", request.project_id)
         raise HTTPException(status_code=404, detail="Project not found")
@@ -173,8 +175,12 @@ async def compile_raw_latex(request: RawCompileRequest):
 async def get_compile_history(
     project_id: str,
     limit: int = 20,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
+    project = db.query(Project).filter(Project.id == project_id, Project.owner_id == owner_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
     history = (
         db.query(CompileHistory)
         .filter(CompileHistory.project_id == project_id)
@@ -189,9 +195,10 @@ async def get_compile_history(
 @router.get("/history/detail/{history_id}", response_model=CompileHistoryResponse, deprecated=True)
 async def get_compile_history_detail(
     history_id: str,
+    owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
-    history = db.query(CompileHistory).filter(CompileHistory.id == history_id).first()
+    history = db.query(CompileHistory).join(Project).filter(CompileHistory.id == history_id, Project.owner_id == owner_id).first()
     if not history:
         raise HTTPException(status_code=404, detail="Compile history not found")
     return history

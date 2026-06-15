@@ -3,6 +3,7 @@ Tests for the Latexed API.
 """
 import hashlib
 from pathlib import Path
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -84,7 +85,7 @@ def test_initialize_database_adds_generation_history_token_columns_for_stale_loc
     main_module.initialize_database()
 
     columns = {column["name"] for column in inspect(stale_engine).get_columns("generation_history")}
-    assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(columns)
+    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(columns)
 
 
 def test_initialize_database_adds_lesson_workflow_columns_for_stale_local_db(monkeypatch, tmp_path):
@@ -141,6 +142,7 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "compile_history",
         "project_snapshots",
         "generation_history",
+        "generation_jobs",
         "pupils",
         "lessons",
         "lesson_audio_recordings",
@@ -151,7 +153,8 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     }.issubset(tables)
     assert "owner_id" in {column["name"] for column in inspector.get_columns("projects")}
     assert "ix_projects_owner_id" in {index["name"] for index in inspector.get_indexes("projects")}
-    assert "ix_generation_history_project_id" in {index["name"] for index in inspector.get_indexes("generation_history")}
+    generation_history_indexes = {index["name"] for index in inspector.get_indexes("generation_history")}
+    assert {"ix_generation_history_project_id", "ix_generation_history_owner_id"}.issubset(generation_history_indexes)
     assert "ix_pupils_teacher_id" in {index["name"] for index in inspector.get_indexes("pupils")}
     lesson_indexes = {index["name"] for index in inspector.get_indexes("lessons")}
     assert {"ix_lessons_teacher_id", "ix_lessons_pupil_id", "ix_lessons_lesson_date"}.issubset(lesson_indexes)
@@ -166,7 +169,19 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
     assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id", "ix_lesson_transcripts_review_status"}.issubset(transcript_indexes)
     document_columns = {column["name"] for column in inspector.get_columns("lesson_generated_documents")}
-    assert {"lesson_id", "transcript_id", "document_type", "title", "filename", "storage_path", "status"}.issubset(document_columns)
+    assert {
+        "lesson_id",
+        "transcript_id",
+        "document_type",
+        "title",
+        "filename",
+        "storage_path",
+        "provider",
+        "prompt_template_hash",
+        "source_text_hash",
+        "source_text_kind",
+        "status",
+    }.issubset(document_columns)
     document_indexes = {index["name"] for index in inspector.get_indexes("lesson_generated_documents")}
     assert {
         "ix_lesson_generated_documents_lesson_id",
@@ -183,7 +198,11 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_processing_jobs_status",
     }.issubset(job_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
-    assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
+    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
+    generation_job_columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
+    assert {"project_id", "owner_id", "idempotency_key", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
+    generation_job_indexes = {index["name"] for index in inspector.get_indexes("generation_jobs")}
+    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash", "ix_generation_jobs_owner_id", "ix_generation_jobs_idempotency_key"}.issubset(generation_job_indexes)
 
 
 def test_health_check():
@@ -217,13 +236,18 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
         "check_artifact_dirs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+    )
 
     response = client.get("/api/ready")
 
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs"}
+    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription"}
     assert data["checks"]["database"]["status"] == "ok"
     assert data["checks"]["compiler"]["status"] == "ok"
 
@@ -252,6 +276,11 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
         "check_artifact_dirs_ready",
         lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
     )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+    )
 
     response = client.get("/api/ready")
 
@@ -261,6 +290,60 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
     assert data["checks"]["compiler"]["status"] == "missing"
     assert data["checks"]["latex_packages"]["status"] == "skipped"
     assert data["checks"]["latex_packages"]["details"] == {"reason": "missing"}
+
+
+def test_transcription_status_disabled_provider_is_skipped(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "TRANSCRIPTION_PROVIDER", "disabled")
+
+    response = client.get("/api/transcription/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "skipped"
+    assert data["details"]["configured_provider"] == "disabled"
+    assert data["details"]["effective_provider"] == "disabled"
+
+
+def test_transcription_status_reports_missing_faster_whisper_runtime(monkeypatch):
+    from app.config import settings
+    from app.services import transcription
+
+    monkeypatch.setattr(settings, "TRANSCRIPTION_PROVIDER", "faster_whisper")
+    monkeypatch.setattr(transcription.importlib.util, "find_spec", lambda module_name: None)
+    monkeypatch.setattr(transcription.shutil, "which", lambda binary: None)
+
+    response = client.get("/api/transcription/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "missing"
+    assert data["details"]["dependency"] == {"module": "faster_whisper", "available": False}
+    assert set(data["details"]["missing_requirements"]) == {"faster_whisper", "ffmpeg", "ffprobe"}
+    assert data["details"]["install_hint"] == "uv sync --group transcription"
+
+
+def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkeypatch):
+    from app.schemas import ReadinessCheckResponse
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
+    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
+    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
+    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}),
+    )
+
+    response = client.get("/api/ready")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "degraded"
+    assert data["checks"]["transcription"]["status"] == "missing"
 
 
 def test_root():
@@ -340,6 +423,26 @@ def test_delete_project():
     # Verify deletion
     response = client.get(f"/api/projects/{project_id}")
     assert response.status_code == 404
+
+
+def test_project_ownership_uses_trusted_user_header():
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    create_response = client.post("/api/projects/", json={"name": "Scoped Project"}, headers=owner_headers)
+    assert create_response.status_code == 201
+    project = create_response.json()
+
+    assert project["owner_id"] == "teacher-a"
+    assert client.get("/api/projects/", headers=owner_headers).json()[0]["id"] == project["id"]
+    assert client.get("/api/projects/", headers=other_headers).json() == []
+    assert client.get(f"/api/projects/{project['id']}", headers=other_headers).status_code == 404
+
+
+def test_blank_trusted_user_header_is_rejected():
+    response = client.get("/api/projects/", headers={"X-Latexed-User": "   "})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Invalid user identity"
 
 
 def create_test_pupil(display_name: str = "Николь") -> dict:
@@ -606,6 +709,28 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Lesson not found"
 
 
+
+def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
+    import shutil
+    import sys
+    from types import SimpleNamespace
+
+    from app.services.transcription import load_legacy_transcibe_module
+
+    repo_root = Path(__file__).resolve().parents[2]
+    test_audio = repo_root / "test_audio.mp3"
+    assert test_audio.exists()
+
+    monkeypatch.setitem(sys.modules, "whisper", SimpleNamespace(load_model=lambda model_name: object()))
+
+    module = load_legacy_transcibe_module()
+
+    assert module.__file__ == str(repo_root / "transcribe.py")
+    assert module.AUDIO_EXTENSIONS >= {".mp3"}
+    if shutil.which("ffprobe") is None:
+        pytest.skip("ffprobe is required to probe repository test_audio.mp3")
+    assert module.get_audio_duration_seconds(test_audio) > 0
+
 def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router
@@ -783,6 +908,34 @@ def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
     ]
 
 
+
+def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypatch, tmp_path, caplog):
+    import logging
+
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import DisabledTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=DisabledTranscriptionProvider()),
+    )
+    caplog.set_level(logging.INFO, logger="app.services.transcription")
+    pupil = create_test_pupil("Disabled Provider Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], filename="recording.mp3", content_type="audio/mpeg", data=b"mp3-data")
+
+    response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "failed"
+    assert "Set TRANSCRIPTION_PROVIDER" in data["error_message"]
+    assert any("lesson transcription provider unavailable" in record.message for record in caplog.records)
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router
@@ -895,10 +1048,19 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
 
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={})
 
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Review the transcript or set allow_unreviewed=true to create draft lesson documents"
+
+    response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"allow_unreviewed": True})
+
     assert response.status_code == 201
     documents = response.json()
     assert {document["document_type"] for document in documents} == {"check_list", "pupil_mistakes"}
-    assert all(document["status"] == "completed" for document in documents)
+    assert all(document["status"] == "draft" for document in documents)
+    assert all(document["provider"] == "fake" for document in documents)
+    assert all(document["source_text_kind"] == "raw" for document in documents)
+    assert all(len(document["source_text_hash"]) == 64 for document in documents)
+    assert all(len(document["prompt_template_hash"]) == 64 for document in documents)
     assert all(document["transcript_id"] == transcript["id"] for document in documents)
     assert all(document["download_url"].endswith(f"/documents/{document['id']}/download") for document in documents)
     assert all("/" not in document["filename"] and ".." not in document["filename"] for document in documents)
@@ -920,7 +1082,7 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
 
     lesson_response = client.get(f"/api/lessons/{lesson['id']}")
     assert lesson_response.status_code == 200
-    assert lesson_response.json()["status"] == "completed"
+    assert lesson_response.json()["status"] == "transcript_ready"
 
 
 def test_lesson_document_generation_uses_reviewed_transcript_text(monkeypatch, tmp_path):
@@ -934,6 +1096,9 @@ def test_lesson_document_generation_uses_reviewed_transcript_text(monkeypatch, t
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"transcript_id": transcript["id"]})
 
     assert response.status_code == 201
+    documents = response.json()
+    assert all(document["status"] == "completed" for document in documents)
+    assert all(document["source_text_kind"] == "edited" for document in documents)
     stored_files = list((tmp_path / "lesson_artifacts").rglob("*.tex"))
     combined_latex = "\n".join(path.read_text(encoding="utf-8") for path in stored_files)
     assert r"исправленный y\_2" in combined_latex
@@ -957,7 +1122,7 @@ def test_lesson_document_download_respects_teacher_scope(monkeypatch, tmp_path):
     from app.dependencies import get_current_teacher_id
 
     lesson, _ = create_transcribed_lesson(monkeypatch, tmp_path)
-    documents = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={}).json()
+    documents = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"allow_unreviewed": True}).json()
 
     app.dependency_overrides[get_current_teacher_id] = lambda: "other-teacher"
     try:
@@ -1116,6 +1281,28 @@ def test_create_file():
     assert response.status_code == 201
     data = response.json()
     assert data["name"] == "test.tex"
+
+
+def test_direct_file_access_respects_project_owner():
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post("/api/projects/", json={"name": "Scoped File Project"}, headers=owner_headers)
+    project_id = project_response.json()["id"]
+    files_response = client.get(f"/api/files/project/{project_id}", headers=owner_headers)
+    file_id = files_response.json()[0]["id"]
+
+    assert client.get(f"/api/files/{file_id}", headers=owner_headers).status_code == 200
+    assert client.get(f"/api/files/{file_id}", headers=other_headers).status_code == 404
+
+    update_response = client.put(
+        f"/api/files/{file_id}",
+        json={"content": "Cross-user write must be denied"},
+        headers=other_headers,
+    )
+    assert update_response.status_code == 404
+
+    owner_file = client.get(f"/api/files/{file_id}", headers=owner_headers).json()
+    assert owner_file["content"] != "Cross-user write must be denied"
 
 
 def test_list_templates():
@@ -1392,6 +1579,79 @@ def test_artifact_cleanup_rejects_untrusted_root(tmp_path):
         cleanup_old_files(untrusted_root, max_age_seconds=60, suffixes={".pdf"}, trusted_roots=(trusted_root,))
 
 
+def test_artifact_cleanup_dry_run_reports_without_deleting(tmp_path):
+    import os
+    import time
+    from app.services.artifact_cleanup import cleanup_old_files_report
+
+    old_pdf = tmp_path / "old.pdf"
+    old_pdf.write_bytes(b"old")
+    old_time = time.time() - 3600
+    os.utime(old_pdf, (old_time, old_time))
+
+    report = cleanup_old_files_report(
+        tmp_path,
+        root_name="compile_pdf",
+        max_age_seconds=60,
+        suffixes={".pdf"},
+        trusted_roots=(tmp_path,),
+        dry_run=True,
+    )
+
+    assert report.dry_run is True
+    assert report.would_delete_files == 1
+    assert report.deleted_files == 0
+    assert old_pdf.exists()
+
+
+def test_artifact_cleanup_skips_symlink_escape(tmp_path):
+    import os
+    import time
+    from app.services.artifact_cleanup import cleanup_old_files_report
+
+    trusted_root = tmp_path / "trusted"
+    outside = tmp_path / "outside"
+    trusted_root.mkdir()
+    outside.mkdir()
+    outside_pdf = outside / "outside.pdf"
+    outside_pdf.write_bytes(b"outside")
+    symlink = trusted_root / "escape.pdf"
+    symlink.symlink_to(outside_pdf)
+    old_time = time.time() - 3600
+    os.utime(symlink, (old_time, old_time), follow_symlinks=False)
+
+    report = cleanup_old_files_report(
+        trusted_root,
+        max_age_seconds=60,
+        suffixes={".pdf"},
+        trusted_roots=(trusted_root,),
+    )
+
+    assert report.deleted_files == 0
+    assert report.skipped_files == 1
+    assert symlink.exists()
+    assert outside_pdf.exists()
+
+
+def test_configured_artifact_cleanup_includes_lesson_root_without_upload_wildcard(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services.artifact_paths import artifact_cleanup_policies, trusted_artifact_roots
+
+    compile_root = tmp_path / "compiles"
+    upload_root = tmp_path / "uploads"
+    lesson_root = tmp_path / "custom_lessons"
+    monkeypatch.setattr(settings, "COMPILE_WORK_DIR", str(compile_root))
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_root))
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(lesson_root))
+
+    policies = {policy.name: policy for policy in artifact_cleanup_policies()}
+
+    assert set(policies) == {"compile_pdf", "export", "lesson"}
+    assert policies["lesson"].root == lesson_root
+    assert policies["lesson"].recursive is True
+    assert upload_root not in trusted_artifact_roots()
+
+
 def test_latex_compiler_truncates_compiler_output(monkeypatch, tmp_path):
     import subprocess
     from app.config import settings
@@ -1599,6 +1859,33 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
+
+
+def test_compile_project_respects_project_owner(monkeypatch):
+    from app.routers import compile as compile_router
+
+    called = False
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        nonlocal called
+        called = True
+        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Compile Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post("/api/compile/", json={"project_id": project_id}, headers=other_headers)
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert called is False
 
 
 def test_compile_raw_rejects_too_many_files(monkeypatch):
@@ -1835,11 +2122,13 @@ def test_frontend_generation_ui_contract():
     )
 
     assert 'href="css/app.css"' in content
-    assert 'src="js/01-state.js"' in content
-    assert 'src="js/09-ui-settings.js"' in content
+    assert 'src="js/01-state.js?v=' in content
+    assert 'src="js/09-ui-settings.js?v=' in content
     assert 'id="generationModal"' in content
     assert 'id="generationTopic"' in content
     assert 'id="generationMaterials"' in content
+    assert 'id="generationMaterialsHint"' in content
+    assert 'oninput="updateGenerationMaterialsDiagnostics()"' in content
     assert 'id="generationLanguage"' in content
     assert 'id="generationContentSourceMode"' in content
     assert 'id="generationLatexMode"' in content
@@ -1890,7 +2179,8 @@ def test_frontend_generation_ui_contract():
     assert "generationMeta" in content
     assert "'/generation/validate'" in content
     assert "generation/providers/status" in content
-    assert "'/generation/generate'" in content
+    assert "'/generation/jobs'" in content
+    assert "`/generation/jobs/${encodeURIComponent(currentJob.id)}`" in content
     assert "await compileLatex();" not in content
     assert "Соединение с backend установлено. Нажмите «Компиляция»" in content
     assert "Документ открыт без автокомпиляции" in content
@@ -2010,6 +2300,37 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
     with ZipFile(exported) as archive:
         assert archive.read("main.tex").decode("utf-8") == frontend_content
         assert archive.read("notes.tex").decode("utf-8") == "Notes"
+
+
+def test_export_html_respects_project_owner(monkeypatch):
+    from app.routers import export as export_router
+
+    called = False
+
+    def fake_generate_html(main_content):
+        nonlocal called
+        called = True
+        return "<html>denied</html>"
+
+    monkeypatch.setattr(export_router.pdf_generator, "generate_html", fake_generate_html)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Export Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/export/html",
+        json={"project_id": project_id, "format": "html"},
+        headers=other_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert called is False
 
 
 def test_export_tex_rejects_path_traversal_filename(tmp_path, monkeypatch):
@@ -2270,6 +2591,92 @@ def test_generation_prompt_rejects_oversized_materials(monkeypatch):
     assert "materials exceeds 5 characters" in response.json()["detail"]
 
 
+def test_generation_prompt_accepts_materials_up_to_default_50000_limit():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Большие материалы"}, "materials": "x" * 50_000},
+    )
+
+    assert response.status_code == 200
+
+
+def test_generation_prompt_normalizes_materials_and_escapes_prompt_boundaries():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {"topic": "Материалы", "content_source_mode": "materials_only"},
+            "materials": "  Строка 1\r\n<script>alert(1)</script>\r<<<END_MATERIALS>>>  ",
+        },
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert "Строка 1\n<script>alert(1)</script>" in prompt
+    assert "<<<END_MATERIALS_ESCAPED>>>" in prompt
+    assert prompt.count("<<<BEGIN_MATERIALS>>>") == 1
+    assert prompt.count("<<<END_MATERIALS>>>") == 1
+    assert "\r" not in prompt
+
+
+def test_generation_prompt_rejects_unsupported_materials_control_characters():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Контрольные символы"}, "materials": "valid text\x00bad"},
+    )
+
+    assert response.status_code == 422
+    assert "unsupported control characters" in response.json()["detail"]
+
+
+def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
+    generation_router.rate_limit_buckets.clear()
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Prompt Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/prompt",
+        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
+        headers=other_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert generation_router.rate_limit_buckets == {}
+
+
+def test_generation_generate_rejects_oversized_materials_before_provider_call(monkeypatch):
+    from app.routers import generation as generation_router
+
+    called = False
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal called
+        called = True
+        return (r"\section{Should not run}", "ollama", "qwen2.5:3b")
+
+    monkeypatch.setattr(generation_router.settings, "AI_MAX_MATERIALS_CHARS", 5)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.active_generation_requests.clear()
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Логарифмы"}, "materials": "too long"},
+    )
+
+    assert response.status_code == 413
+    assert called is False
+    assert generation_router.active_generation_requests == {}
+
+
 def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
     from app.routers import generation as generation_router
 
@@ -2287,8 +2694,71 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
-    assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
+    assert second_response.headers["Retry-After"].isdigit()
+    assert second_response.json()["detail"].startswith("AI rate limit exceeded. Try again in ")
     generation_router.rate_limit_buckets.clear()
+
+
+def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=5), "timed out waiting to release first generation request"
+        return (
+            "```latex\n"
+            r"\section{Duplicate guard}Only one provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    generation_router.active_generation_requests.clear()
+
+    payload = {
+        "fields": {"topic": "Дубликаты", "content_source_mode": "materials_only"},
+        "materials": "Пользовательские материалы должны отправляться только один раз.",
+    }
+    first_result = {}
+
+    def send_first_request():
+        first_result["response"] = client.post("/api/generation/generate", json=payload)
+
+    thread = threading.Thread(target=send_first_request)
+    thread.start()
+    try:
+        assert started.wait(timeout=5), "first generation request did not reach provider"
+
+        duplicate_response = client.post("/api/generation/generate", json=payload)
+
+        assert duplicate_response.status_code == 409
+        assert duplicate_response.headers["Retry-After"] == str(
+            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
+        )
+        assert duplicate_response.json()["detail"] == (
+            "AI generation is already running for the same input. Wait for the current request to finish."
+        )
+        assert calls == 1
+        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        generation_router.rate_limit_buckets.clear()
+        generation_router.active_generation_requests.clear()
+
+    assert not thread.is_alive()
+    assert first_result["response"].status_code == 200
+    assert calls == 1
 
 
 def test_estimated_token_counter_splits_text_and_latex_commands():
@@ -2305,7 +2775,7 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     assert usage.source == "estimated"
 
 
-def test_ai_generation_service_defaults_to_qwen2.5:3b_for_ollama(monkeypatch):
+def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
 
@@ -2522,6 +2992,200 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
     assert item_response.json()["id"] == item["id"]
 
 
+def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Scoped}Owner-only generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Generation Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    generate_response = client.post(
+        "/api/generation/generate",
+        json={"project_id": project_id, "fields": {"topic": "История"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert generate_response.status_code == 200
+    history_item = client.get(f"/api/generation/history/project/{project_id}", headers=owner_headers).json()[0]
+
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "Job"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    assert client.get(f"/api/generation/history/project/{project_id}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/history/item/{history_item['id']}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
+
+
+def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Job}Persisted generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job API"}, "materials": "Материалы для job."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "completed"
+    assert job["stage"] == "completed"
+    assert job["attempts"] == 1
+    assert job["request_hash"]
+    assert job["prompt_hash"]
+    assert job["result"]["status"] == "success"
+    assert "Persisted generation result" in job["result"]["latex_code"]
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["id"] == job["id"]
+    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
+
+
+def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        return (
+            "```latex\n"
+            r"\section{Idempotent}Single provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    payload = {"fields": {"topic": "Idempotency"}, "materials": "Материал."}
+    headers = {"Idempotency-Key": "generation-job-retry-1"}
+
+    first_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+    second_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    assert second_response.json()["id"] == first_response.json()["id"]
+    assert second_response.json()["idempotency_key"] == "generation-job-retry-1"
+    assert calls == 1
+
+
+def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Idempotent}Original"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    headers = {"Idempotency-Key": "generation-job-retry-2"}
+
+    first_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Первый"}, "materials": "Материал."},
+        headers=headers,
+    )
+    second_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Другой"}, "materials": "Материал."},
+        headers=headers,
+    )
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 409
+    assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
+
+
+def test_generation_job_rejects_invalid_idempotency_key():
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Bad key"}, "materials": "Материал."},
+        headers={"Idempotency-Key": "bad key with spaces"},
+    )
+
+    assert response.status_code == 400
+    assert "Invalid idempotency key" in response.json()["detail"]
+
+
+def test_generation_job_persists_provider_failure(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError("Provider unavailable")
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job failure"}, "materials": "Материалы."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["attempts"] == 1
+    assert job["result"] is None
+    assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "failed"
+
+
+def test_generation_job_not_found_returns_404():
+    response = client.get("/api/generation/jobs/missing")
+
+    assert response.status_code == 404
+    assert "Generation job missing not found" in response.json()["detail"]
+
+
 def test_generation_history_records_provider_failure(monkeypatch):
     from app.routers import generation as generation_router
     from app.services.ai_generation import AIGenerationError
@@ -2630,7 +3294,9 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
     monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    from app.services import generation_orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
 
@@ -2686,7 +3352,9 @@ def test_generation_generate_simplifies_safe_mode_risky_latex_before_compile(mon
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
     monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    from app.services import generation_orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
 

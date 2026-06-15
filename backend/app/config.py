@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     ARTIFACT_TTL_SECONDS: int = 24 * 60 * 60
 
     # Security
+    LOCAL_USER_ID: str = "local-teacher"
+    TRUSTED_USER_HEADER: str = "X-Latexed-User"
     SECRET_KEY: str = "change-me-in-production-please"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
@@ -80,7 +82,10 @@ class Settings(BaseSettings):
     AI_GENERATION_TIMEOUT: int = 120_000
     AI_PROVIDER_STATUS_TIMEOUT: int = 10
     AI_RATE_LIMIT_PER_MINUTE: int = 20
-    AI_MAX_MATERIALS_CHARS: int = 20_000
+    AI_DUPLICATE_RETRY_AFTER_SECONDS: int = 3
+    AI_IDEMPOTENCY_HEADER: str = "Idempotency-Key"
+    AI_IDEMPOTENCY_KEY_MAX_CHARS: int = 128
+    AI_MAX_MATERIALS_CHARS: int = 50_000
     AI_MAX_PROMPT_CHARS: int = 200_000
     AI_MAX_RAW_OUTPUT_CHARS: int = 200_000
     AI_EXPOSE_PROVIDER_ERRORS: bool = False

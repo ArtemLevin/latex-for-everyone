@@ -102,7 +102,7 @@ frontend-check: ## Run node --check for frontend JavaScript files.
 
 .PHONY: frontend-e2e
 frontend-e2e: ## Run optional Playwright smoke test for the local frontend workflow.
-	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_frontend_e2e.py -q
+	$(PYTHONPATH_BACKEND) $(PYTHON) -m pytest $(BACKEND_DIR)/tests/test_frontend_e2e.py -q
 
 .PHONY: check
 check: compileall frontend-check test ## Run all local checks.
@@ -137,8 +137,12 @@ clean: ## Remove local test databases and Python/test caches.
 	find $(ROOT_DIR) -type d \( -name __pycache__ -o -name .pytest_cache \) -prune -exec rm -rf {} +
 
 .PHONY: clean-artifacts
-clean-artifacts: ## Remove local compile/export artifacts from the default /tmp Latexed directories.
-	rm -rf /tmp/latexed_compiles /tmp/latexed_uploads
+clean-artifacts: ## Safely remove stale local runtime artifacts from trusted Latexed directories.
+	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/clean_artifacts.py --commit
+
+.PHONY: clean-artifacts-dry-run
+clean-artifacts-dry-run: ## Report stale runtime artifacts that cleanup would remove.
+	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/clean_artifacts.py
 
 .PHONY: clean-venv
 clean-venv: ## Remove the uv virtual environment.
