@@ -152,6 +152,7 @@ class LessonTranscriptResponse(BaseModel):
 class LessonDocumentGenerateRequest(BaseModel):
     transcript_id: Optional[str] = None
     document_types: list[Literal["check_list", "pupil_mistakes"]] = Field(default_factory=list)
+    allow_unreviewed: bool = False
 
 
 class LessonGeneratedDocumentResponse(BaseModel):
@@ -164,6 +165,10 @@ class LessonGeneratedDocumentResponse(BaseModel):
     title: str
     filename: str
     content_type: str
+    provider: str
+    prompt_template_hash: Optional[str] = None
+    source_text_hash: Optional[str] = None
+    source_text_kind: str
     status: str
     error_message: Optional[str] = None
     created_at: datetime
@@ -352,6 +357,30 @@ class GenerationResultResponse(GenerationPromptResponse):
     validation: GenerationValidationResponse
     compile_check: GenerationCompileCheckResponse = Field(default_factory=GenerationCompileCheckResponse)
     token_usage: GenerationTokenUsageResponse = Field(default_factory=GenerationTokenUsageResponse)
+
+
+class GenerationJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    provider: str
+    model: Optional[str] = None
+    status: str
+    stage: str
+    request_hash: str
+    prompt_hash: Optional[str] = None
+    idempotency_key: Optional[str] = None
+    result: Optional[GenerationResultResponse] = None
+    error_message: Optional[str] = None
+    attempts: int
+    queue_wait_seconds: Optional[float] = None
+    run_duration_seconds: Optional[float] = None
+    total_duration_seconds: Optional[float] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class GenerationPresetResponse(BaseModel):
