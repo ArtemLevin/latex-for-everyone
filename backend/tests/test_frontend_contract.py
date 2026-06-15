@@ -95,4 +95,8 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     main_html = (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
     assert 'type="button" class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn"' in main_html
     assert "error.status = response.status" in api_js
+    assert "async function runGenerationJob" in generation_js
+    assert "async function waitForGenerationJob" in generation_js
+    assert "apiRequest('/generation/jobs'" in generation_js
+    assert "apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`)" in generation_js
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js

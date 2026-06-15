@@ -142,6 +142,7 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "compile_history",
         "project_snapshots",
         "generation_history",
+        "generation_jobs",
         "pupils",
         "lessons",
         "lesson_audio_recordings",
@@ -185,6 +186,10 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     }.issubset(job_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
     assert {"input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
+    generation_job_columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
+    assert {"project_id", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
+    generation_job_indexes = {index["name"] for index in inspector.get_indexes("generation_jobs")}
+    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash"}.issubset(generation_job_indexes)
 
 
 def test_health_check():
@@ -1943,7 +1948,8 @@ def test_frontend_generation_ui_contract():
     assert "generationMeta" in content
     assert "'/generation/validate'" in content
     assert "generation/providers/status" in content
-    assert "'/generation/generate'" in content
+    assert "'/generation/jobs'" in content
+    assert "`/generation/jobs/${encodeURIComponent(currentJob.id)}`" in content
     assert "await compileLatex();" not in content
     assert "Соединение с backend установлено. Нажмите «Компиляция»" in content
     assert "Документ открыт без автокомпиляции" in content
@@ -2688,6 +2694,77 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
     item_response = client.get(f"/api/generation/history/item/{item['id']}")
     assert item_response.status_code == 200
     assert item_response.json()["id"] == item["id"]
+
+
+def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    async def fake_generate(prompt, provider, model):
+        return (
+            "```latex\n"
+            r"\section{Job}Persisted generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job API"}, "materials": "Материалы для job."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "completed"
+    assert job["stage"] == "completed"
+    assert job["attempts"] == 1
+    assert job["request_hash"]
+    assert job["prompt_hash"]
+    assert job["result"]["status"] == "success"
+    assert "Persisted generation result" in job["result"]["latex_code"]
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["id"] == job["id"]
+    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
+
+
+def test_generation_job_persists_provider_failure(monkeypatch):
+    from app.routers import generation as generation_router
+    from app.services.ai_generation import AIGenerationError
+
+    async def fake_generate(prompt, provider, model):
+        raise AIGenerationError("Provider unavailable")
+
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job failure"}, "materials": "Материалы."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "failed"
+    assert job["stage"] == "failed"
+    assert job["attempts"] == 1
+    assert job["result"] is None
+    assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["status"] == "failed"
+
+
+def test_generation_job_not_found_returns_404():
+    response = client.get("/api/generation/jobs/missing")
+
+    assert response.status_code == 404
+    assert "Generation job missing not found" in response.json()["detail"]
 
 
 def test_generation_history_records_provider_failure(monkeypatch):

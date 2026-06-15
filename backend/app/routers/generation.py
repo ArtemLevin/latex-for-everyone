@@ -4,7 +4,7 @@ import logging
 import math
 import time
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.schemas import (
@@ -13,6 +13,7 @@ from app.schemas import (
     GenerationProviderStatusResponse,
     GenerationRequest,
     GenerationHistoryResponse,
+    GenerationJobResponse,
     GenerationResultResponse,
     GenerationValidationRequest,
     GenerationValidationResponse,
@@ -23,6 +24,7 @@ from app.services.ai_generation import AIGenerationError, AIGenerationService
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_validator import validate_latex_document
 from app.services.generation_history_service import GenerationHistoryNotFoundError, GenerationHistoryService
+from app.services.generation_jobs import GenerationJobNotFoundError, GenerationJobService
 from app.services.prompt_builder import build_latex_generation_prompt
 from app.services.generation_orchestrator import (
     GenerationOrchestrationError,
@@ -38,6 +40,7 @@ router = APIRouter()
 ai_generator = AIGenerationService()
 generation_compiler = LatexCompiler()
 generation_history_service = GenerationHistoryService()
+generation_job_service = GenerationJobService()
 generation_orchestrator = GenerationOrchestrator(
     ai_generator=ai_generator,
     compiler=generation_compiler,
@@ -324,3 +327,40 @@ async def generate_latex(request: Request, generation_request: GenerationRequest
             raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
     finally:
         finish_generation_request(active_request_key)
+
+
+@router.post("/jobs", response_model=GenerationJobResponse, status_code=status.HTTP_202_ACCEPTED)
+async def create_generation_job(request: Request, generation_request: GenerationRequest, db: Session = Depends(get_db)):
+    generation_request = prepare_generation_request(generation_request)
+    active_request_key = begin_generation_request(request, generation_request)
+    try:
+        enforce_ai_rate_limit(request)
+        request_sha = generation_request_fingerprint(generation_request)
+        prompt_response = build_generation_prompt_response(generation_request)
+        job = generation_job_service.create_job(
+            db,
+            generation_request=generation_request,
+            request_hash=request_sha,
+            prompt_hash=text_digest(prompt_response.prompt),
+        )
+        # Persist the job first; this PR runs it inline, and a later worker can reuse the same job contract.
+        job = await generation_job_service.run_job(
+            db,
+            job=job,
+            generation_request=generation_request,
+            prompt_response=prompt_response,
+            request_hash=request_sha,
+            orchestrator=generation_orchestrator,
+        )
+        return generation_job_service.to_response(job)
+    finally:
+        finish_generation_request(active_request_key)
+
+
+@router.get("/jobs/{job_id}", response_model=GenerationJobResponse)
+async def get_generation_job(job_id: str, db: Session = Depends(get_db)):
+    try:
+        job = generation_job_service.get_job(db, job_id=job_id)
+    except GenerationJobNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return generation_job_service.to_response(job)

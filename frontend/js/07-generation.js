@@ -530,6 +530,34 @@
         return error.message;
     }
 
+    function sleep(ms) {
+        return new Promise(resolve => window.setTimeout(resolve, ms));
+    }
+
+    async function waitForGenerationJob(job) {
+        let currentJob = job;
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+            if (currentJob.status === 'completed' && currentJob.result) {
+                return currentJob.result;
+            }
+            if (currentJob.status === 'failed') {
+                throw new Error(currentJob.error_message || 'AI generation job failed.');
+            }
+            setGenerationStatus(`AI-генерация: ${currentJob.status} · ${currentJob.stage}`);
+            await sleep(1000);
+            currentJob = await apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`);
+        }
+        throw new Error('AI generation job did not finish before the polling timeout.');
+    }
+
+    async function runGenerationJob(request) {
+        const job = await apiRequest('/generation/jobs', {
+            method: 'POST',
+            body: JSON.stringify(request)
+        });
+        return waitForGenerationJob(job);
+    }
+
     async function runGenerationRequest(request, loadingButtonId = 'generateLatexBtn') {
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
@@ -566,10 +594,7 @@
         try {
             await saveCurrentFile();
             lastGenerationRequest = cloneGenerationRequest(request);
-            const result = await apiRequest('/generation/generate', {
-                method: 'POST',
-                body: JSON.stringify(request)
-            });
+            const result = await runGenerationJob(request);
             stopGenerationFunWait();
             lastGenerationResult = result;
             lastGenerationRawOutput = result.raw_output || '';
