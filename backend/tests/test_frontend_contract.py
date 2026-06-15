@@ -121,3 +121,26 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "/generation/jobs/operator/status" in readme
     assert "/generation/jobs/operator/recover-stale" in readme
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js
+
+
+def test_operations_runbook_documents_operator_workflows():
+    operations = (REPO_ROOT / "docs" / "operations.md").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "docs/operations.md" in readme
+    for expected in [
+        "Symptom",
+        "Likely cause",
+        "GET /api/ready",
+        "GET /api/generation/jobs/operator/status",
+        "POST /api/generation/jobs/operator/recover-stale",
+        "make generation-worker-recover-stale",
+        "make clean-artifacts-dry-run",
+        "make latex-check",
+        "TRANSCRIPTION_PROVIDER",
+        "Alert thresholds",
+        "systemd generation worker",
+        "Docker Compose generation worker",
+        "Known next gaps",
+    ]:
+        assert expected in operations

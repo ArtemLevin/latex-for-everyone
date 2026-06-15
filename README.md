@@ -21,7 +21,7 @@ frontend/css/       Frontend styles
 frontend/js/        Frontend state, API, editor, compile/export, AI UI scripts
 ```
 
-Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md). The current service-state analysis and development roadmap are maintained in [`PLAN.md`](PLAN.md).
+Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagrams.md`](docs/uml-diagrams.md). The current service-state analysis and development roadmap are maintained in [`PLAN.md`](PLAN.md). Production and local troubleshooting guidance is maintained in [`docs/operations.md`](docs/operations.md).
 
 ## Quick start
 
