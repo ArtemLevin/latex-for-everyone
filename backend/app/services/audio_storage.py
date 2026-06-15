@@ -1,5 +1,6 @@
 import hashlib
 import json
+import logging
 import re
 import shutil
 import subprocess
@@ -12,6 +13,9 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import Lesson, LessonAudioRecording
 from app.time_utils import utc_now
+
+
+logger = logging.getLogger(__name__)
 
 
 class AudioStorageError(Exception):
@@ -110,8 +114,10 @@ def probe_audio_duration_seconds(audio_path: Path) -> float | None:
     """Best-effort ffprobe duration extraction for already trusted local audio."""
 
     if not settings.LESSON_AUDIO_DURATION_PROBE_ENABLED:
+        logger.info("audio duration probe skipped reason=disabled path=%s", audio_path)
         return None
     if shutil.which("ffprobe") is None:
+        logger.info("audio duration probe skipped reason=ffprobe_missing path=%s", audio_path)
         return None
 
     result = subprocess.run(
@@ -131,6 +137,7 @@ def probe_audio_duration_seconds(audio_path: Path) -> float | None:
         check=False,
     )
     if result.returncode != 0:
+        logger.warning("audio duration probe failed path=%s returncode=%s stderr_chars=%s", audio_path, result.returncode, len(result.stderr or ""))
         return None
 
     try:
@@ -139,7 +146,9 @@ def probe_audio_duration_seconds(audio_path: Path) -> float | None:
     except (TypeError, ValueError, json.JSONDecodeError):
         return None
     if duration <= 0:
+        logger.warning("audio duration probe returned nonpositive duration path=%s duration=%s", audio_path, duration)
         return None
+    logger.info("audio duration probe completed path=%s duration_seconds=%.3f", audio_path, duration)
     return duration
 
 
@@ -164,7 +173,9 @@ class AudioStorageService:
         content_type: str | None,
         payload: bytes,
     ) -> LessonAudioRecording:
+        logger.info("lesson audio upload started lesson_id=%s teacher_id=%s filename=%s content_type=%s size_bytes=%s", lesson.id, teacher_id, filename, content_type, len(payload))
         validated = validate_audio_upload(filename, content_type, payload)
+        logger.info("lesson audio upload validated lesson_id=%s suffix=%s normalized_content_type=%s size_bytes=%s sha256_prefix=%s", lesson.id, validated.suffix, validated.content_type, validated.size_bytes, validated.sha256_checksum[:12])
         recording_id = str(uuid.uuid4())
         root = lesson_artifact_root()
         lesson_date = lesson.lesson_date.date().isoformat()
@@ -177,13 +188,18 @@ class AudioStorageService:
             f"recording_{recording_id}{validated.suffix}",
         )
         target_path = resolve_inside_root(root, *relative_parts)
+        logger.info("lesson audio storage path resolved lesson_id=%s recording_id=%s root=%s relative_path=%s", lesson.id, recording_id, root, Path(*relative_parts).as_posix())
         target_path.parent.mkdir(parents=True, exist_ok=True)
+        logger.info("lesson audio storage directory ready lesson_id=%s recording_id=%s directory=%s", lesson.id, recording_id, target_path.parent)
         target_path.write_bytes(payload)
+        logger.info("lesson audio payload written lesson_id=%s recording_id=%s bytes=%s", lesson.id, recording_id, validated.size_bytes)
         duration_seconds = probe_audio_duration_seconds(target_path)
         try:
             validate_audio_duration(duration_seconds)
         except AudioDurationTooLongError:
+            logger.warning("lesson audio duration rejected lesson_id=%s recording_id=%s duration_seconds=%s max_seconds=%s", lesson.id, recording_id, duration_seconds, settings.MAX_LESSON_AUDIO_DURATION_SECONDS)
             target_path.unlink(missing_ok=True)
+            logger.info("lesson audio rejected payload removed lesson_id=%s recording_id=%s", lesson.id, recording_id)
             raise
 
         recording = LessonAudioRecording(
@@ -200,6 +216,8 @@ class AudioStorageService:
         lesson.status = "recording_uploaded"
         lesson.updated_at = utc_now()
         db.add(recording)
+        logger.info("lesson audio recording db insert prepared lesson_id=%s recording_id=%s status=%s", lesson.id, recording_id, recording.status)
         db.commit()
         db.refresh(recording)
+        logger.info("lesson audio upload completed lesson_id=%s recording_id=%s duration_seconds=%s storage_path=%s", lesson.id, recording.id, recording.duration_seconds, recording.storage_path)
         return recording

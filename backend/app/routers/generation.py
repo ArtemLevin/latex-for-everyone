@@ -1,6 +1,8 @@
 from collections import defaultdict, deque
 import hashlib
+import json
 import logging
+import math
 import shutil
 import time
 
@@ -41,6 +43,8 @@ ai_generator = AIGenerationService()
 generation_compiler = LatexCompiler()
 generation_history_service = GenerationHistoryService()
 rate_limit_buckets: dict[str, deque[float]] = defaultdict(deque)
+active_generation_requests: dict[str, float] = {}
+GENERATION_DUPLICATE_RETRY_AFTER_SECONDS = 3
 
 PRESETS: list[GenerationPresetResponse] = [
     GenerationPresetResponse(
@@ -64,25 +68,71 @@ PRESETS: list[GenerationPresetResponse] = [
 ]
 
 
+def get_request_client(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def generation_request_fingerprint(generation_request: GenerationRequest) -> str:
+    payload = generation_request.model_dump(mode="json")
+    serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return text_digest(serialized)
+
+
+def get_generation_duplicate_key(request: Request, generation_request: GenerationRequest) -> str:
+    return f"{get_request_client(request)}:{request.url.path}:{generation_request_fingerprint(generation_request)}"
+
+
+def begin_generation_request(request: Request, generation_request: GenerationRequest) -> str:
+    key = get_generation_duplicate_key(request, generation_request)
+    if key in active_generation_requests:
+        logger.warning(
+            "ai duplicate generation submit rejected client=%s path=%s request_sha=%s materials_chars=%s topic=%s retry_after_seconds=%s",
+            get_request_client(request),
+            request.url.path,
+            generation_request_fingerprint(generation_request),
+            len(generation_request.materials),
+            generation_request.fields.topic or "-",
+            GENERATION_DUPLICATE_RETRY_AFTER_SECONDS,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="AI generation is already running for the same input. Wait for the current request to finish.",
+            headers={"Retry-After": str(GENERATION_DUPLICATE_RETRY_AFTER_SECONDS)},
+        )
+    active_generation_requests[key] = time.monotonic()
+    return key
+
+
+def finish_generation_request(key: str | None) -> None:
+    if key:
+        active_generation_requests.pop(key, None)
+
+
 def enforce_ai_rate_limit(request: Request) -> None:
     limit = settings.AI_RATE_LIMIT_PER_MINUTE
     if limit <= 0:
         return
 
-    client = request.client.host if request.client else "unknown"
+    client = get_request_client(request)
     key = f"{client}:{request.url.path}"
     now = time.monotonic()
     bucket = rate_limit_buckets[key]
     while bucket and now - bucket[0] >= 60:
         bucket.popleft()
     if len(bucket) >= limit:
+        retry_after = max(1, math.ceil(60 - (now - bucket[0])))
         logger.warning(
-            "ai rate limit exceeded client=%s path=%s limit=%s window_seconds=60",
+            "ai rate limit exceeded client=%s path=%s limit=%s window_seconds=60 retry_after_seconds=%s",
             client,
             request.url.path,
             limit,
+            retry_after,
         )
-        raise HTTPException(status_code=429, detail="AI rate limit exceeded. Try again later.")
+        raise HTTPException(
+            status_code=429,
+            detail=f"AI rate limit exceeded. Try again in {retry_after} seconds.",
+            headers={"Retry-After": str(retry_after)},
+        )
     bucket.append(now)
 
 
@@ -375,125 +425,132 @@ async def validate_generated_latex(request: Request, validation_request: Generat
 
 @router.post("/generate", response_model=GenerationResultResponse)
 async def generate_latex(request: Request, generation_request: GenerationRequest, db: Session = Depends(get_db)):
-    enforce_ai_rate_limit(request)
-    logger.info(
-        "ai generation requested provider=%s model=%s topic=%s materials_chars=%s",
-        generation_request.provider or "default",
-        generation_request.model or "default",
-        generation_request.fields.topic or "-",
-        len(generation_request.materials),
-    )
-    prompt_response = build_generation_prompt_response(generation_request)
-    token_usage = GenerationTokenUsageResponse()
-    add_estimated_usage(token_usage, input_text=prompt_response.prompt)
-    started_at = time.perf_counter()
-
+    active_request_key = begin_generation_request(request, generation_request)
     try:
-        raw_output, provider, model = await ai_generator.generate(
-            prompt=prompt_response.prompt,
-            provider=generation_request.provider,
-            model=generation_request.model,
-        )
-    except AIGenerationError as exc:
-        logger.warning(
-            "ai generation failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f error=%s",
+        enforce_ai_rate_limit(request)
+        request_sha = generation_request_fingerprint(generation_request)
+        logger.info(
+            "ai generation requested provider=%s model=%s topic=%s materials_chars=%s request_sha=%s",
             generation_request.provider or "default",
             generation_request.model or "default",
-            exc.status_code,
-            text_digest(prompt_response.prompt),
-            (time.perf_counter() - started_at) * 1000,
-            exc,
+            generation_request.fields.topic or "-",
+            len(generation_request.materials),
+            request_sha,
         )
-        error_detail = provider_error_detail(exc)
-        record_generation_failure(
-            db,
-            generation_request=generation_request,
-            provider=generation_request.provider,
-            model=generation_request.model,
-            prompt=prompt_response.prompt,
-            error=error_detail,
-        )
-        raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
+        prompt_response = build_generation_prompt_response(generation_request)
+        token_usage = GenerationTokenUsageResponse()
+        add_estimated_usage(token_usage, input_text=prompt_response.prompt)
+        started_at = time.perf_counter()
 
-    add_estimated_usage(token_usage, output_text=raw_output)
-    enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
-    latex_body = sanitize_generated_latex_body(extract_latex_code(raw_output))
-    enforce_text_limit("latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
+        try:
+            raw_output, provider, model = await ai_generator.generate(
+                prompt=prompt_response.prompt,
+                provider=generation_request.provider,
+                model=generation_request.model,
+            )
+        except AIGenerationError as exc:
+            logger.warning(
+                "ai generation failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f error=%s",
+                generation_request.provider or "default",
+                generation_request.model or "default",
+                exc.status_code,
+                text_digest(prompt_response.prompt),
+                (time.perf_counter() - started_at) * 1000,
+                exc,
+            )
+            error_detail = provider_error_detail(exc)
+            record_generation_failure(
+                db,
+                generation_request=generation_request,
+                provider=generation_request.provider,
+                model=generation_request.model,
+                prompt=prompt_response.prompt,
+                error=error_detail,
+            )
+            raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
 
-    try:
-        latex_body, raw_output, latex_code, validation, compile_check = await compile_check_and_repair(
-            latex_body=latex_body,
-            raw_output=raw_output,
-            provider=provider,
-            model=model,
-            safe_mode=generation_request.fields.latex_mode == "safe",
-            token_usage=token_usage,
-        )
-    except AIGenerationError as exc:
-        logger.warning(
-            "ai generation repair failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f error=%s",
+        add_estimated_usage(token_usage, output_text=raw_output)
+        enforce_text_limit("raw_output", raw_output, settings.AI_MAX_RAW_OUTPUT_CHARS)
+        latex_body = sanitize_generated_latex_body(extract_latex_code(raw_output))
+        enforce_text_limit("latex_body", latex_body, settings.AI_MAX_RAW_OUTPUT_CHARS)
+
+        try:
+            latex_body, raw_output, latex_code, validation, compile_check = await compile_check_and_repair(
+                latex_body=latex_body,
+                raw_output=raw_output,
+                provider=provider,
+                model=model,
+                safe_mode=generation_request.fields.latex_mode == "safe",
+                token_usage=token_usage,
+            )
+        except AIGenerationError as exc:
+            logger.warning(
+                "ai generation repair failed provider=%s model=%s status_code=%s prompt_sha=%s duration_ms=%.2f error=%s",
+                provider,
+                model,
+                exc.status_code,
+                text_digest(prompt_response.prompt),
+                (time.perf_counter() - started_at) * 1000,
+                exc,
+            )
+            error_detail = provider_error_detail(exc)
+            record_generation_failure(
+                db,
+                generation_request=generation_request,
+                provider=provider,
+                model=model,
+                prompt=prompt_response.prompt,
+                error=error_detail,
+            )
+            raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
+
+        logger.info(
+            "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s request_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s compile_attempted=%s compile_success=%s compile_repaired=%s input_tokens=%s output_tokens=%s total_tokens=%s token_source=%s",
             provider,
             model,
-            exc.status_code,
-            text_digest(prompt_response.prompt),
             (time.perf_counter() - started_at) * 1000,
-            exc,
+            text_digest(prompt_response.prompt),
+            request_sha,
+            len(raw_output),
+            len(latex_body),
+            len(latex_code),
+            text_digest(latex_code),
+            validation["valid"],
+            len(validation["errors"]),
+            len(validation["warnings"]),
+            compile_check.attempted,
+            compile_check.success,
+            compile_check.repaired,
+            token_usage.input_tokens,
+            token_usage.output_tokens,
+            token_usage.total_tokens,
+            token_usage.source,
         )
-        error_detail = provider_error_detail(exc)
-        record_generation_failure(
+
+        record_generation_success(
             db,
             generation_request=generation_request,
             provider=provider,
             model=model,
             prompt=prompt_response.prompt,
-            error=error_detail,
+            raw_output=raw_output,
+            latex_code=latex_code,
+            validation=validation,
+            compile_check=compile_check,
+            token_usage=token_usage,
         )
-        raise HTTPException(status_code=exc.status_code, detail=error_detail) from exc
 
-    logger.info(
-        "ai generation completed provider=%s model=%s duration_ms=%.2f prompt_sha=%s raw_chars=%s body_chars=%s latex_chars=%s latex_sha=%s valid=%s errors=%s warnings=%s compile_attempted=%s compile_success=%s compile_repaired=%s input_tokens=%s output_tokens=%s total_tokens=%s token_source=%s",
-        provider,
-        model,
-        (time.perf_counter() - started_at) * 1000,
-        text_digest(prompt_response.prompt),
-        len(raw_output),
-        len(latex_body),
-        len(latex_code),
-        text_digest(latex_code),
-        validation["valid"],
-        len(validation["errors"]),
-        len(validation["warnings"]),
-        compile_check.attempted,
-        compile_check.success,
-        compile_check.repaired,
-        token_usage.input_tokens,
-        token_usage.output_tokens,
-        token_usage.total_tokens,
-        token_usage.source,
-    )
-
-    record_generation_success(
-        db,
-        generation_request=generation_request,
-        provider=provider,
-        model=model,
-        prompt=prompt_response.prompt,
-        raw_output=raw_output,
-        latex_code=latex_code,
-        validation=validation,
-        compile_check=compile_check,
-        token_usage=token_usage,
-    )
-
-    return GenerationResultResponse(
-        status="success",
-        prompt=prompt_response.prompt,
-        warnings=prompt_response.warnings,
-        provider=provider,
-        model=model,
-        latex_code=latex_code,
-        raw_output=raw_output,
-        validation=GenerationValidationResponse(**validation),
-        compile_check=compile_check,
-        token_usage=token_usage,
-    )
+        return GenerationResultResponse(
+            status="success",
+            prompt=prompt_response.prompt,
+            warnings=prompt_response.warnings,
+            provider=provider,
+            model=model,
+            latex_code=latex_code,
+            raw_output=raw_output,
+            validation=GenerationValidationResponse(**validation),
+            compile_check=compile_check,
+            token_usage=token_usage,
+        )
+    finally:
+        finish_generation_request(active_request_key)

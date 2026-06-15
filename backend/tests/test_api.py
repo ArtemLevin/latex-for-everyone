@@ -3,6 +3,7 @@ Tests for the Latexed API.
 """
 import hashlib
 from pathlib import Path
+import threading
 
 import pytest
 from fastapi.testclient import TestClient
@@ -606,6 +607,28 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Lesson not found"
 
 
+
+def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
+    import shutil
+    import sys
+    from types import SimpleNamespace
+
+    from app.services.transcription import load_legacy_transcibe_module
+
+    repo_root = Path(__file__).resolve().parents[2]
+    test_audio = repo_root / "test_audio.mp3"
+    assert test_audio.exists()
+
+    monkeypatch.setitem(sys.modules, "whisper", SimpleNamespace(load_model=lambda model_name: object()))
+
+    module = load_legacy_transcibe_module()
+
+    assert module.__file__ == str(repo_root / "transcribe.py")
+    assert module.AUDIO_EXTENSIONS >= {".mp3"}
+    if shutil.which("ffprobe") is None:
+        pytest.skip("ffprobe is required to probe repository test_audio.mp3")
+    assert module.get_audio_duration_seconds(test_audio) > 0
+
 def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     from app.config import settings
     from app.routers import lessons as lessons_router
@@ -782,6 +805,34 @@ def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
         (1.25, 2.5, "Второй фрагмент"),
     ]
 
+
+
+def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypatch, tmp_path, caplog):
+    import logging
+
+    from app.config import settings
+    from app.routers import lessons as lessons_router
+    from app.services.transcription import DisabledTranscriptionProvider, TranscriptionService
+
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(tmp_path / "lesson_artifacts"))
+    monkeypatch.setattr(
+        lessons_router,
+        "transcription_service",
+        TranscriptionService(provider=DisabledTranscriptionProvider()),
+    )
+    caplog.set_level(logging.INFO, logger="app.services.transcription")
+    pupil = create_test_pupil("Disabled Provider Student")
+    lesson = create_test_lesson(pupil["id"])
+    upload_test_recording(lesson["id"], filename="recording.mp3", content_type="audio/mpeg", data=b"mp3-data")
+
+    response = client.post(f"/api/lessons/{lesson['id']}/transcribe", json={})
+
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "failed"
+    assert "Set TRANSCRIPTION_PROVIDER" in data["error_message"]
+    assert any("lesson transcription provider unavailable" in record.message for record in caplog.records)
+    assert not any(record.levelno >= logging.ERROR for record in caplog.records)
 
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
@@ -1835,8 +1886,8 @@ def test_frontend_generation_ui_contract():
     )
 
     assert 'href="css/app.css"' in content
-    assert 'src="js/01-state.js"' in content
-    assert 'src="js/09-ui-settings.js"' in content
+    assert 'src="js/01-state.js?v=' in content
+    assert 'src="js/09-ui-settings.js?v=' in content
     assert 'id="generationModal"' in content
     assert 'id="generationTopic"' in content
     assert 'id="generationMaterials"' in content
@@ -2287,8 +2338,71 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
 
     assert first_response.status_code == 200
     assert second_response.status_code == 429
-    assert second_response.json()["detail"] == "AI rate limit exceeded. Try again later."
+    assert second_response.headers["Retry-After"].isdigit()
+    assert second_response.json()["detail"].startswith("AI rate limit exceeded. Try again in ")
     generation_router.rate_limit_buckets.clear()
+
+
+def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=5), "timed out waiting to release first generation request"
+        return (
+            "```latex\n"
+            r"\section{Duplicate guard}Only one provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    generation_router.active_generation_requests.clear()
+
+    payload = {
+        "fields": {"topic": "Дубликаты", "content_source_mode": "materials_only"},
+        "materials": "Пользовательские материалы должны отправляться только один раз.",
+    }
+    first_result = {}
+
+    def send_first_request():
+        first_result["response"] = client.post("/api/generation/generate", json=payload)
+
+    thread = threading.Thread(target=send_first_request)
+    thread.start()
+    try:
+        assert started.wait(timeout=5), "first generation request did not reach provider"
+
+        duplicate_response = client.post("/api/generation/generate", json=payload)
+
+        assert duplicate_response.status_code == 409
+        assert duplicate_response.headers["Retry-After"] == str(
+            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
+        )
+        assert duplicate_response.json()["detail"] == (
+            "AI generation is already running for the same input. Wait for the current request to finish."
+        )
+        assert calls == 1
+        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        generation_router.rate_limit_buckets.clear()
+        generation_router.active_generation_requests.clear()
+
+    assert not thread.is_alive()
+    assert first_result["response"].status_code == 200
+    assert calls == 1
 
 
 def test_estimated_token_counter_splits_text_and_latex_commands():
@@ -2305,7 +2419,7 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     assert usage.source == "estimated"
 
 
-def test_ai_generation_service_defaults_to_qwen2.5:3b_for_ollama(monkeypatch):
+def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
     from app.services.ai_generation import AIGenerationService
 
