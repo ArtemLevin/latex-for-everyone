@@ -3704,109 +3704,110 @@ def test_generation_job_not_found_returns_404():
 
 def test_generation_history_records_provider_failure(monkeypatch):
     from app.routers import generation as generation_router
-    from app.services.ai_generation import AIGenerationError
 
     async def fake_generate(prompt, provider, model):
-        raise AIGenerationError("Provider unavailable", status_code=503)
+        return (
+            "```latex\n"
+            r"\section{Scoped}Owner-only generation result"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
 
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
     project_response = client.post(
         "/api/projects/",
-        json={"name": "Generation Failure History Project", "template": "article"},
+        json={"name": "Scoped Generation Project", "template": "article"},
+        headers=owner_headers,
     )
     project_id = project_response.json()["id"]
 
-    response = client.post(
+    generate_response = client.post(
         "/api/generation/generate",
-        json={"project_id": project_id, "fields": {"topic": "Ошибка"}, "materials": "Материал."},
+        json={"project_id": project_id, "fields": {"topic": "История"}, "materials": "Материал."},
+        headers=owner_headers,
     )
+    assert generate_response.status_code == 200
+    history_item = client.get(f"/api/generation/history/project/{project_id}", headers=owner_headers).json()[0]
 
-    assert response.status_code == 503
-    history_response = client.get(f"/api/generation/history/project/{project_id}")
-    assert history_response.status_code == 200
-    history = history_response.json()
-    assert len(history) == 1
-    item = history[0]
-    assert item["status"] == "error"
-    assert item["error"] == "AI provider request failed. Check backend logs or provider configuration."
-    assert item["prompt_hash"]
-    assert item["raw_output_hash"] is None
-    assert item["latex_code_hash"] is None
-    assert item["compile_check"] is None
-    assert item["input_tokens"] is None
-    assert item["output_tokens"] is None
-    assert item["total_tokens"] is None
-    assert item["token_count_source"] is None
+    job_response = client.post(
+        "/api/generation/jobs",
+        json={"project_id": project_id, "fields": {"topic": "Job"}, "materials": "Материал."},
+        headers=owner_headers,
+    )
+    assert job_response.status_code == 202
+    job_id = job_response.json()["id"]
+
+    assert client.get(f"/api/generation/history/project/{project_id}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/history/item/{history_item['id']}", headers=other_headers).status_code == 404
+    assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
 
 
-def test_generation_history_item_not_found():
-    response = client.get("/api/generation/history/item/missing")
-
-    assert response.status_code == 404
-    assert "Generation history item missing not found" in response.json()["detail"]
-
-
-def test_generation_generate_strips_accidental_model_preamble(monkeypatch):
+def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
+    from app.config import settings
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
         return (
             "```latex\n"
-            r"\documentclass{article}\usepackage{graphicx}\begin{document}Generated full doc\end{document}"
+            r"\section{Job}Persisted generation result"
             "\n```",
             "ollama",
             "qwen2.5:3b",
         )
 
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
 
     response = client.post(
-        "/api/generation/generate",
-        json={"fields": {"topic": "Преамбула"}, "materials": "Сделать пособие."},
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Job API"}, "materials": "Материалы для job."},
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert data["latex_code"].count(r"\documentclass") == 1
-    assert r"\usepackage{graphicx}" not in data["latex_code"]
-    assert "Generated full doc" in data["latex_code"]
-    assert data["validation"]["valid"] is True
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "completed"
+    assert job["stage"] == "completed"
+    assert job["attempts"] == 1
+    assert job["request_hash"]
+    assert job["prompt_hash"]
+    assert job["queue_wait_seconds"] is not None
+    assert job["run_duration_seconds"] is not None
+    assert job["total_duration_seconds"] is not None
+    assert job["result"]["status"] == "success"
+    assert "Persisted generation result" in job["result"]["latex_code"]
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    assert status_response.json()["id"] == job["id"]
+    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
 
 
-
-
-def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch):
-    from app.routers import generation as generation_router
+def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
     from app.config import settings
-    from app.schemas import LatexCompileResult
+    from app.routers import generation as generation_router
 
-    prompts = []
-    compile_inputs = []
+    calls = 0
 
     async def fake_generate(prompt, provider, model):
-        prompts.append(prompt)
-        if len(prompts) == 1:
-            return (
-                "```latex\n"
-                r"\section{Broken}Компилируемый body, но компилятор вернул ошибку."
-                "\n```",
-                "ollama",
-                "qwen2.5:3b",
-            )
+        nonlocal calls
+        calls += 1
         return (
             "```latex\n"
-            r"\section{Fixed}\begin{infoblock}{Важно}Закрыто\end{infoblock}"
+            r"\section{Idempotent}Single provider call"
             "\n```",
             "ollama",
             "qwen2.5:3b",
         )
 
-    def fake_compile(main_content, files, main_filename="main.tex"):
-        compile_inputs.append(main_content)
-        if len(compile_inputs) == 1:
-            return LatexCompileResult(status="error", error="Compiler boom")
-        return LatexCompileResult(status="success", output="OK", compile_time="0.01s", pdf_url="/api/compile/download/test.pdf")
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    payload = {"fields": {"topic": "Idempotency"}, "materials": "Материал."}
+    headers = {"Idempotency-Key": "generation-job-retry-1"}
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
     monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
@@ -3814,57 +3815,81 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
 
     monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
+    generation_router.rate_limit_buckets.clear()
+    headers = {"Idempotency-Key": "generation-job-retry-2"}
 
-    response = client.post(
-        "/api/generation/generate",
-        json={"fields": {"topic": "Компилируемость"}, "materials": "Сделать пособие."},
+    first_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Первый"}, "materials": "Материал."},
+        headers=headers,
+    )
+    second_response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Другой"}, "materials": "Материал."},
+        headers=headers,
     )
 
-    assert response.status_code == 200
-    data = response.json()
-    assert len(prompts) == 2
-    assert "исправляешь LaTeX BODY" in prompts[1]
-    assert "Compiler boom" in prompts[1]
-    assert len(compile_inputs) == 2
-    assert "Broken" in compile_inputs[0]
-    assert "Fixed" in compile_inputs[1]
-    assert "Закрыто" in data["latex_code"]
-    assert data["raw_output"].startswith("```latex")
-    assert data["compile_check"] == {
-        "attempted": True,
-        "success": True,
-        "attempts": 2,
-        "repaired": True,
-        "skipped_reason": None,
-        "error": None,
-    }
-    assert data["token_usage"]["input_tokens"] > 0
-    assert data["token_usage"]["output_tokens"] > 0
-    assert data["token_usage"]["total_tokens"] == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
+    assert first_response.status_code == 202
+    assert second_response.status_code == 409
+    assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
 
 
-def test_generation_generate_simplifies_safe_mode_risky_latex_before_compile(monkeypatch):
-    from app.routers import generation as generation_router
+def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
     from app.config import settings
-    from app.schemas import LatexCompileResult
-
-    prompts = []
-    compile_inputs = []
+    from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
-        prompts.append(prompt)
         return (
             "```latex\n"
-            r"\section{Risky}\begin{tikzpicture}\draw (0,0)--(1,1);\end{tikzpicture}"
+            r"\section{Background}Completed from background task"
             "\n```",
             "ollama",
             "qwen2.5:3b",
         )
 
-    def fake_compile(main_content, files, main_filename="main.tex"):
-        compile_inputs.append(main_content)
-        return LatexCompileResult(status="success", output="OK", compile_time="0.01s")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
+    generation_router.rate_limit_buckets.clear()
+
+    response = client.post(
+        "/api/generation/jobs",
+        json={"fields": {"topic": "Background"}, "materials": "Материал."},
+    )
+
+    assert response.status_code == 202
+    job = response.json()
+    assert job["status"] == "queued"
+    assert job["stage"] == "queued"
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    completed_job = status_response.json()
+    assert completed_job["status"] == "completed"
+    assert "Completed from background task" in completed_job["result"]["latex_code"]
+
+
+def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        return (
+            "```latex\n"
+            r"\section{External}Should not run in request"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
     monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
