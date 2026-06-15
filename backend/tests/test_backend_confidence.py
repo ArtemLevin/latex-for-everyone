@@ -82,3 +82,14 @@ def test_latex_compiler_uses_uuid_compile_work_directories():
     assert "compile_{uuid.uuid4().hex}" in source
     assert "os.getpid()" not in source
     assert "int(time.time())" not in source
+
+
+def test_generation_router_delegates_provider_orchestration_to_service():
+    router_source = (BACKEND_APP / "routers" / "generation.py").read_text(encoding="utf-8")
+    service_source = (BACKEND_APP / "services" / "generation_orchestrator.py").read_text(encoding="utf-8")
+
+    assert "generation_orchestrator = GenerationOrchestrator(" in router_source
+    assert "await generation_orchestrator.generate(" in router_source
+    assert "async def _compile_check_and_repair" in service_source
+    assert "async def compile_check_and_repair" not in router_source
+    assert "raw_output, provider, model = await ai_generator.generate" not in router_source

@@ -2798,7 +2798,9 @@ def test_generation_generate_repairs_latex_when_compile_check_fails(monkeypatch)
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
     monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    from app.services import generation_orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
 
@@ -2854,7 +2856,9 @@ def test_generation_generate_simplifies_safe_mode_risky_latex_before_compile(mon
 
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
     monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    monkeypatch.setattr(generation_router.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
+    from app.services import generation_orchestrator as orchestrator_module
+
+    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
 
