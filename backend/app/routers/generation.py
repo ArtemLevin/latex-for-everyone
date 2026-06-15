@@ -452,6 +452,7 @@ async def create_generation_job(
         prompt_response = build_generation_prompt_response(generation_request)
         job = generation_job_service.create_job(
             db,
+            job=job,
             generation_request=generation_request,
             request_hash=request_sha,
             prompt_hash=text_digest(prompt_response.prompt),
