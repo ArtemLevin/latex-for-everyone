@@ -1002,6 +1002,10 @@
         margin-top: 4px;
     }
 
+    .generation-hint.error {
+        color: var(--accent-danger);
+    }
+
     @media (max-width: 768px) {
         .generation-grid {
             grid-template-columns: 1fr;
