@@ -11,6 +11,8 @@
     let lastGenerationRawOutput = '';
     let lastGenerationRequest = null;
     let lastGenerationResult = null;
+    let generationRequestInFlight = false;
+    let generationRateLimitedUntil = 0;
     let generationFunTimer = null;
     let generationFunStep = 0;
     let suppressEditorChange = false;

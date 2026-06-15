@@ -147,9 +147,10 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
 Latexed exposes two operational status endpoints:
 
 - `GET /api/health` is a lightweight liveness check. It means the backend process is running and can answer HTTP requests.
-- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, and `artifact_dirs`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, `artifact_dirs`, and optional `transcription`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+- `GET /api/transcription/status` reports only the configured transcription runtime: selected/effective provider, optional Python package discovery, `ffmpeg`/`ffprobe` availability, model settings, and install hints.
 
-When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. Run `make latex-check` in the target environment to verify the TeX Live runtime.
+When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. When an enabled transcription provider is missing optional packages or media tools, readiness is also `degraded`; the editor and compile flows can continue, but lesson transcription must be fixed before use. Run `make latex-check` in the target environment to verify the TeX Live runtime.
 
 ## Runtime artifacts and cleanup
 
@@ -276,7 +277,8 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/health` | Liveness check: backend process is responding |
-| GET | `/api/ready` | Readiness check: database, compiler, LaTeX packages, and runtime artifact directories |
+| GET | `/api/ready` | Readiness check: database, compiler, LaTeX packages, runtime artifact directories, and optional transcription runtime |
+| GET | `/api/transcription/status` | Transcription runtime diagnostics for the configured provider and optional dependencies |
 | GET | `/api/projects/` | List projects |
 | POST | `/api/projects/` | Create project |
 | GET | `/api/projects/{id}` | Get project details |
@@ -388,7 +390,7 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
 
-Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper.
+Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. Install it with `uv sync --group transcription` or `uv pip install faster-whisper==1.2.1`, and make sure system `ffmpeg` and `ffprobe` are on `PATH`. The legacy `TRANSCRIPTION_PROVIDER=legacy_whisper` adapter requires `uv sync --group legacy-transcription` or `uv pip install openai-whisper==20250625`, plus system `ffmpeg`/`ffprobe` and the repository `transcribe.py` adapter. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper. Use `GET /api/transcription/status` or the `transcription` section of `GET /api/ready` before enabling lesson transcription in a deployment; missing optional packages or media binaries are reported with `missing_requirements` and an `install_hint`. If `/api/lessons/{id}/transcribe` logs `provider=disabled` or returns a failed transcript with `Transcription provider is disabled`, the backend is running in the safe no-provider mode; set `TRANSCRIPTION_PROVIDER=faster_whisper` after installing the optional runtime, or set `TRANSCRIPTION_PROVIDER=fake` only for local UI smoke tests.
 
 ## Logging and observability
 

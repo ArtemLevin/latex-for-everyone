@@ -354,6 +354,26 @@ class GenerationResultResponse(GenerationPromptResponse):
     token_usage: GenerationTokenUsageResponse = Field(default_factory=GenerationTokenUsageResponse)
 
 
+class GenerationJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    provider: str
+    model: Optional[str] = None
+    status: str
+    stage: str
+    request_hash: str
+    prompt_hash: Optional[str] = None
+    result: Optional[GenerationResultResponse] = None
+    error_message: Optional[str] = None
+    attempts: int
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class GenerationPresetResponse(BaseModel):
     id: str
     name: str

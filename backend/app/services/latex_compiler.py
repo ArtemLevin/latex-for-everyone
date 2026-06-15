@@ -1,6 +1,6 @@
 import subprocess
-import os
 import time
+import uuid
 import shutil
 import logging
 from pathlib import Path
@@ -29,7 +29,7 @@ class LatexCompiler:
     ) -> LatexCompileResult:
         """Compile a LaTeX document into a typed service result."""
         start_time = time.time()
-        compile_id = f"compile_{int(time.time())}_{os.getpid()}"
+        compile_id = f"compile_{uuid.uuid4().hex}"
         work_dir = self.work_dir / compile_id
 
         try:

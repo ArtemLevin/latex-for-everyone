@@ -20,6 +20,7 @@ class Project(Base):
     compile_history = relationship("CompileHistory", back_populates="project", cascade="all, delete-orphan")
     snapshots = relationship("ProjectSnapshot", back_populates="project", cascade="all, delete-orphan")
     generation_history = relationship("GenerationHistory", back_populates="project", cascade="all, delete-orphan")
+    generation_jobs = relationship("GenerationJob", back_populates="project", cascade="all, delete-orphan")
 
 
 class Pupil(Base):
@@ -176,6 +177,29 @@ class ProjectSnapshot(Base):
     created_at = Column(DateTime, default=utc_now)
 
     project = relationship("Project", back_populates="snapshots")
+
+
+class GenerationJob(Base):
+    __tablename__ = "generation_jobs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    project_id = Column(String(36), ForeignKey("projects.id"), nullable=True, index=True)
+    provider = Column(String(100), nullable=False)
+    model = Column(String(255), nullable=True)
+    status = Column(String(50), nullable=False, default="queued", index=True)
+    stage = Column(String(50), nullable=False, default="queued")
+    request_hash = Column(String(64), nullable=False, index=True)
+    prompt_hash = Column(String(64), nullable=True)
+    request_payload = Column(JSON, nullable=False)
+    result_payload = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    project = relationship("Project", back_populates="generation_jobs")
 
 
 class GenerationHistory(Base):
