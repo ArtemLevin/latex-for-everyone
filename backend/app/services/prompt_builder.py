@@ -244,6 +244,15 @@ CONTENT_SOURCE_RULES = {
 }
 
 
+def escape_materials_delimiters(materials: str) -> str:
+    """Keep user materials inside the prompt boundary even if they contain boundary-looking text."""
+    return (
+        materials
+        .replace("<<<BEGIN_MATERIALS>>>", "<<<BEGIN_MATERIALS_ESCAPED>>>")
+        .replace("<<<END_MATERIALS>>>", "<<<END_MATERIALS_ESCAPED>>>")
+    )
+
+
 def build_latex_generation_prompt(fields: GenerationFields, materials: str = "") -> str:
     """Build the deterministic prompt used by generation endpoints."""
     source_mode = fields.content_source_mode
@@ -251,7 +260,8 @@ def build_latex_generation_prompt(fields: GenerationFields, materials: str = "")
     latex_mode = fields.latex_mode
     latex_mode_rules = LATEX_MODE_RULES[latex_mode]
     if materials.strip():
-        safe_materials = materials.strip()
+        # User materials are data, not instructions; escaping prompt sentinels prevents delimiter breakout.
+        safe_materials = escape_materials_delimiters(materials.strip())
     elif source_mode == "ai_creative":
         safe_materials = "[Материалы не переданы. Разрешено самостоятельно сгенерировать содержание по теме, уровню, классу и предмету.]"
     else:

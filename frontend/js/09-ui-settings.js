@@ -153,7 +153,10 @@
             info: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#3b82f6" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>'
         };
 
-        toast.innerHTML = `${icons[type] || icons.info}<span>${message}</span>`;
+        toast.insertAdjacentHTML('beforeend', icons[type] || icons.info);
+        const text = document.createElement('span');
+        text.textContent = message;
+        toast.appendChild(text);
         container.appendChild(toast);
 
         setTimeout(() => {
