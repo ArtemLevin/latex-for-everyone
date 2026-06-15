@@ -1,7 +1,39 @@
     // ==================== AI GENERATION ====================
+    const GENERATION_MATERIALS_MAX_CHARS = 50000;
+
     function getGenerationFieldValue(id) {
         const element = document.getElementById(id);
         return element ? element.value.trim() : '';
+    }
+
+    function getGenerationRawFieldValue(id) {
+        const element = document.getElementById(id);
+        return element ? element.value : '';
+    }
+
+    function normalizeGenerationMaterialsForRequest(materials) {
+        // Keep user-authored line breaks, but make pasted CRLF/CR text match backend normalization.
+        return String(materials || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+    }
+
+    function updateGenerationMaterialsDiagnostics() {
+        const hint = document.getElementById('generationMaterialsHint');
+        if (!hint) return true;
+        const materials = normalizeGenerationMaterialsForRequest(getGenerationRawFieldValue('generationMaterials'));
+        const remaining = GENERATION_MATERIALS_MAX_CHARS - materials.length;
+        const lines = materials ? materials.split('\n').length : 0;
+        hint.textContent = `Материалы: ${materials.length}/${GENERATION_MATERIALS_MAX_CHARS} символов, строк: ${lines}.`;
+        hint.classList.toggle('error', remaining < 0);
+        return remaining >= 0;
+    }
+
+    function validateGenerationMaterialsBeforeSubmit() {
+        if (updateGenerationMaterialsDiagnostics()) return true;
+        const message = `Материалы слишком большие: максимум ${GENERATION_MATERIALS_MAX_CHARS} символов.`;
+        setGenerationStatus(message, 'error');
+        setGenerationDetails([message], 'error');
+        showToast(message, 'error');
+        return false;
     }
 
     function setGenerationStatus(message, type = '') {
@@ -22,11 +54,34 @@
         details.innerHTML = `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
     }
 
+    const GENERATION_ACTION_BUTTON_IDS = [
+        'previewPromptBtn',
+        'checkProviderBtn',
+        'validateLatexBtn',
+        'retryGenerationBtn',
+        'regenerateSafeBtn',
+        'regenerateRichBtn',
+        'insertLastGeneratedBtn',
+        'generateLatexBtn',
+        'cancelGenerationJobBtn',
+        'retryGenerationJobBtn'
+    ];
+
+    function setGenerationActionButtonsDisabled(isDisabled, activeButtonId = '') {
+        GENERATION_ACTION_BUTTON_IDS.forEach(id => {
+            const button = document.getElementById(id);
+            if (!button || id === activeButtonId) return;
+            button.disabled = isDisabled;
+        });
+    }
+
     function setButtonLoading(id, isLoading, loadingText = 'Выполняется...') {
         const btn = document.getElementById(id);
         if (!btn) return;
         if (isLoading) {
-            btn.dataset.originalText = btn.textContent.trim();
+            if (!btn.dataset.originalText) {
+                btn.dataset.originalText = btn.textContent.trim();
+            }
             btn.disabled = true;
             btn.textContent = loadingText;
         } else {
@@ -97,6 +152,7 @@
         modal.classList.add('active');
         setGenerationDetails();
         setGenerationRetryActionsVisible(false);
+        updateGenerationMaterialsDiagnostics();
 
         if (backendAvailable) {
             try {
@@ -154,7 +210,7 @@
                 priority_method: getGenerationFieldValue('generationPriorityMethod') || 'нейросеть выбирает самостоятельно по отношению к уровню и классу',
                 graph_analytic: getGenerationFieldValue('generationGraphAnalytic') || 'по ситуации'
             },
-            materials: getGenerationFieldValue('generationMaterials')
+            materials: normalizeGenerationMaterialsForRequest(getGenerationRawFieldValue('generationMaterials'))
         };
     }
 
@@ -190,6 +246,14 @@
         const errors = validation.errors?.length ? ` Ошибки: ${validation.errors.join(' ')}` : '';
         const warnings = validation.warnings?.length ? ` Предупреждения: ${validation.warnings.join(' ')}` : '';
         return `${validation.valid ? 'LaTeX прошел структурную проверку.' : 'LaTeX не прошел структурную проверку.'}${errors}${warnings}`;
+    }
+
+
+    function setGenerationJobActionsVisible({ cancel = false, retry = false } = {}) {
+        const cancelButton = document.getElementById('cancelGenerationJobBtn');
+        if (cancelButton) cancelButton.style.display = cancel ? 'inline-flex' : 'none';
+        const retryButton = document.getElementById('retryGenerationJobBtn');
+        if (retryButton) retryButton.style.display = retry ? 'inline-flex' : 'none';
     }
 
     function setGenerationRetryActionsVisible(visible, allowInsert = false) {
@@ -467,27 +531,105 @@
         document.getElementById('statusText').textContent = 'AI-документ вставлен для ручной правки';
     }
 
+    function formatApiError(error) {
+        if (error.status === 429) {
+            const retryAfter = Number(error.retryAfter || 0);
+            const suffix = retryAfter > 0 ? ` Подождите примерно ${retryAfter} сек. и повторите.` : ' Подождите немного и повторите.';
+            return `${error.message}${suffix}`;
+        }
+        return error.message;
+    }
+
+    function sleep(ms) {
+        return new Promise(resolve => window.setTimeout(resolve, ms));
+    }
+
+    async function waitForGenerationJob(job) {
+        let currentJob = job;
+        currentGenerationJob = currentJob;
+        for (let attempt = 0; attempt < 120; attempt += 1) {
+            currentGenerationJob = currentJob;
+            if (currentJob.status === 'completed' && currentJob.result) {
+                setGenerationJobActionsVisible();
+                return currentJob.result;
+            }
+            if (currentJob.status === 'failed') {
+                setGenerationJobActionsVisible({ retry: true });
+                throw new Error(currentJob.error_message || 'AI generation job failed.');
+            }
+            if (currentJob.status === 'canceled') {
+                setGenerationJobActionsVisible({ retry: true });
+                throw new Error(currentJob.error_message || 'AI generation job was canceled.');
+            }
+            setGenerationJobActionsVisible({ cancel: true });
+            setGenerationStatus(`AI-генерация: ${currentJob.status} · ${currentJob.stage}`);
+            await sleep(1000);
+            currentJob = await apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`);
+        }
+        setGenerationJobActionsVisible({ retry: Boolean(currentGenerationJob) });
+        throw new Error('AI generation job did not finish before the polling timeout.');
+    }
+
+
+    function createGenerationIdempotencyKey() {
+        // A stable key per submit lets the backend return the same job if the HTTP request is retried.
+        if (window.crypto && typeof window.crypto.randomUUID === 'function') {
+            return window.crypto.randomUUID();
+        }
+        return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
+
+    async function runGenerationJob(request) {
+        const job = await apiRequest('/generation/jobs', {
+            method: 'POST',
+            headers: {
+                'Idempotency-Key': createGenerationIdempotencyKey()
+            },
+            body: JSON.stringify(request)
+        });
+        currentGenerationJob = job;
+        return waitForGenerationJob(job);
+    }
+
     async function runGenerationRequest(request, loadingButtonId = 'generateLatexBtn') {
         if (!backendAvailable) {
             setGenerationStatus('Backend недоступен: AI-генерация невозможна.', 'error');
             showToast('Запустите backend для AI-генерации', 'error');
             return;
         }
+        if (!validateGenerationMaterialsBeforeSubmit()) {
+            return;
+        }
+        if (generationRequestInFlight) {
+            setGenerationStatus('AI-генерация уже выполняется. Дождитесь завершения текущего запроса.', 'error');
+            showToast('AI-генерация уже выполняется', 'error');
+            return;
+        }
+        const waitMs = generationRateLimitedUntil - Date.now();
+        if (waitMs > 0) {
+            const waitSeconds = Math.ceil(waitMs / 1000);
+            const message = `AI-генерация временно ограничена rate limit. Подождите примерно ${waitSeconds} сек.`;
+            setGenerationStatus(message, 'error');
+            setGenerationDetails([message], 'error');
+            showToast(message, 'error');
+            return;
+        }
 
+        generationRequestInFlight = true;
         const previousContent = editor.getValue();
         const previousFileId = currentFileId;
+        setGenerationActionButtonsDisabled(true, loadingButtonId);
         setButtonLoading(loadingButtonId, true, 'Генерация...');
         setGenerationRetryActionsVisible(false);
+        setGenerationJobActionsVisible();
+        currentGenerationJob = null;
         startGenerationFunWait();
         document.getElementById('statusText').textContent = 'AI-генерация — творим чудо...';
 
         try {
             await saveCurrentFile();
             lastGenerationRequest = cloneGenerationRequest(request);
-            const result = await apiRequest('/generation/generate', {
-                method: 'POST',
-                body: JSON.stringify(request)
-            });
+            const result = await runGenerationJob(request);
             stopGenerationFunWait();
             lastGenerationResult = result;
             lastGenerationRawOutput = result.raw_output || '';
@@ -530,16 +672,22 @@
                 files[currentFileId].content = previousContent;
                 renderFileTree();
             }
+            if (error.status === 429) {
+                const retryAfter = Number(error.retryAfter || 0);
+                generationRateLimitedUntil = retryAfter > 0 ? Date.now() + retryAfter * 1000 : Date.now() + 60_000;
+            }
+            const message = formatApiError(error);
             setGenerationRetryActionsVisible(Boolean(lastGenerationRequest), Boolean(lastGenerationResult?.latex_code));
-            setGenerationStatus(`Ошибка генерации: ${error.message}`, 'error');
-            setGenerationDetails([error.message], 'error');
-            document.getElementById('statusText').textContent = 'Ошибка AI-генерации';
-            showToast(`Ошибка AI-генерации: ${error.message}`, 'error');
+            setGenerationStatus(`Ошибка генерации: ${message}`, 'error');
+            setGenerationDetails([message], 'error');
+            document.getElementById('statusText').textContent = error.status === 429 ? 'AI-генерация ограничена rate limit' : 'Ошибка AI-генерации';
+            showToast(`Ошибка AI-генерации: ${message}`, 'error');
         } finally {
+            generationRequestInFlight = false;
             stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
+            setGenerationActionButtonsDisabled(false, loadingButtonId);
         }
-        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
     }
 
     async function regenerateWithLatexMode(mode) {
@@ -566,59 +714,32 @@
         await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
     }
 
-    async function regenerateWithLatexMode(mode) {
-        const modeInput = document.getElementById('generationLatexMode');
-        if (modeInput) modeInput.value = mode;
-        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
-        request.fields = request.fields || {};
-        request.fields.latex_mode = mode;
-        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
-    }
 
-    async function generateLatexFromAi() {
-        lastGenerationResult = null;
-        lastGenerationRawOutput = '';
-        await runGenerationRequest(collectGenerationRequest(), 'generateLatexBtn');
-    }
-
-    async function retryLastGeneration() {
-        if (!lastGenerationRequest) {
-            setGenerationStatus('Нет сохранённого запроса для retry.', 'error');
-            showToast('Сначала выполните AI-генерацию', 'error');
+    async function cancelCurrentGenerationJob() {
+        if (!currentGenerationJob) {
+            showToast('Нет активного AI job для отмены', 'error');
             return;
         }
-        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
+        const job = await apiRequest(`/generation/jobs/${encodeURIComponent(currentGenerationJob.id)}/cancel`, { method: 'POST' });
+        currentGenerationJob = job;
+        setGenerationJobActionsVisible({ retry: true });
+        setGenerationStatus('AI generation job отменён.', 'error');
+        showToast('AI generation job отменён', 'success');
     }
 
-    async function regenerateWithLatexMode(mode) {
-        const modeInput = document.getElementById('generationLatexMode');
-        if (modeInput) modeInput.value = mode;
-        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
-        request.fields = request.fields || {};
-        request.fields.latex_mode = mode;
-        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
-    }
-
-    async function generateLatexFromAi() {
-        lastGenerationResult = null;
-        lastGenerationRawOutput = '';
-        await runGenerationRequest(collectGenerationRequest(), 'generateLatexBtn');
-    }
-
-    async function retryLastGeneration() {
-        if (!lastGenerationRequest) {
-            setGenerationStatus('Нет сохранённого запроса для retry.', 'error');
-            showToast('Сначала выполните AI-генерацию', 'error');
+    async function retryCurrentGenerationJob() {
+        if (!currentGenerationJob) {
+            showToast('Нет AI job для повтора', 'error');
             return;
         }
-        await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');
-    }
-
-    async function regenerateWithLatexMode(mode) {
-        const modeInput = document.getElementById('generationLatexMode');
-        if (modeInput) modeInput.value = mode;
-        const request = lastGenerationRequest ? cloneGenerationRequest(lastGenerationRequest) : collectGenerationRequest();
-        request.fields = request.fields || {};
-        request.fields.latex_mode = mode;
-        await runGenerationRequest(request, mode === 'rich' ? 'regenerateRichBtn' : 'regenerateSafeBtn');
+        setGenerationJobActionsVisible({ cancel: true });
+        const job = await apiRequest(`/generation/jobs/${encodeURIComponent(currentGenerationJob.id)}/retry`, { method: 'POST' });
+        currentGenerationJob = job;
+        const result = await waitForGenerationJob(job);
+        lastGenerationResult = result;
+        lastGenerationRawOutput = result.raw_output || '';
+        renderGenerationResultDetails(result);
+        setGenerationStatus('AI generation job повторён. Проверьте результат перед вставкой.', 'success');
+        setGenerationRetryActionsVisible(true, Boolean(result.latex_code));
+        showToast('AI job повторён', 'success');
     }
