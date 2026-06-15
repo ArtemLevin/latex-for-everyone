@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     # AI Generation
     AI_PROVIDER: str = "ollama"
     AI_GENERATION_TIMEOUT: int = 120_000
-    AI_GENERATION_JOB_EXECUTION_MODE: str = "inline"  # inline or background
+    AI_GENERATION_JOB_EXECUTION_MODE: str = "inline"  # inline, background, or external worker
     AI_GENERATION_JOB_TIMEOUT_SECONDS: int = 0  # 0 disables persisted job timeout
     AI_PROVIDER_STATUS_TIMEOUT: int = 10
     AI_RATE_LIMIT_PER_MINUTE: int = 20

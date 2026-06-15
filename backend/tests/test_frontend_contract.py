@@ -103,6 +103,10 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "apiRequest(`/generation/jobs/${encodeURIComponent(currentJob.id)}`)" in generation_js
     assert "cancelCurrentGenerationJob" in generation_js
     assert "retryCurrentGenerationJob" in generation_js
+    assert "loadGenerationJobsPanel" in generation_js
+    assert "renderGenerationJobsPanel" in generation_js
+    assert "generationJobsPanel" in (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
+    assert "refreshGenerationJobsBtn" in (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
     assert "cancelGenerationJobBtn" in (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
     assert "retryGenerationJobBtn" in (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
     readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")

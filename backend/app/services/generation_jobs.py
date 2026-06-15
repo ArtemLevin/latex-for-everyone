@@ -102,6 +102,12 @@ class GenerationJobService:
             .first()
         )
 
+    def get_next_queued_job(self, db: Session, *, owner_id: str | None = None) -> GenerationJob | None:
+        query = db.query(GenerationJob).filter(GenerationJob.status == "queued")
+        if owner_id is not None:
+            query = query.filter(GenerationJob.owner_id == owner_id)
+        return query.order_by(GenerationJob.created_at.asc()).first()
+
     async def run_job(
         self,
         db: Session,
@@ -179,7 +185,15 @@ class GenerationJobService:
         db.add(job)
         db.commit()
         db.refresh(job)
-        logger.info("generation job canceled job_id=%s owner_id=%s", job.id, owner_id)
+        logger.info(
+            "generation job canceled job_id=%s owner_id=%s queue_wait_seconds=%s run_duration_seconds=%s total_duration_seconds=%s attempts=%s",
+            job.id,
+            owner_id,
+            self._seconds_between(job.created_at, job.started_at),
+            self._seconds_between(job.started_at, job.finished_at),
+            self._seconds_between(job.created_at, job.finished_at),
+            job.attempts,
+        )
         return job
 
     def to_response(self, job: GenerationJob) -> GenerationJobResponse:
@@ -197,6 +211,9 @@ class GenerationJobService:
             result=result,
             error_message=job.error_message,
             attempts=job.attempts,
+            queue_wait_seconds=self._seconds_between(job.created_at, job.started_at),
+            run_duration_seconds=self._seconds_between(job.started_at, job.finished_at),
+            total_duration_seconds=self._seconds_between(job.created_at, job.finished_at),
             started_at=job.started_at,
             finished_at=job.finished_at,
             created_at=job.created_at,
@@ -212,7 +229,13 @@ class GenerationJobService:
         db.add(job)
         db.commit()
         db.refresh(job)
-        logger.info("generation job running job_id=%s stage=%s attempts=%s", job.id, job.stage, job.attempts)
+        logger.info(
+            "generation job running job_id=%s stage=%s attempts=%s queue_wait_seconds=%s",
+            job.id,
+            job.stage,
+            job.attempts,
+            self._seconds_between(job.created_at, job.started_at),
+        )
 
     def _mark_completed(self, db: Session, job: GenerationJob, result: GenerationResultResponse) -> None:
         job.status = "completed"
@@ -225,7 +248,16 @@ class GenerationJobService:
         db.add(job)
         db.commit()
         db.refresh(job)
-        logger.info("generation job completed job_id=%s provider=%s model=%s", job.id, result.provider, result.model)
+        logger.info(
+            "generation job completed job_id=%s provider=%s model=%s queue_wait_seconds=%s run_duration_seconds=%s total_duration_seconds=%s attempts=%s",
+            job.id,
+            result.provider,
+            result.model,
+            self._seconds_between(job.created_at, job.started_at),
+            self._seconds_between(job.started_at, job.finished_at),
+            self._seconds_between(job.created_at, job.finished_at),
+            job.attempts,
+        )
 
     def _mark_failed(self, db: Session, job: GenerationJob, message: str) -> None:
         job.status = "failed"
@@ -236,4 +268,18 @@ class GenerationJobService:
         db.add(job)
         db.commit()
         db.refresh(job)
-        logger.warning("generation job failed job_id=%s error=%s", job.id, message)
+        logger.warning(
+            "generation job failed job_id=%s queue_wait_seconds=%s run_duration_seconds=%s total_duration_seconds=%s attempts=%s error=%s",
+            job.id,
+            self._seconds_between(job.created_at, job.started_at),
+            self._seconds_between(job.started_at, job.finished_at),
+            self._seconds_between(job.created_at, job.finished_at),
+            job.attempts,
+            message,
+        )
+
+    @staticmethod
+    def _seconds_between(start, end) -> float | None:
+        if not start or not end:
+            return None
+        return max((end - start).total_seconds(), 0.0)

@@ -64,7 +64,8 @@
         'insertLastGeneratedBtn',
         'generateLatexBtn',
         'cancelGenerationJobBtn',
-        'retryGenerationJobBtn'
+        'retryGenerationJobBtn',
+        'refreshGenerationJobsBtn'
     ];
 
     function setGenerationActionButtonsDisabled(isDisabled, activeButtonId = '') {
@@ -725,6 +726,73 @@
         setGenerationJobActionsVisible({ retry: true });
         setGenerationStatus('AI generation job отменён.', 'error');
         showToast('AI generation job отменён', 'success');
+    }
+
+    function formatGenerationJobSummary(job) {
+        const duration = job.total_duration_seconds === null || job.total_duration_seconds === undefined
+            ? 'ожидает'
+            : `${Number(job.total_duration_seconds).toFixed(1)} сек.`;
+        return `${job.status} · ${job.stage} · попыток: ${job.attempts} · всего: ${duration}`;
+    }
+
+    function renderGenerationJobsPanel(jobs) {
+        const panel = document.getElementById('generationJobsPanel');
+        if (!panel) return;
+        panel.textContent = '';
+        panel.classList.add('active');
+        const title = document.createElement('div');
+        title.textContent = jobs.length ? 'Последние AI generation jobs:' : 'AI generation jobs пока нет.';
+        panel.appendChild(title);
+
+        jobs.forEach(job => {
+            const row = document.createElement('div');
+            row.className = 'generation-job-row';
+
+            const summary = document.createElement('span');
+            summary.textContent = `${job.id.slice(0, 8)} · ${formatGenerationJobSummary(job)}`;
+            row.appendChild(summary);
+
+            const actions = document.createElement('span');
+            if (job.status === 'queued' || job.status === 'running') {
+                const cancelButton = document.createElement('button');
+                cancelButton.type = 'button';
+                cancelButton.className = 'btn btn-secondary';
+                cancelButton.textContent = 'Отменить';
+                cancelButton.addEventListener('click', async () => {
+                    currentGenerationJob = job;
+                    await cancelCurrentGenerationJob();
+                    await loadGenerationJobsPanel();
+                });
+                actions.appendChild(cancelButton);
+            }
+            if (job.status === 'failed' || job.status === 'canceled') {
+                const retryButton = document.createElement('button');
+                retryButton.type = 'button';
+                retryButton.className = 'btn btn-secondary';
+                retryButton.textContent = 'Повторить';
+                retryButton.addEventListener('click', async () => {
+                    currentGenerationJob = job;
+                    await retryCurrentGenerationJob();
+                    await loadGenerationJobsPanel();
+                });
+                actions.appendChild(retryButton);
+            }
+            row.appendChild(actions);
+            panel.appendChild(row);
+        });
+    }
+
+    async function loadGenerationJobsPanel() {
+        if (!backendAvailable) {
+            setGenerationStatus('Backend недоступен: невозможно загрузить историю jobs.', 'error');
+            return;
+        }
+        const params = new URLSearchParams({ limit: '10' });
+        if (currentProject?.id) {
+            params.set('project_id', currentProject.id);
+        }
+        const jobs = await apiRequest(`/generation/jobs?${params.toString()}`);
+        renderGenerationJobsPanel(jobs);
     }
 
     async function retryCurrentGenerationJob() {

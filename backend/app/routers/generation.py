@@ -271,6 +271,10 @@ async def run_generation_job_by_mode(
         background_tasks.add_task(run_generation_job_background, job.id)
         logger.info("generation job scheduled background job_id=%s owner_id=%s", job.id, owner_id)
         return generation_job_service.to_response(job)
+    if execution_mode == "external":
+        # External mode intentionally leaves the row queued so a dedicated worker can claim and run it.
+        logger.info("generation job queued for external worker job_id=%s owner_id=%s", job.id, owner_id)
+        return generation_job_service.to_response(job)
     if execution_mode != "inline":
         logger.warning("unknown generation job execution mode mode=%s; falling back to inline", execution_mode)
 

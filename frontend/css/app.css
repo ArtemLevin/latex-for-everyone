@@ -1670,3 +1670,31 @@
     color: var(--text-muted);
     font-size: 11px;
 }
+
+    .generation-jobs-panel {
+        display: none;
+        margin-top: 12px;
+        padding: 10px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-tertiary);
+        color: var(--text-secondary);
+        font-size: 12px;
+    }
+
+    .generation-jobs-panel.active {
+        display: block;
+    }
+
+    .generation-job-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 0;
+        border-top: 1px solid var(--border-color);
+    }
+
+    .generation-job-row:first-child {
+        border-top: 0;
+    }

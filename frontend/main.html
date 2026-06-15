@@ -513,7 +513,7 @@
                     <div class="generation-field full">
                         <label for="generationMaterials">Материалы / условия задач</label>
                         <textarea id="generationMaterials" oninput="updateGenerationMaterialsDiagnostics()" placeholder="Вставьте исходные задания, ссылку или описание. Можно оставить пустым, если тема достаточна."></textarea>
-                        <div class="generation-hint" id="generationMaterialsHint">Материалы: 0/20000 символов, строк: 0.</div>
+                        <div class="generation-hint" id="generationMaterialsHint">Материалы: 0/50000 символов, строк: 0.</div>
                     </div>
                     <div class="generation-field">
                         <label for="generationInsertMode">Куда вставить результат</label>
@@ -531,6 +531,7 @@
                 </div>
                 <div id="generationStatus" class="generation-status">Заполните тему и нажмите «Сгенерировать и вставить».</div>
                 <div id="generationDetails" class="generation-details"></div>
+                <div class="generation-jobs-panel" id="generationJobsPanel" aria-live="polite"></div>
                 <div class="generation-actions">
                     <button type="button" class="btn btn-secondary" id="previewPromptBtn" onclick="previewGenerationPrompt()">Проверить prompt</button>
                     <button type="button" class="btn btn-secondary" onclick="copyGenerationPrompt()">Скопировать prompt</button>
@@ -543,6 +544,7 @@
                     <button type="button" class="btn btn-secondary" id="insertLastGeneratedBtn" onclick="insertLastGeneratedLatex()" style="display: none;">Вставить всё равно</button>
                     <button type="button" class="btn btn-secondary" id="cancelGenerationJobBtn" onclick="cancelCurrentGenerationJob()" style="display: none;">Отменить job</button>
                     <button type="button" class="btn btn-secondary" id="retryGenerationJobBtn" onclick="retryCurrentGenerationJob()" style="display: none;">Повторить job</button>
+                    <button type="button" class="btn btn-secondary" id="refreshGenerationJobsBtn" onclick="loadGenerationJobsPanel()">История jobs</button>
                     <button type="button" class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
                     <button type="button" class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
                         <span>Сгенерировать и вставить</span>
@@ -738,4 +740,3 @@
 <script src="js/10-lessons.js?v=20260614-ai-generation-guard"></script>
 </body>
 </html>
-

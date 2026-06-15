@@ -374,6 +374,9 @@ class GenerationJobResponse(BaseModel):
     result: Optional[GenerationResultResponse] = None
     error_message: Optional[str] = None
     attempts: int
+    queue_wait_seconds: Optional[float] = None
+    run_duration_seconds: Optional[float] = None
+    total_duration_seconds: Optional[float] = None
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     created_at: datetime
