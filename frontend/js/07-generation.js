@@ -22,11 +22,32 @@
         details.innerHTML = `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join('')}</ul>`;
     }
 
+    const GENERATION_ACTION_BUTTON_IDS = [
+        'previewPromptBtn',
+        'checkProviderBtn',
+        'validateLatexBtn',
+        'retryGenerationBtn',
+        'regenerateSafeBtn',
+        'regenerateRichBtn',
+        'insertLastGeneratedBtn',
+        'generateLatexBtn'
+    ];
+
+    function setGenerationActionButtonsDisabled(isDisabled, activeButtonId = '') {
+        GENERATION_ACTION_BUTTON_IDS.forEach(id => {
+            const button = document.getElementById(id);
+            if (!button || id === activeButtonId) return;
+            button.disabled = isDisabled;
+        });
+    }
+
     function setButtonLoading(id, isLoading, loadingText = 'Выполняется...') {
         const btn = document.getElementById(id);
         if (!btn) return;
         if (isLoading) {
-            btn.dataset.originalText = btn.textContent.trim();
+            if (!btn.dataset.originalText) {
+                btn.dataset.originalText = btn.textContent.trim();
+            }
             btn.disabled = true;
             btn.textContent = loadingText;
         } else {
@@ -500,6 +521,7 @@
         generationRequestInFlight = true;
         const previousContent = editor.getValue();
         const previousFileId = currentFileId;
+        setGenerationActionButtonsDisabled(true, loadingButtonId);
         setButtonLoading(loadingButtonId, true, 'Генерация...');
         setGenerationRetryActionsVisible(false);
         startGenerationFunWait();
@@ -568,6 +590,7 @@
             generationRequestInFlight = false;
             stopGenerationFunWait();
             setButtonLoading(loadingButtonId, false);
+            setGenerationActionButtonsDisabled(false, loadingButtonId);
         }
     }
 

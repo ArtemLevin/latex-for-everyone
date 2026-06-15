@@ -531,17 +531,17 @@
                 <div id="generationStatus" class="generation-status">Заполните тему и нажмите «Сгенерировать и вставить».</div>
                 <div id="generationDetails" class="generation-details"></div>
                 <div class="generation-actions">
-                    <button class="btn btn-secondary" id="previewPromptBtn" onclick="previewGenerationPrompt()">Проверить prompt</button>
-                    <button class="btn btn-secondary" onclick="copyGenerationPrompt()">Скопировать prompt</button>
-                    <button class="btn btn-secondary" id="checkProviderBtn" onclick="checkGenerationProvider()">Проверить провайдера</button>
-                    <button class="btn btn-secondary" id="validateLatexBtn" onclick="validateCurrentLatex()">Проверить .tex</button>
-                    <button class="btn btn-secondary" onclick="copyGenerationRawOutput()">Скопировать raw output</button>
-                    <button class="btn btn-secondary" id="retryGenerationBtn" onclick="retryLastGeneration()" style="display: none;">Повторить repair</button>
-                    <button class="btn btn-secondary" id="regenerateSafeBtn" onclick="regenerateWithLatexMode('safe')" style="display: none;">Перегенерировать safe</button>
-                    <button class="btn btn-secondary" id="regenerateRichBtn" onclick="regenerateWithLatexMode('rich')" style="display: none;">Перегенерировать rich</button>
-                    <button class="btn btn-secondary" id="insertLastGeneratedBtn" onclick="insertLastGeneratedLatex()" style="display: none;">Вставить всё равно</button>
-                    <button class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
-                    <button class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
+                    <button type="button" class="btn btn-secondary" id="previewPromptBtn" onclick="previewGenerationPrompt()">Проверить prompt</button>
+                    <button type="button" class="btn btn-secondary" onclick="copyGenerationPrompt()">Скопировать prompt</button>
+                    <button type="button" class="btn btn-secondary" id="checkProviderBtn" onclick="checkGenerationProvider()">Проверить провайдера</button>
+                    <button type="button" class="btn btn-secondary" id="validateLatexBtn" onclick="validateCurrentLatex()">Проверить .tex</button>
+                    <button type="button" class="btn btn-secondary" onclick="copyGenerationRawOutput()">Скопировать raw output</button>
+                    <button type="button" class="btn btn-secondary" id="retryGenerationBtn" onclick="retryLastGeneration()" style="display: none;">Повторить repair</button>
+                    <button type="button" class="btn btn-secondary" id="regenerateSafeBtn" onclick="regenerateWithLatexMode('safe')" style="display: none;">Перегенерировать safe</button>
+                    <button type="button" class="btn btn-secondary" id="regenerateRichBtn" onclick="regenerateWithLatexMode('rich')" style="display: none;">Перегенерировать rich</button>
+                    <button type="button" class="btn btn-secondary" id="insertLastGeneratedBtn" onclick="insertLastGeneratedLatex()" style="display: none;">Вставить всё равно</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal('generationModal')">Отмена</button>
+                    <button type="button" class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn">
                         <span>Сгенерировать и вставить</span>
                     </button>
                 </div>

@@ -85,5 +85,10 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "generationRequestInFlight = false" in generation_js
     assert "generationRateLimitedUntil = retryAfter > 0" in generation_js
     assert "const waitMs = generationRateLimitedUntil - Date.now()" in generation_js
+    assert "const GENERATION_ACTION_BUTTON_IDS" in generation_js
+    assert "setGenerationActionButtonsDisabled(true, loadingButtonId)" in generation_js
+    assert "setGenerationActionButtonsDisabled(false, loadingButtonId)" in generation_js
+    main_html = (FRONTEND_DIR / "main.html").read_text(encoding="utf-8")
+    assert 'type="button" class="compile-btn" onclick="generateLatexFromAi()" id="generateLatexBtn"' in main_html
     assert "error.status = response.status" in api_js
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js
