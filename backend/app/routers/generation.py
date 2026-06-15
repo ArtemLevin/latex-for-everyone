@@ -472,6 +472,7 @@ async def create_generation_job(
         prompt_response = build_generation_prompt_response(generation_request)
         job = generation_job_service.create_job(
             db,
+            job=job,
             generation_request=generation_request,
             request_hash=request_sha,
             prompt_hash=text_digest(prompt_response.prompt),
@@ -542,6 +543,7 @@ async def get_generation_jobs_operator_status(
             for job in summary["stale_samples"]
         ],
     )
+    return [generation_job_service.to_response(job) for job in jobs]
 
 
 @router.post("/jobs/operator/recover-stale", response_model=GenerationJobRecoverStaleResponse)
