@@ -1536,6 +1536,79 @@ def test_artifact_cleanup_rejects_untrusted_root(tmp_path):
         cleanup_old_files(untrusted_root, max_age_seconds=60, suffixes={".pdf"}, trusted_roots=(trusted_root,))
 
 
+def test_artifact_cleanup_dry_run_reports_without_deleting(tmp_path):
+    import os
+    import time
+    from app.services.artifact_cleanup import cleanup_old_files_report
+
+    old_pdf = tmp_path / "old.pdf"
+    old_pdf.write_bytes(b"old")
+    old_time = time.time() - 3600
+    os.utime(old_pdf, (old_time, old_time))
+
+    report = cleanup_old_files_report(
+        tmp_path,
+        root_name="compile_pdf",
+        max_age_seconds=60,
+        suffixes={".pdf"},
+        trusted_roots=(tmp_path,),
+        dry_run=True,
+    )
+
+    assert report.dry_run is True
+    assert report.would_delete_files == 1
+    assert report.deleted_files == 0
+    assert old_pdf.exists()
+
+
+def test_artifact_cleanup_skips_symlink_escape(tmp_path):
+    import os
+    import time
+    from app.services.artifact_cleanup import cleanup_old_files_report
+
+    trusted_root = tmp_path / "trusted"
+    outside = tmp_path / "outside"
+    trusted_root.mkdir()
+    outside.mkdir()
+    outside_pdf = outside / "outside.pdf"
+    outside_pdf.write_bytes(b"outside")
+    symlink = trusted_root / "escape.pdf"
+    symlink.symlink_to(outside_pdf)
+    old_time = time.time() - 3600
+    os.utime(symlink, (old_time, old_time), follow_symlinks=False)
+
+    report = cleanup_old_files_report(
+        trusted_root,
+        max_age_seconds=60,
+        suffixes={".pdf"},
+        trusted_roots=(trusted_root,),
+    )
+
+    assert report.deleted_files == 0
+    assert report.skipped_files == 1
+    assert symlink.exists()
+    assert outside_pdf.exists()
+
+
+def test_configured_artifact_cleanup_includes_lesson_root_without_upload_wildcard(monkeypatch, tmp_path):
+    from app.config import settings
+    from app.services.artifact_paths import artifact_cleanup_policies, trusted_artifact_roots
+
+    compile_root = tmp_path / "compiles"
+    upload_root = tmp_path / "uploads"
+    lesson_root = tmp_path / "custom_lessons"
+    monkeypatch.setattr(settings, "COMPILE_WORK_DIR", str(compile_root))
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(upload_root))
+    monkeypatch.setattr(settings, "LESSON_ARTIFACT_ROOT", str(lesson_root))
+
+    policies = {policy.name: policy for policy in artifact_cleanup_policies()}
+
+    assert set(policies) == {"compile_pdf", "export", "lesson"}
+    assert policies["lesson"].root == lesson_root
+    assert policies["lesson"].recursive is True
+    assert upload_root not in trusted_artifact_roots()
+
+
 def test_latex_compiler_truncates_compiler_output(monkeypatch, tmp_path):
     import subprocess
     from app.config import settings

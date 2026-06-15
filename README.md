@@ -118,7 +118,8 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make check` | Run Python compile check, frontend syntax check, and backend tests. |
 | `make migrate` | Run Alembic migrations. |
 | `make migration MSG="..."` | Create an Alembic autogeneration revision. |
-| `make clean-artifacts` | Remove generated compile/export artifacts from default `/tmp` runtime dirs. |
+| `make clean-artifacts-dry-run` | Report stale trusted runtime artifacts that cleanup would remove. |
+| `make clean-artifacts` | Safely remove stale trusted runtime artifacts using `ARTIFACT_TTL_SECONDS`. |
 | `make docker-up` | Build and start Docker Compose services. |
 | `make docker-down` | Stop Docker Compose services. |
 | `make clean` | Remove local DB files and Python/test caches. |
@@ -167,9 +168,11 @@ Generated artifact locations are intentionally separated by purpose:
 - uploaded user files and temporary upload state live under `${UPLOAD_DIR}`;
 - lesson audio recordings live under `${LESSON_ARTIFACT_ROOT}` when set, otherwise under `${UPLOAD_DIR}/lessons`.
 
-Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Automatic best-effort cleanup uses `ARTIFACT_TTL_SECONDS` and removes only old allowlisted compile/export artifact files from trusted runtime roots; custom lesson-audio retention remains an explicit follow-up, while the default lesson root is removed by `make clean-artifacts` because it is under `/tmp/latexed_uploads`.
+Download endpoints validate artifact filenames through a shared safe-path resolver: path traversal, nested paths, unsupported extensions, and files outside the configured artifact roots are rejected. Compile downloads currently allow PDF files only; export downloads allow PDF, HTML, and ZIP artifacts. Cleanup uses the same trusted-root policy and never treats the broad upload directory as a wildcard root. The configured cleanup roots are `${COMPILE_WORK_DIR}/pdfs`, `${UPLOAD_DIR}/exports`, and `${LESSON_ARTIFACT_ROOT}` or `${UPLOAD_DIR}/lessons`; lesson cleanup is recursive but suffix-allowlisted to known audio/document artifact types.
 
-Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Use `make clean-artifacts` to remove generated files under the default `/tmp` runtime directories when no backend process is using them. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
+Automatic and manual cleanup use `ARTIFACT_TTL_SECONDS`; set it to `0` to disable age-based cleanup. `make clean-artifacts-dry-run` prints a JSON report with files that would be deleted, skipped counts, byte totals, errors, and duration. `make clean-artifacts` runs the same safe cleanup with `--commit`; use it only when no backend process is actively writing artifacts. Production cron/systemd timers should call `backend/scripts/clean_artifacts.py` first without `--commit`, review the report in logs, and then schedule `--commit` with an explicit retention window.
+
+Use `make clean` to remove local SQLite databases and Python/test caches from the repository working tree. Do not commit local databases, generated PDFs, uploaded user files, `.env` files, or provider credentials.
 
 ## Timestamp policy
 
@@ -349,7 +352,7 @@ Deprecated compatibility routes are still available for compile history:
 | `MAX_LATEX_TOTAL_CHARS` | `2000000` | Maximum total characters allowed across a compile/export payload; set `0` to disable |
 | `MAX_COMPILER_OUTPUT_CHARS` | `20000` | Maximum compiler output/log characters returned through API responses/history; set `0` to disable truncation |
 | `LATEX_ALLOWED_EXTENSIONS` | `.tex,.bib,.cls,.sty` | Comma-separated allowlist for user-provided LaTeX project files accepted by compile/export payloads |
-| `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for generated compile/export artifacts; set `0` to disable automatic cleanup |
+| `ARTIFACT_TTL_SECONDS` | `86400` | Best-effort cleanup threshold for trusted compile/export/lesson artifacts; set `0` to disable automatic cleanup |
 | `UPLOAD_DIR` | `/tmp/latexed_uploads` | Upload/export artifact directory |
 | `LESSON_ARTIFACT_ROOT` | empty (`${UPLOAD_DIR}/lessons`) | Trusted root for lesson audio artifacts; leave empty to derive from `UPLOAD_DIR` |
 | `MAX_LESSON_AUDIO_SIZE` | `104857600` | Maximum lesson audio upload size in bytes |
