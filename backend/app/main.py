@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy import inspect, text
 
 from app.config import settings
@@ -15,6 +15,7 @@ from app.logging_config import configure_logging, reset_request_id, set_request_
 from app.routers import compile, export, files, generation, lessons, projects, pupils, templates
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services import readiness
+from app.services.metrics import PROMETHEUS_CONTENT_TYPE, build_prometheus_metrics
 
 
 # Logging
@@ -294,6 +295,14 @@ async def readiness_check():
 @app.get("/api/transcription/status", response_model=ReadinessCheckResponse)
 async def transcription_status_check():
     return readiness.check_transcription_ready()
+
+
+@app.get("/api/metrics", response_class=PlainTextResponse)
+async def metrics_check():
+    # Prometheus text keeps ops scraping dependency-free and avoids exposing prompts/materials.
+    readiness_response = readiness.build_readiness_response(engine)
+    metrics_text = build_prometheus_metrics(readiness_response, generation.request_control_service.metrics_snapshot())
+    return PlainTextResponse(metrics_text, media_type=PROMETHEUS_CONTENT_TYPE)
 
 
 @app.get("/")

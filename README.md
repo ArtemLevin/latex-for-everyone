@@ -349,6 +349,7 @@ If the browser shows a failed `OPTIONS /api/health` preflight, check that the fr
 | POST | `/api/generation/jobs/{id}/cancel` | Cancel a queued/running generation job in the current owner scope |
 | GET | `/api/generation/jobs/operator/status` | Owner-scoped operator summary with job counts, backlog and stale job samples without prompts/materials |
 | POST | `/api/generation/jobs/operator/recover-stale` | Owner-scoped stale-running job recovery trigger |
+| GET | `/api/metrics` | Prometheus text metrics for readiness, generation backlog/stale jobs and AI request-control decisions |
 
 Deprecated compatibility routes are still available for compile history:
 

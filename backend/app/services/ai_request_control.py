@@ -1,4 +1,4 @@
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 from dataclasses import dataclass
 import hashlib
 import math
@@ -203,6 +203,9 @@ class AIRequestControlService:
             )
 
         self.backend = normalized_backend
+        # Counters are process-local by design; shared Redis state controls behavior, while these expose per-replica activity.
+        self.rate_limit_decisions: Counter[str] = Counter()
+        self.in_flight_decisions: Counter[str] = Counter()
         self.redis: Redis | None = None
         if self.backend == "redis":
             if redis_client is None and not redis_url:
@@ -219,10 +222,24 @@ class AIRequestControlService:
             self.in_flight = InFlightRequestRegistry()
 
     def check_rate_limit(self, *, key: str, limit: int) -> RateLimitDecision:
-        return self.rate_limiter.check(key=key, limit=limit)
+        try:
+            decision = self.rate_limiter.check(key=key, limit=limit)
+        except RequestControlBackendError:
+            self.rate_limit_decisions["error"] += 1
+            raise
+        self.rate_limit_decisions["allowed" if decision.allowed else "limited"] += 1
+        return decision
 
     def begin_in_flight(self, key: str) -> None:
-        self.in_flight.begin(key)
+        try:
+            self.in_flight.begin(key)
+        except DuplicateRequestError:
+            self.in_flight_decisions["duplicate"] += 1
+            raise
+        except RequestControlBackendError:
+            self.in_flight_decisions["error"] += 1
+            raise
+        self.in_flight_decisions["accepted"] += 1
 
     def finish_in_flight(self, key: str | None) -> None:
         self.in_flight.finish(key)
@@ -239,6 +256,18 @@ class AIRequestControlService:
                 f"{max_chars} ASCII letters, digits, dots, underscores, colons, or hyphens."
             )
         return key
+
+    def metrics_snapshot(self) -> dict[str, Any]:
+        snapshot: dict[str, Any] = {"backend": self.backend, "shared": self.backend == "redis"}
+        try:
+            snapshot.update(self.health_check())
+            snapshot["healthy"] = True
+        except RequestControlBackendError as exc:
+            snapshot["healthy"] = False
+            snapshot["error"] = str(exc)
+        snapshot["rate_limit_decisions"] = dict(self.rate_limit_decisions)
+        snapshot["in_flight_decisions"] = dict(self.in_flight_decisions)
+        return snapshot
 
     def health_check(self) -> dict[str, Any]:
         details: dict[str, Any] = {"backend": self.backend}

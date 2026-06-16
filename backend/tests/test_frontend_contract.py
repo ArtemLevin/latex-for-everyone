@@ -120,6 +120,7 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "stale-running count" in readme
     assert "/generation/jobs/operator/status" in readme
     assert "/generation/jobs/operator/recover-stale" in readme
+    assert "/api/metrics" in readme
     assert "error.retryAfter = response.headers.get('Retry-After')" in api_js
 
 
@@ -132,6 +133,7 @@ def test_operations_runbook_documents_operator_workflows():
         "Symptom",
         "Likely cause",
         "GET /api/ready",
+        "GET /api/metrics",
         "GET /api/generation/jobs/operator/status",
         "POST /api/generation/jobs/operator/recover-stale",
         "make generation-worker-recover-stale",
@@ -143,6 +145,7 @@ def test_operations_runbook_documents_operator_workflows():
         "Alert thresholds",
         "systemd generation worker",
         "Docker Compose generation worker",
+        "latexed_generation_jobs_stale_running",
         "Known next gaps",
     ]:
         assert expected in operations

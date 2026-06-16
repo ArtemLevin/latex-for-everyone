@@ -12,6 +12,7 @@ summaries instead.
 |------|---------------------|-----------------|
 | Backend process responds | `GET /api/health` or `make health` | `status=healthy` |
 | Full readiness summary | `GET /api/ready` | `ready`, `degraded` or `not_ready`; includes `ai_request_control` details |
+| Prometheus metrics | `GET /api/metrics` | Text-format readiness, generation job and request-control metrics |
 | AI provider status | `GET /api/generation/providers/status?provider=...&model=...` | Provider/model availability without generation |
 | Generation job pressure | `GET /api/generation/jobs/operator/status` | Owner-scoped counts, backlog and stale samples |
 | Transcription runtime | `GET /api/transcription/status` | Provider, missing requirements and install hint |
@@ -113,9 +114,9 @@ traffic. They intentionally avoid inspecting user prompt or transcript content.
 |--------|---------------------|----------|----------------|
 | `GET /api/ready` returns `not_ready` | Any single production probe | Page | Check DB connectivity and artifact roots before serving traffic. |
 | `GET /api/ready` returns sustained `degraded` | 5 minutes | Warning | Inspect degraded sections; prioritize compiler and `generation_jobs`. |
-| `generation_jobs.stale_running > 0` | More than one probe window | Warning | Run stale recovery and inspect worker/provider logs. |
+| `generation_jobs.stale_running > 0` or `latexed_generation_jobs_stale_running > 0` | More than one probe window | Warning | Run stale recovery and inspect worker/provider logs. |
 | Generation queued backlog | More than 10 queued jobs for 10 minutes in small deployments | Warning | Start or scale workers; check provider throughput and DB latency. |
-| Repeated AI `429` responses | Burst above normal baseline for 5 minutes | Warning | Confirm frontend is not retrying automatically and review rate-limit settings. |
+| Repeated AI `429` responses or rising `latexed_ai_request_control_rate_limit_decisions_total{decision="limited"}` | Burst above normal baseline for 5 minutes | Warning | Confirm frontend is not retrying automatically and review rate-limit settings. |
 | Cleanup dry-run would delete unexpected roots | Any unexpected path | Page before commit cleanup | Stop cleanup and verify trusted-root configuration. |
 
 ## Deployment examples
@@ -197,5 +198,4 @@ moving to a production database that can handle concurrent job claims.
 - Redis-backed AI request control shares rate-limit and duplicate-guard state, but still needs production load testing and dashboards before broad horizontal scaling.
 - Generation jobs are durable in the database, but this is not yet a full queue
   system with priorities and dead-letter routing.
-- Metrics are exposed through JSON readiness/operator endpoints rather than a
-  Prometheus exporter; add an exporter before relying on dashboard-only alerts.
+- `/api/metrics` exposes core operational gauges/counters; add deployment-specific dashboards and alert routing before relying on dashboard-only alerts.

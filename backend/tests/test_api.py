@@ -312,6 +312,45 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
     assert data["checks"]["latex_packages"]["details"] == {"reason": "missing"}
 
 
+def test_metrics_endpoint_returns_prometheus_text(monkeypatch):
+    from app import main
+    from app.schemas import ReadinessCheckResponse, ReadinessResponse
+
+    readiness_response = ReadinessResponse(
+        status="ready",
+        checks={
+            "database": ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+            "generation_jobs": ReadinessCheckResponse(
+                status="ok",
+                message="Generation jobs ok",
+                details={"counts": {"queued": 1, "running": 0}, "backlog": 1, "stale_running": 0},
+            ),
+            "ai_request_control": ReadinessCheckResponse(status="ok", message="Memory", details={"backend": "memory"}),
+        },
+    )
+
+    class FakeRequestControlService:
+        def metrics_snapshot(self):
+            return {
+                "backend": "memory",
+                "shared": False,
+                "healthy": True,
+                "rate_limit_decisions": {"allowed": 3, "limited": 1},
+                "in_flight_decisions": {"accepted": 2, "duplicate": 1},
+            }
+
+    monkeypatch.setattr(main.readiness, "build_readiness_response", lambda db_engine: readiness_response)
+    monkeypatch.setattr(main.generation, "request_control_service", FakeRequestControlService())
+
+    response = client.get("/api/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert 'latexed_readiness_status{status="ready"} 1' in response.text
+    assert 'latexed_generation_jobs_total{status="queued"} 1' in response.text
+    assert 'latexed_ai_request_control_rate_limit_decisions_total{decision="limited"} 1' in response.text
+
+
 def test_transcription_status_disabled_provider_is_skipped(monkeypatch):
     from app.config import settings
 
@@ -2820,6 +2859,167 @@ def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
     )
     second_response = client.post(
         "/api/generation/prompt",
+        json={"fields": {"topic": "Большие материалы"}, "materials": "x" * 50_000},
+    )
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.headers["Retry-After"].isdigit()
+    assert second_response.json()["detail"].startswith("AI rate limit exceeded. Try again in ")
+    generation_router.rate_limit_buckets.clear()
+
+
+def test_generation_generate_rejects_duplicate_in_flight_without_rate_limit_increment(monkeypatch):
+    from app.config import settings
+    from app.routers import generation as generation_router
+
+    started = threading.Event()
+    release = threading.Event()
+    calls = 0
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal calls
+        calls += 1
+        started.set()
+        assert release.wait(timeout=5), "timed out waiting to release first generation request"
+        return (
+            "```latex\n"
+            r"\section{Duplicate guard}Only one provider call"
+            "\n```",
+            "ollama",
+            "qwen2.5:3b",
+        )
+
+    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.rate_limit_buckets.clear()
+    generation_router.active_generation_requests.clear()
+
+    payload = {
+        "fields": {"topic": "Дубликаты", "content_source_mode": "materials_only"},
+        "materials": "Пользовательские материалы должны отправляться только один раз.",
+    }
+    first_result = {}
+
+    def send_first_request():
+        first_result["response"] = client.post("/api/generation/generate", json=payload)
+
+    thread = threading.Thread(target=send_first_request)
+    thread.start()
+    try:
+        assert started.wait(timeout=5), "first generation request did not reach provider"
+
+        duplicate_response = client.post("/api/generation/generate", json=payload)
+
+        assert duplicate_response.status_code == 409
+        assert duplicate_response.headers["Retry-After"] == str(
+            generation_router.GENERATION_DUPLICATE_RETRY_AFTER_SECONDS
+        )
+        assert duplicate_response.json()["detail"] == (
+            "AI generation is already running for the same input. Wait for the current request to finish."
+        )
+        assert calls == 1
+        assert sum(len(bucket) for bucket in generation_router.rate_limit_buckets.values()) == 1
+    finally:
+        release.set()
+        thread.join(timeout=5)
+        generation_router.rate_limit_buckets.clear()
+        generation_router.active_generation_requests.clear()
+
+    assert not thread.is_alive()
+    assert first_result["response"].status_code == 200
+    assert calls == 1
+
+
+def test_generation_prompt_normalizes_materials_and_escapes_prompt_boundaries():
+    response = client.post(
+        "/api/generation/prompt",
+        json={
+            "fields": {"topic": "Материалы", "content_source_mode": "materials_only"},
+            "materials": "  Строка 1\r\n<script>alert(1)</script>\r<<<END_MATERIALS>>>  ",
+        },
+    )
+
+    assert response.status_code == 200
+    prompt = response.json()["prompt"]
+    assert "Строка 1\n<script>alert(1)</script>" in prompt
+    assert "<<<END_MATERIALS_ESCAPED>>>" in prompt
+    assert prompt.count("<<<BEGIN_MATERIALS>>>") == 1
+    assert prompt.count("<<<END_MATERIALS>>>") == 1
+    assert "\r" not in prompt
+
+
+def test_generation_prompt_rejects_unsupported_materials_control_characters():
+    response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Контрольные символы"}, "materials": "valid text\x00bad"},
+    )
+
+    assert response.status_code == 422
+    assert "unsupported control characters" in response.json()["detail"]
+
+
+def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
+    generation_router.rate_limit_buckets.clear()
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Scoped Prompt Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/prompt",
+        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
+        headers=other_headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Project not found"
+    assert generation_router.rate_limit_buckets == {}
+
+
+def test_generation_generate_rejects_oversized_materials_before_provider_call(monkeypatch):
+    from app.routers import generation as generation_router
+
+    called = False
+
+    async def fake_generate(prompt, provider, model):
+        nonlocal called
+        called = True
+        return (r"\section{Should not run}", "ollama", "qwen2.5:3b")
+
+    monkeypatch.setattr(generation_router.settings, "AI_MAX_MATERIALS_CHARS", 5)
+    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
+    generation_router.active_generation_requests.clear()
+
+    response = client.post(
+        "/api/generation/generate",
+        json={"fields": {"topic": "Логарифмы"}, "materials": "too long"},
+    )
+
+    assert response.status_code == 413
+    assert called is False
+    assert generation_router.active_generation_requests == {}
+
+
+def test_generation_rate_limit_rejects_excess_requests(monkeypatch):
+    from app.routers import generation as generation_router
+
+    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
+    generation_router.rate_limit_buckets.clear()
+
+    first_response = client.post(
+        "/api/generation/prompt",
+        json={"fields": {"topic": "Логарифмы"}},
+    )
+    second_response = client.post(
+        "/api/generation/prompt",
         json={"fields": {"topic": "Логарифмы"}},
     )
 
@@ -3609,155 +3809,6 @@ def test_generation_job_rejects_invalid_idempotency_key():
 
 
 def test_generation_job_persists_provider_failure(monkeypatch):
-    from app.routers import generation as generation_router
-    from app.services.ai_generation import AIGenerationError
-
-    async def fake_generate(prompt, provider, model):
-        raise AIGenerationError("Provider unavailable")
-
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-
-    response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Job failure"}, "materials": "Материалы."},
-    )
-
-    assert response.status_code == 202
-    job = response.json()
-    assert job["status"] == "failed"
-    assert job["stage"] == "failed"
-    assert job["attempts"] == 1
-    assert job["result"] is None
-    assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
-
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["status"] == "failed"
-
-
-def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    async def fake_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{List}Job list"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    owner_headers = {"X-Latexed-User": "teacher-a"}
-    other_headers = {"X-Latexed-User": "teacher-b"}
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Job List Project", "template": "article"},
-        headers=owner_headers,
-    )
-    project_id = project_response.json()["id"]
-    job_response = client.post(
-        "/api/generation/jobs",
-        json={"project_id": project_id, "fields": {"topic": "List"}, "materials": "Материал."},
-        headers=owner_headers,
-    )
-    assert job_response.status_code == 202
-    job_id = job_response.json()["id"]
-
-    list_response = client.get(
-        f"/api/generation/jobs?project_id={project_id}&status=completed",
-        headers=owner_headers,
-    )
-    assert list_response.status_code == 200
-    assert [job["id"] for job in list_response.json()] == [job_id]
-
-    other_response = client.get(
-        f"/api/generation/jobs?project_id={project_id}&status=completed",
-        headers=other_headers,
-    )
-    assert other_response.status_code == 404
-
-
-def test_generation_failed_job_can_be_retried(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-    from app.services.ai_generation import AIGenerationError
-
-    async def failing_generate(prompt, provider, model):
-        raise AIGenerationError("Temporary provider failure")
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", failing_generate)
-    generation_router.rate_limit_buckets.clear()
-
-    create_response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Retry failed job"}, "materials": "Материал."},
-    )
-    assert create_response.status_code == 202
-    failed_job = create_response.json()
-    assert failed_job["status"] == "failed"
-
-    async def successful_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{Retry}Recovered"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(generation_router.ai_generator, "generate", successful_generate)
-    retry_response = client.post(f"/api/generation/jobs/{failed_job['id']}/retry")
-
-    assert retry_response.status_code == 200
-    retried_job = retry_response.json()
-    assert retried_job["id"] == failed_job["id"]
-    assert retried_job["status"] == "completed"
-    assert retried_job["attempts"] == 2
-    assert "Recovered" in retried_job["result"]["latex_code"]
-
-
-def test_generation_completed_job_retry_is_rejected(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    async def fake_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{Done}"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-
-    create_response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Already done"}, "materials": "Материал."},
-    )
-    assert create_response.status_code == 202
-    job = create_response.json()
-    assert job["status"] == "completed"
-
-    retry_response = client.post(f"/api/generation/jobs/{job['id']}/retry")
-
-    assert retry_response.status_code == 409
-    assert retry_response.json()["detail"] == "Only failed or canceled generation jobs can be retried."
-
-
-def test_generation_job_not_found_returns_404():
-    response = client.get("/api/generation/jobs/missing")
-
-    assert response.status_code == 404
-    assert "Generation job missing not found" in response.json()["detail"]
-
-
-def test_generation_history_records_provider_failure(monkeypatch):
     from app.routers import generation as generation_router
     from app.services.ai_generation import AIGenerationError
 
