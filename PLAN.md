@@ -1,6 +1,6 @@
 # Анализ состояния сервиса Latexed и план дальнейшей разработки
 
-Дата первичного анализа: 2026-06-08. Актуализация: 2026-06-09. Репозиторий повторно сверён по фактической структуре, Makefile-командам, backend/frontend коду, тестам, миграциям, документации и текущим runtime-hardening изменениям.
+Дата первичного анализа: 2026-06-08. Актуализация: 2026-06-14. Репозиторий повторно сверён по фактической структуре, Makefile-командам, backend/frontend коду, тестам, миграциям, документации и текущим runtime-hardening изменениям.
 
 ## 1. Резюме состояния
 
@@ -1348,3 +1348,424 @@ Readiness endpoint нужно расширять постепенно, не см
 - без изменений в frontend на backend-foundation этапах.
 
 Такой scope снизил риск и позволил подключить audio storage, transcription и document generation по одному безопасному boundary за раз.
+
+## 11. Актуальный roadmap по отдельным Pull Request’ам
+
+Этот раздел фиксирует дальнейшую разработку именно как цепочку небольших, проверяемых Pull Request’ов. Каждый PR должен иметь узкий scope, отдельные acceptance criteria и собственный набор проверок. Цель — не смешивать исправления production-инцидентов, архитектурные выносы, UI-polish и новые доменные возможности в один большой diff.
+
+### 11.1 Правила разбиения roadmap на PR
+
+- **Один PR — один риск.** Если изменение одновременно меняет backend contract, frontend UX и миграции БД, его нужно разбить, кроме случаев, когда это один неделимый вертикальный slice.
+- **Сначала стабилизация, потом расширение.** Перед добавлением новых lesson/AI функций закрывать регрессии генерации, readiness и диагностику окружения.
+- **Router → Service → DB для новой логики.** Новые backend-функции должны уходить в service layer, а router оставаться HTTP-адаптером.
+- **Проверяемый DoD.** В описании PR всегда указывать точные команды проверки: `make frontend-check`, `make compileall`, `make test`, `make latex-check` при runtime-зависимых изменениях.
+- **Безопасность данных по умолчанию.** Не логировать полный prompt, пользовательский текст из поля материалов, transcript/audio content или LaTeX-документы целиком.
+- **Совместимость frontend.** Если меняется JS-поведение, обновлять static contract tests и при заметном UI-изменении прикладывать ручную проверку/скриншот.
+
+### 11.2 Очередь PR-ов
+
+| PR | Название | Приоритет | Зависит от | Основной результат |
+|---|---|---:|---|---|
+| PR-01 | Stabilize AI generation submit flow | P0 | текущий baseline | Пользовательский текст в «Материалы/условия задач» не приводит к повторным запросам и 429-шторму. |
+| PR-02 | Harden materials/prompt payload handling | P0 | PR-01 | Поле материалов безопасно ограничено, диагностируется и одинаково обрабатывается frontend/backend. |
+| PR-03 | Extract generation orchestration service | P1 | PR-01, PR-02 | `generation.py` становится тонким router-слоем, AI pipeline тестируется сервисно. |
+| PR-04 | Add durable generation jobs | P1 | PR-03 | Долгая AI-генерация уходит из синхронного HTTP request lifecycle. |
+| PR-05 | Transcription runtime readiness and setup | P1 | baseline deps | Оператор видит, какой transcription provider установлен и почему он недоступен. |
+| PR-06 | Lesson document pipeline hardening | P1 | PR-03, PR-05 | Генерация документов занятия становится воспроизводимой, review-aware и безопасной по данным. |
+| PR-07 | Artifact lifecycle and storage policy | P1 | baseline artifact resolver | Cleanup/retention для compile/export/lesson artifacts описаны и автоматизированы. |
+| PR-08 | Frontend E2E smoke coverage | P1 | PR-01, PR-06 | Основные пользовательские сценарии проверяются браузерным smoke-тестом. |
+| PR-09 | Auth and ownership MVP | P0/P1 | стабилизированные lesson/project flows | Данные пользователей/преподавателей нельзя читать по чужим ID. |
+| PR-10 | Distributed rate limiting and request idempotency | P1 | PR-01, PR-04 | Rate limiting работает предсказуемо в multi-process/multi-replica режиме. |
+| PR-11 | Production observability pack | P2 | PR-04, PR-07 | Логи, request/job IDs, slow-stage timings и runbook дают операторскую картину сервиса. |
+
+### 11.3 PR-01 — Stabilize AI generation submit flow
+
+**Проблема.** По пользовательским логам repeated `POST /api/generation/generate` превращается в `429 Too Many Requests`, особенно когда заполнено поле «Материалы/условия задач». Даже если корень проблемы на стороне устаревшего JS-кэша или двойной отправки, backend/frontend должны быть устойчивы к повтору.
+
+**Scope:**
+
+- Проверить все frontend entrypoints, которые вызывают `runGenerationRequest`, `generateLatexFromAi`, `retryLastGeneration`, `regenerateWithLatexMode`.
+- Убедиться, что поле материалов не имеет `input/change/submit` обработчика, который автоматически запускает generation.
+- Оставить только явный user action для генерации.
+- На frontend держать единый in-flight guard для всех кнопок генерации, retry и regenerate.
+- На backend добавить безопасную диагностику duplicate submits: request hash/lengths без полного текста материалов.
+- Не увеличивать лимит как основной способ лечения: 429 должен оставаться защитой, а не UX-механизмом.
+
+**Ожидаемые файлы:**
+
+- `frontend/js/07-generation.js`;
+- `frontend/js/01-state.js`;
+- `frontend/js/02-api.js`;
+- `frontend/main.html` при необходимости cache-busting/version bump;
+- `backend/app/routers/generation.py` только для lightweight diagnostics/idempotency guard;
+- `backend/tests/test_frontend_contract.py` и `backend/tests/test_api.py`.
+
+**Не входит:**
+
+- вынос всего AI pipeline из router;
+- Celery/worker;
+- смена AI provider-а;
+- новая UI-верстка модального окна.
+
+**Acceptance criteria:**
+
+- Один клик по «Сгенерировать» создаёт максимум один `POST /api/generation/generate`.
+- Наличие текста в поле материалов не создаёт дополнительных POST-запросов само по себе.
+- Повторный клик во время in-flight запроса блокируется на frontend и, при необходимости, мягко отклоняется backend-ом без заполнения rate-limit bucket.
+- При 429 пользователь видит время ожидания из `Retry-After`, а frontend не делает автоматический retry.
+- Логи содержат request id, payload sizes и fingerprint, но не содержат полный пользовательский текст.
+
+**Проверки:**
+
+```bash
+make frontend-check
+PYTHONPATH=backend pytest backend/tests/test_frontend_contract.py -q
+PYTHONPATH=backend pytest backend/tests/test_api.py -q
+```
+
+### 11.4 PR-02 — Harden materials/prompt payload handling
+
+**Проблема.** Поле «Материалы/условия задач» является пользовательским свободным текстом. Оно может быть большим, содержать LaTeX-команды, markdown, кавычки, unicode, HTML-like строки и фрагменты условий. Нужно отделить ошибки payload/prompt от ошибок rate limit.
+
+**Scope:**
+
+- Ввести явные frontend/backend ограничения длины материалов и понятное сообщение при превышении.
+- Нормализовать whitespace без удаления смысловых переносов строк.
+- Добавить prompt preview diagnostics: длина материалов, итоговая длина prompt, выбранный режим вставки.
+- Проверить, что материалы экранируются/передаются как текст в prompt builder и не попадают в DOM через `innerHTML`.
+- Добавить тестовые fixtures: русский текст, длинный текст, LaTeX fragments, markdown list, HTML-like payload.
+
+**Ожидаемые файлы:**
+
+- `backend/app/schemas.py`;
+- `backend/app/services/prompt_builder.py`;
+- `backend/app/services/payload_limits.py`;
+- `backend/app/routers/generation.py`;
+- `frontend/js/07-generation.js`;
+- `backend/tests/test_api.py` или отдельный `backend/tests/test_generation_materials.py`.
+
+**Acceptance criteria:**
+
+- Валидные материалы проходят generation/prompt preview.
+- Слишком большие материалы получают `413` или `422` с actionable message до вызова AI provider-а.
+- Prompt/log diagnostics показывают размеры, но не раскрывают полный текст.
+- HTML-like материалы отображаются как текст и не исполняются в UI.
+
+**Проверки:**
+
+```bash
+make frontend-check
+make compileall
+PYTHONPATH=backend pytest backend/tests/test_api.py -q
+```
+
+### 11.5 PR-03 — Extract generation orchestration service
+
+**Проблема.** `backend/app/routers/generation.py` содержит слишком много orchestration: HTTP, AI call, validation, repair, compile-check, history, logging. Это повышает риск регрессий при изменении prompt/materials flow.
+
+**Scope:**
+
+- Создать service, например `backend/app/services/generation_orchestrator.py`.
+- Перенести pipeline: build prompt → provider call → extract LaTeX → validate → optional compile-check/repair → persist history.
+- Router должен только принимать Pydantic request, вызывать service и переводить известные service errors в HTTP status.
+- Добавить fake provider/fake compiler для unit tests без TestClient.
+
+**Ожидаемые файлы:**
+
+- `backend/app/services/generation_orchestrator.py`;
+- `backend/app/routers/generation.py`;
+- `backend/app/schemas.py` при необходимости уточнения response models;
+- `backend/tests/test_generation_orchestrator.py`;
+- существующие `backend/tests/test_api.py` должны остаться зелёными.
+
+**Acceptance criteria:**
+
+- Public API response shape не меняется.
+- Router становится меньше и содержит преимущественно HTTP/dependency wiring.
+- Основные ветки AI pipeline покрыты service tests: success, provider error, invalid LaTeX, repair success, repair failure.
+
+**Проверки:**
+
+```bash
+make compileall
+PYTHONPATH=backend pytest backend/tests/test_generation_orchestrator.py backend/tests/test_api.py -q
+```
+
+### 11.6 PR-04 — Add durable generation jobs
+
+**Проблема.** AI generation может занимать долго, а синхронный endpoint держит HTTP request открытым. Это ухудшает UX и затрудняет retry/cancel/progress.
+
+**Scope:**
+
+- Добавить модель job или переиспользовать существующий lesson job подход, если он подходит для generation.
+- Endpoint `POST /api/generation/jobs` создаёт job и возвращает `job_id`.
+- Endpoint `GET /api/generation/jobs/{job_id}` возвращает статус, progress/stage, error/result metadata.
+- На первом этапе worker может быть DB-backed/minimal, без обязательного Celery, если это снижает риск.
+- Синхронный `/api/generation/generate` оставить как compatibility endpoint.
+
+**Ожидаемые файлы:**
+
+- `backend/app/models.py`;
+- `backend/alembic/versions/*`;
+- `backend/app/schemas.py`;
+- `backend/app/routers/generation.py`;
+- `backend/app/services/generation_orchestrator.py`;
+- `backend/app/worker.py` или отдельный job service;
+- `frontend/js/07-generation.js` для polling UX.
+
+**Acceptance criteria:**
+
+- Долгая генерация не требует держать один HTTP request до завершения.
+- Frontend показывает stage: queued/running/validating/repairing/completed/failed.
+- Job errors не теряются и не раскрывают полный prompt/materials.
+- Старый endpoint остаётся совместимым до отдельного deprecation PR.
+
+**Проверки:**
+
+```bash
+make compileall
+make test
+make frontend-check
+make migrate
+```
+
+### 11.7 PR-05 — Transcription runtime readiness and setup
+
+**Проблема.** Транскрипция зависит от optional runtime (`faster-whisper`, legacy `openai-whisper`, ffmpeg/ffprobe). Сейчас важно сделать состояние provider-а очевидным оператору до запуска урока.
+
+**Scope:**
+
+- Расширить `/api/ready` transcription checks: selected provider, installed package, ffmpeg/ffprobe availability, model path/config presence.
+- Добавить endpoint или расширить existing provider status для transcription.
+- Обновить README: команды установки optional dependency groups, системные зависимости ffmpeg/ffprobe, env vars.
+- Добавить negative tests без optional packages.
+
+**Ожидаемые файлы:**
+
+- `backend/app/services/readiness.py`;
+- `backend/app/services/transcription.py`;
+- `backend/app/schemas.py`;
+- `backend/app/main.py` или dedicated router;
+- `README.md`;
+- `backend/tests/test_api.py`.
+
+**Acceptance criteria:**
+
+- Оператор видит `disabled`, `missing_dependency`, `ready` или `misconfigured` до попытки transcribe.
+- Disabled provider сообщает, какую переменную окружения изменить.
+- Отсутствие ffmpeg/ffprobe не падает stack trace-ом в пользовательский flow.
+
+**Проверки:**
+
+```bash
+make compileall
+PYTHONPATH=backend pytest backend/tests/test_api.py -q
+```
+
+### 11.8 PR-06 — Lesson document pipeline hardening
+
+**Проблема.** Lesson documents строятся из transcript/review/prompt templates и AI output. Нужно зафиксировать, какой текст используется, как сохраняется результат и как преподаватель подтверждает review.
+
+**Scope:**
+
+- Явный contract: raw transcript, edited transcript, selected transcript for document generation.
+- Зафиксировать document types: checklist, mistakes, homework или другие Latexed-specific артефакты.
+- Валидировать generated LaTeX/Markdown/HTML в зависимости от формата.
+- Сохранять provenance: transcript id, prompt template version/hash, provider, status.
+- Не логировать полный transcript/generated document.
+
+**Ожидаемые файлы:**
+
+- `backend/app/services/lesson_documents.py`;
+- `backend/app/services/lesson_jobs.py`;
+- `backend/app/routers/lessons.py`;
+- `backend/app/schemas.py`;
+- `backend/tests/test_api.py`;
+- `frontend/js/10-lessons.js`.
+
+**Acceptance criteria:**
+
+- Если `edited_text` есть, документы строятся из review-текста.
+- Если review не готов, UI/endpoint явно требует подтверждение или помечает документ как draft.
+- Download documents проходит через safe artifact resolver/trusted root.
+
+**Проверки:**
+
+```bash
+make frontend-check
+make compileall
+PYTHONPATH=backend pytest backend/tests/test_api.py -q
+```
+
+### 11.9 PR-07 — Artifact lifecycle and storage policy
+
+**Проблема.** Compile/export/lesson artifacts должны иметь понятную retention policy, безопасный cleanup и operator runbook.
+
+**Scope:**
+
+- Единая таблица trusted artifact roots.
+- Scheduled/manual cleanup для compile/export/upload/lesson roots.
+- Structured logs: deleted/skipped/errors/duration.
+- README/operator docs: TTL, dry-run, production volume policy.
+- Тесты на symlink escape, unsupported suffix, fresh vs stale files.
+
+**Ожидаемые файлы:**
+
+- `backend/app/services/artifact_cleanup.py`;
+- `backend/app/services/artifact_paths.py`;
+- `backend/scripts/*` при добавлении CLI cleanup;
+- `Makefile`;
+- `README.md`;
+- `backend/tests/test_backend_confidence.py` или dedicated cleanup tests.
+
+**Acceptance criteria:**
+
+- Cleanup не удаляет ничего вне trusted roots.
+- Есть dry-run или безопасный отчёт перед production schedule.
+- Lesson artifacts не вводят wildcard filesystem access.
+
+**Проверки:**
+
+```bash
+make compileall
+PYTHONPATH=backend pytest backend/tests/test_backend_confidence.py -q
+```
+
+### 11.10 PR-08 — Frontend E2E smoke coverage
+
+**Проблема.** Static `node --check` и contract tests не ловят все browser-регрессии: duplicate submit, broken modal, stale cache, file tree event handlers.
+
+**Scope:**
+
+- Добавить минимальный Playwright или аналогичный smoke runner.
+- Сценарии: открыть editor, создать/выбрать файл, заполнить материалы, нажать generation один раз, проверить отсутствие второго POST при mocked backend.
+- Проверить lesson UI: upload fallback states, transcript review textarea, document actions.
+- В CI сделать optional/required режим в зависимости от доступности браузера.
+
+**Ожидаемые файлы:**
+
+- `package.json` или dedicated frontend test config, если вводится инструмент;
+- `frontend/tests/*` или `backend/tests/e2e/*`;
+- `Makefile` target, например `make frontend-e2e`;
+- docs/README с инструкцией.
+
+**Acceptance criteria:**
+
+- Browser smoke ловит повторную отправку `/api/generation/generate`.
+- Тест можно запустить локально одной командой.
+- Если браузерные зависимости отсутствуют, limitation документирована, а не скрыта.
+
+**Проверки:**
+
+```bash
+make frontend-check
+make frontend-e2e
+```
+
+### 11.11 PR-09 — Auth and ownership MVP
+
+**Проблема.** Без auth/ownership нельзя безопасно переводить сервис из local single-user режима в multi-user режим, особенно с аудио и transcript данными учеников.
+
+**Scope:**
+
+- Выбрать MVP identity model: локальный dev user, header-based trusted proxy или полноценный auth provider.
+- Связать `owner_id`/`teacher_id` с реальной проверкой доступа.
+- Ограничить projects/files/lessons/transcripts/documents по owner.
+- Добавить cross-user denial tests.
+- Обновить docs: single-user mode vs authenticated mode.
+
+**Ожидаемые файлы:**
+
+- `backend/app/dependencies.py`;
+- `backend/app/models.py`;
+- `backend/app/routers/projects.py`, `files.py`, `lessons.py`, `generation.py`;
+- `backend/app/schemas.py`;
+- Alembic migration при изменении schema;
+- backend tests по access control.
+
+**Acceptance criteria:**
+
+- Пользователь A не может получить project/file/lesson/transcript пользователя B через прямой ID.
+- Local dev mode остаётся удобным и явно задокументированным.
+- Ошибки доступа возвращают `403`/`404` по выбранной policy без утечки существования чужих ресурсов, если так решено.
+
+**Проверки:**
+
+```bash
+make compileall
+make test
+make migrate
+```
+
+### 11.12 PR-10 — Distributed rate limiting and request idempotency
+
+**Проблема.** In-memory limiter не подходит для нескольких backend workers/replicas. Также duplicate submits должны быть управляемыми на backend, а не только frontend-флагом.
+
+**Scope:**
+
+- Вынести rate limiting в service abstraction.
+- Добавить Redis-backed implementation или явно documented fallback для single-process local mode.
+- Добавить idempotency key support для generation requests.
+- Не считать duplicate in-flight requests как полноценные новые AI calls.
+- Возвращать понятные `409`/`429` с `Retry-After` там, где это применимо.
+
+**Ожидаемые файлы:**
+
+- `backend/app/services/rate_limit.py`;
+- `backend/app/routers/generation.py`;
+- `backend/app/config.py`;
+- `pyproject.toml` при добавлении Redis dependency;
+- `backend/tests/test_api.py` или dedicated rate-limit tests;
+- README/env docs.
+
+**Acceptance criteria:**
+
+- Single-process tests проходят без Redis.
+- Redis mode documented и покрыт mock/fake tests.
+- Duplicate generation request не создаёт 429-шторм и не запускает второй provider call.
+
+**Проверки:**
+
+```bash
+make compileall
+PYTHONPATH=backend pytest backend/tests/test_api.py -q
+```
+
+### 11.13 PR-11 — Production observability pack
+
+**Проблема.** Логов стало больше, но нужен единый operator view: request id, job id, stage durations, provider failures, cleanup metrics и runbook.
+
+**Scope:**
+
+- Стандартизировать log fields: `request_id`, `job_id`, `lesson_id`, `project_id`, `stage`, `duration_ms`, `status`.
+- Добавить slow-stage warnings для AI/transcription/compile/export.
+- Добавить counters в логах для cleanup/jobs/provider failures.
+- Создать operator troubleshooting guide: 429, missing pdflatex, disabled transcription provider, AI provider unavailable, upload errors.
+
+**Ожидаемые файлы:**
+
+- `backend/app/logging_config.py`;
+- service modules по мере добавления stage logs;
+- `README.md` или `docs/operations.md`;
+- tests только там, где логика меняет observable behavior.
+
+**Acceptance criteria:**
+
+- По одному `request_id` можно проследить полный generation/lesson flow.
+- Логи не содержат секретов, полного prompt, transcript или материалов.
+- У оператора есть таблица симптом → причина → действие.
+
+**Проверки:**
+
+```bash
+make compileall
+make test
+```
+
+### 11.14 Рекомендуемый порядок ближайших трёх PR
+
+1. **PR-01 Stabilize AI generation submit flow** — закрывает текущий пользовательский инцидент с материалами и 429.
+2. **PR-02 Harden materials/prompt payload handling** — отделяет реальные ошибки содержимого материалов от транспортных/rate-limit проблем.
+3. **PR-03 Extract generation orchestration service** — снижает стоимость дальнейших изменений AI pipeline и подготавливает async jobs.
+
+Только после этих трёх PR стоит начинать durable jobs и расширение lesson/transcription flow: иначе каждое новое изменение будет усиливать сложность уже перегруженного generation router и усложнять диагностику пользовательских проблем.
