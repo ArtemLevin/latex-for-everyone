@@ -25,12 +25,21 @@ class Settings(BaseSettings):
     MAX_LATEX_FILE_CHARS: int = 500_000
     MAX_LATEX_TOTAL_CHARS: int = 2_000_000
     MAX_COMPILER_OUTPUT_CHARS: int = 20_000
+    MAX_LATEX_UPLOAD_FILE_BYTES: int = 2 * 1024 * 1024
+    MAX_LATEX_UPLOAD_TOTAL_BYTES: int = 10 * 1024 * 1024
+    UPLOAD_READ_CHUNK_BYTES: int = 64 * 1024
+    COMPILE_CONCURRENCY_LIMIT: int = 2
+    COMPILE_QUEUE_TIMEOUT_SECONDS: int = 5
     LATEX_ALLOWED_EXTENSIONS: str = ".tex,.bib,.cls,.sty"
     ARTIFACT_TTL_SECONDS: int = 24 * 60 * 60
 
     # Security
+    DEPLOYMENT_ENV: str = "development"
+    AUTH_MODE: str = "local"  # local or trusted_proxy
     LOCAL_USER_ID: str = "local-teacher"
     TRUSTED_USER_HEADER: str = "X-Latexed-User"
+    TRUSTED_PROXY_IPS: list[str] = []
+    ALLOW_PRODUCTION_LOCAL_AUTH: bool = False
     SECRET_KEY: str = "change-me-in-production-please"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days

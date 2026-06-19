@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File as FastAPIFile
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.database import get_db
 from app.dependencies import get_current_user_id, get_project
 from app.models import Project
@@ -11,6 +12,14 @@ from app.services.file_service import (
     FileService,
     InvalidFileNameError,
 )
+from app.services.latex_file_policy import LatexFilePolicyError
+from app.services.payload_limits import PayloadLimitError
+from app.services.upload_limits import (
+    UploadDecodeError,
+    UploadLimitError,
+    read_upload_text_bounded,
+    read_uploads_text_bounded,
+)
 
 router = APIRouter()
 file_service = FileService()
@@ -19,12 +28,16 @@ file_service = FileService()
 def map_file_service_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FileNotFoundError):
         return HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    if isinstance(exc, InvalidFileNameError):
+    if isinstance(exc, (InvalidFileNameError, LatexFilePolicyError)):
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     if isinstance(exc, FileConflictError):
         detail = str(exc)
         status_code = status.HTTP_400_BAD_REQUEST if "last file" in detail else status.HTTP_409_CONFLICT
         return HTTPException(status_code=status_code, detail=detail)
+    if isinstance(exc, (PayloadLimitError, UploadLimitError)):
+        return HTTPException(status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail=str(exc))
+    if isinstance(exc, UploadDecodeError):
+        return HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc))
     return HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unexpected file service error")
 
 
@@ -44,7 +57,7 @@ async def create_file(
 ):
     try:
         return file_service.create_file(db, project, file_data)
-    except (FileConflictError, InvalidFileNameError) as exc:
+    except (FileConflictError, InvalidFileNameError, LatexFilePolicyError, PayloadLimitError) as exc:
         raise map_file_service_error(exc) from exc
 
 
@@ -69,7 +82,7 @@ async def update_file(
 ):
     try:
         return file_service.update_file(db, file_id, file_data, owner_id=owner_id)
-    except (FileConflictError, FileNotFoundError, InvalidFileNameError) as exc:
+    except (FileConflictError, FileNotFoundError, InvalidFileNameError, LatexFilePolicyError, PayloadLimitError) as exc:
         raise map_file_service_error(exc) from exc
 
 
@@ -95,8 +108,13 @@ async def upload_file(
     db: Session = Depends(get_db),
 ):
     try:
-        file_service.replace_file_content(db, file_id, await file.read(), owner_id=owner_id)
-    except FileNotFoundError as exc:
+        content = await read_upload_text_bounded(
+            file,
+            max_bytes=settings.MAX_LATEX_UPLOAD_FILE_BYTES,
+            chunk_size=settings.UPLOAD_READ_CHUNK_BYTES,
+        )
+        file_service.replace_file_content(db, file_id, content, owner_id=owner_id)
+    except (FileNotFoundError, UploadLimitError, UploadDecodeError, LatexFilePolicyError, PayloadLimitError) as exc:
         raise map_file_service_error(exc) from exc
 
     return {"message": "File uploaded successfully"}
@@ -108,10 +126,16 @@ async def upload_all_files(
     files: list[UploadFile] = FastAPIFile(...),
     db: Session = Depends(get_db),
 ):
-    uploads = [(upload_file.filename, await upload_file.read()) for upload_file in files]
     try:
+        uploads = await read_uploads_text_bounded(
+            files,
+            max_file_bytes=settings.MAX_LATEX_UPLOAD_FILE_BYTES,
+            max_total_bytes=settings.MAX_LATEX_UPLOAD_TOTAL_BYTES,
+            max_files=settings.MAX_LATEX_FILES,
+            chunk_size=settings.UPLOAD_READ_CHUNK_BYTES,
+        )
         uploaded_count = file_service.upload_project_files(db, project, uploads)
-    except InvalidFileNameError as exc:
+    except (InvalidFileNameError, UploadLimitError, UploadDecodeError, LatexFilePolicyError, PayloadLimitError) as exc:
         raise map_file_service_error(exc) from exc
 
     return {"message": f"Uploaded {uploaded_count} files"}
