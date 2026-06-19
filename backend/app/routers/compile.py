@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from app.models import Project, CompileHistory
 from app.dependencies import get_current_user_id
 from app.schemas import CompileRequest, CompileResponse, CompileHistoryResponse, LatexCompileResult, RawCompileRequest
@@ -9,6 +9,7 @@ from app.services.artifact_paths import (
     UnsupportedArtifactTypeError,
     resolve_artifact_download,
 )
+from app.services.compile_control import CompileControlService, CompileQueueFullError, CompileRateLimitError
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.payload_limits import PayloadLimitError, enforce_latex_payload_limits
@@ -22,7 +23,44 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 compiler = LatexCompiler()
+compile_control = CompileControlService()
 
+
+
+def get_request_client(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def enforce_compile_rate_limit(key: str) -> None:
+    try:
+        compile_control.check_rate_limit(key=key)
+    except CompileRateLimitError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Compile rate limit exceeded. Try again in {exc.retry_after_seconds} seconds.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+
+async def run_latex_compile_checked(
+    main_content: str,
+    files: dict[str, str],
+    *,
+    main_filename: str | None = None,
+) -> LatexCompileResult:
+    try:
+        if main_filename is None:
+            raw_result = await compile_control.run_in_thread(compiler.compile, main_content, files)
+        else:
+            raw_result = await compile_control.run_in_thread(
+                compiler.compile,
+                main_content,
+                files,
+                main_filename=main_filename,
+            )
+    except CompileQueueFullError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return LatexCompileResult.model_validate(raw_result)
 
 def enforce_compile_payload_limits(files: dict[str, str]) -> None:
     try:
@@ -44,20 +82,21 @@ def enforce_compile_payload_limits(files: dict[str, str]) -> None:
 
 @router.post("/", response_model=CompileResponse)
 async def compile_project(
-    request: CompileRequest,
+    request_body: CompileRequest,
+    request: Request,
     owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
     logger.info(
         "compile project requested project_id=%s main_file_name=%s has_main_content=%s override_files=%s",
-        request.project_id,
-        request.main_file_name or "default",
-        bool(request.main_file_content),
-        len(request.all_files or {}),
+        request_body.project_id,
+        request_body.main_file_name or "default",
+        bool(request_body.main_file_content),
+        len(request_body.all_files or {}),
     )
-    project = db.query(Project).filter(Project.id == request.project_id, Project.owner_id == owner_id).first()
+    project = db.query(Project).filter(Project.id == request_body.project_id, Project.owner_id == owner_id).first()
     if not project:
-        logger.warning("compile project not found project_id=%s", request.project_id)
+        logger.warning("compile project not found project_id=%s", request_body.project_id)
         raise HTTPException(status_code=404, detail="Project not found")
 
     # Get all files
@@ -66,22 +105,22 @@ async def compile_project(
         files[f.name] = f.content
 
     # Override with request content if provided
-    if request.all_files:
-        files.update(request.all_files)
+    if request_body.all_files:
+        files.update(request_body.all_files)
 
     # Find the compile entrypoint. The frontend passes the currently selected file
     # as main_file_name; otherwise we keep the historical is_main/main.tex fallback.
-    if request.main_file_name:
+    if request_body.main_file_name:
         try:
             main_file_name = validate_latex_filename(
-                request.main_file_name,
+                request_body.main_file_name,
                 allowed_extensions=parse_allowed_extensions(settings.LATEX_ALLOWED_EXTENSIONS),
             )
         except LatexFilePolicyError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
     else:
         main_file_name = None
-    main_content = request.main_file_content
+    main_content = request_body.main_file_content
 
     if main_file_name and main_content is None:
         main_content = files.get(main_file_name)
@@ -101,7 +140,7 @@ async def compile_project(
     if not main_content:
         logger.warning(
             "compile project missing main file project_id=%s main_file_name=%s files=%s",
-            request.project_id,
+            request_body.project_id,
             main_file_name,
             len(files),
         )
@@ -109,18 +148,19 @@ async def compile_project(
 
     files[main_file_name] = main_content
     enforce_compile_payload_limits(files)
+    enforce_compile_rate_limit(f"owner:{owner_id}:/api/compile")
 
     # Create history record
     history = CompileHistory(
-        project_id=request.project_id,
+        project_id=request_body.project_id,
         status="pending",
     )
     db.add(history)
     db.flush()
-    logger.info("compile history created project_id=%s history_id=%s main_file_name=%s files=%s", request.project_id, history.id, main_file_name, len(files))
+    logger.info("compile history created project_id=%s history_id=%s main_file_name=%s files=%s", request_body.project_id, history.id, main_file_name, len(files))
 
     # Compile
-    result = LatexCompileResult.model_validate(compiler.compile(main_content, files, main_filename=main_file_name))
+    result = await run_latex_compile_checked(main_content, files, main_filename=main_file_name)
 
     # Update history
     history.status = result.status
@@ -130,7 +170,7 @@ async def compile_project(
     db.commit()
     logger.info(
         "compile project completed project_id=%s history_id=%s main_file_name=%s status=%s compile_time=%s pdf_url=%s",
-        request.project_id,
+        request_body.project_id,
         history.id,
         main_file_name,
         result.status,
@@ -149,11 +189,12 @@ async def compile_project(
 
 
 @router.post("/raw", response_model=CompileResponse)
-async def compile_raw_latex(request: RawCompileRequest):
-    logger.info("compile raw requested content_chars=%s files=%s", len(request.content), len(request.files))
-    files_for_limits = {"__entrypoint__.tex": request.content, **request.files}
+async def compile_raw_latex(request_body: RawCompileRequest, request: Request):
+    logger.info("compile raw requested content_chars=%s files=%s", len(request_body.content), len(request_body.files))
+    files_for_limits = {"__entrypoint__.tex": request_body.content, **request_body.files}
     enforce_compile_payload_limits(files_for_limits)
-    result = LatexCompileResult.model_validate(compiler.compile(request.content, request.files))
+    enforce_compile_rate_limit(f"client:{get_request_client(request)}:/api/compile/raw")
+    result = await run_latex_compile_checked(request_body.content, request_body.files)
     logger.info(
         "compile raw completed status=%s compile_time=%s pdf_url=%s",
         result.status,

@@ -199,3 +199,55 @@ moving to a production database that can handle concurrent job claims.
 - Generation jobs are durable in the database, but this is not yet a full queue
   system with priorities and dead-letter routing.
 - `/api/metrics` exposes core operational gauges/counters; add deployment-specific dashboards and alert routing before relying on dashboard-only alerts.
+
+## Security configuration runbook
+
+### Startup fails with an unsafe security configuration
+
+**Symptom:** the API exits during startup with a `SecurityConfigurationError`.
+
+**Likely cause:** `DEPLOYMENT_ENV=production` is set while `SECRET_KEY` still uses the development default, `ALLOWED_HOSTS` contains `*`, `AUTH_MODE=trusted_proxy` has no `TRUSTED_PROXY_IPS`, or `AUTH_MODE=local` was not explicitly allowed with `ALLOW_PRODUCTION_LOCAL_AUTH=true`.
+
+**Action:** set a unique `SECRET_KEY`, configure exact public/reverse-proxy hostnames in `ALLOWED_HOSTS`, and choose one explicit auth mode. For multi-user deployments, use `AUTH_MODE=trusted_proxy` and populate `TRUSTED_PROXY_IPS`. For intentionally single-user production deployments, use `AUTH_MODE=local` with `ALLOW_PRODUCTION_LOCAL_AUTH=true` and keep the backend private.
+
+### Users resolve to the wrong owner or all data appears as one teacher
+
+**Symptom:** all created projects/lessons are owned by `local-teacher` or by the same configured user.
+
+**Likely cause:** the service is running in `AUTH_MODE=local`, which intentionally ignores `X-Latexed-User` and uses `LOCAL_USER_ID`.
+
+**Action:** keep `AUTH_MODE=local` for local/single-user installs. For multi-user deployments, configure a real authentication proxy, set `AUTH_MODE=trusted_proxy`, set `TRUSTED_PROXY_IPS`, and ensure the proxy sets `X-Latexed-User` from authenticated state rather than forwarding browser input.
+
+### Trusted-proxy requests return 401 or 403
+
+**Symptom:** API requests fail with `Trusted proxy identity header is required` or `Trusted proxy identity is not allowed from this client`.
+
+**Likely cause:** the proxy did not set the configured identity header, or the proxy IP/CIDR is missing from `TRUSTED_PROXY_IPS`.
+
+**Action:** verify the reverse proxy strips incoming `X-Latexed-User`, sets its own authenticated identity value, and connects from an address listed in `TRUSTED_PROXY_IPS`.
+
+## Upload and compile DoS protection runbook
+
+### File upload returns 413 or 422
+
+**Symptom:** project file upload returns `413 Payload Too Large` or `422 Unprocessable Entity`.
+
+**Likely cause:** a single upload exceeded `MAX_LATEX_UPLOAD_FILE_BYTES`, a multi-file upload exceeded `MAX_LATEX_UPLOAD_TOTAL_BYTES`/`MAX_LATEX_FILES`, the resulting project exceeded LaTeX character limits, or the uploaded text was not valid UTF-8.
+
+**Action:** ask the user to split the project into fewer/smaller LaTeX text files, remove binary assets from LaTeX upload flows, or raise limits deliberately after checking worker memory and database capacity. Do not raise `MAX_UPLOAD_SIZE` as a substitute for LaTeX-specific limits.
+
+### Compile returns 429
+
+**Symptom:** compile endpoints return `429 Too Many Requests` with a `Retry-After` header.
+
+**Likely cause:** the caller exceeded `COMPILE_RATE_LIMIT_PER_HOUR` for the owner/client key.
+
+**Action:** wait for the retry window, reduce frontend/manual retry frequency, or tune `COMPILE_RATE_LIMIT_PER_HOUR` for the deployment. Treat repeated 429s as a signal of abusive traffic or a stuck frontend retry loop.
+
+### Compile returns 503 queue full
+
+**Symptom:** compile endpoints return `503` with `Compile queue is full. Try again later.`
+
+**Likely cause:** all `COMPILE_CONCURRENCY_LIMIT` slots are occupied and no slot opened within `COMPILE_QUEUE_TIMEOUT_SECONDS`.
+
+**Action:** check running `pdflatex` processes and request volume, increase API replicas or `COMPILE_CONCURRENCY_LIMIT` only if CPU/memory allow it, and keep `COMPILE_TIMEOUT` bounded so stuck compiler processes do not exhaust capacity.

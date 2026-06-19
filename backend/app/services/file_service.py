@@ -4,6 +4,7 @@ from app.config import settings
 from app.models import File, Project
 from app.schemas import FileCreate, FileUpdate
 from app.services.latex_file_policy import LatexFilePolicyError, parse_allowed_extensions, validate_latex_filename
+from app.services.project_file_validation import validate_project_latex_files
 from app.time_utils import utc_now
 
 
@@ -33,6 +34,10 @@ def _safe_file_name(name: str | None) -> str:
         raise InvalidFileNameError(str(exc)) from exc
 
 
+def _project_file_map(project: Project) -> dict[str, str]:
+    return {file.name: file.content for file in project.files}
+
+
 class FileService:
     """Business rules for project file CRUD and upload workflows."""
 
@@ -47,6 +52,9 @@ class FileService:
     def create_file(self, db: Session, project: Project, file_data: FileCreate) -> File:
         file_name = _safe_file_name(file_data.name)
         self._ensure_unique_name(db, project.id, file_name)
+        future_files = _project_file_map(project)
+        future_files[file_name] = file_data.content
+        validate_project_latex_files(future_files)
 
         if file_data.is_main:
             self._unset_other_main_files(db, project.id)
@@ -79,6 +87,16 @@ class FileService:
             update_data["name"] = _safe_file_name(update_data["name"])
             self._ensure_unique_name(db, file.project_id, update_data["name"], exclude_file_id=file_id)
 
+        future_name = update_data.get("name", file.name)
+        future_content = update_data.get("content", file.content)
+        future_files = {
+            existing.name: existing.content
+            for existing in file.project.files
+            if existing.id != file.id
+        }
+        future_files[future_name] = future_content
+        validate_project_latex_files(future_files)
+
         if update_data.get("is_main"):
             self._unset_other_main_files(db, file.project_id, exclude_file_id=file_id)
 
@@ -101,15 +119,24 @@ class FileService:
         db.commit()
         return file_name
 
-    def replace_file_content(self, db: Session, file_id: str, content: bytes, *, owner_id: str | None = None) -> None:
+    def replace_file_content(self, db: Session, file_id: str, content: str, *, owner_id: str | None = None) -> None:
         file = self.get_file(db, file_id, owner_id=owner_id)
-        file.content = content.decode("utf-8")
+        future_files = _project_file_map(file.project)
+        future_files[file.name] = content
+        validate_project_latex_files(future_files)
+
+        file.content = content
         file.updated_at = utc_now()
         db.commit()
 
-    def upload_project_files(self, db: Session, project: Project, uploads: list[tuple[str | None, bytes]]) -> int:
-        for upload_name, content in uploads:
-            file_name = _safe_file_name(upload_name)
+    def upload_project_files(self, db: Session, project: Project, uploads: list[tuple[str | None, str]]) -> int:
+        normalized_uploads = [(_safe_file_name(upload_name), content) for upload_name, content in uploads]
+        future_files = _project_file_map(project)
+        for file_name, content in normalized_uploads:
+            future_files[file_name] = content
+        validate_project_latex_files(future_files)
+
+        for file_name, content in normalized_uploads:
             existing = (
                 db.query(File)
                 .filter(File.project_id == project.id, File.name == file_name)
@@ -117,14 +144,14 @@ class FileService:
             )
 
             if existing:
-                existing.content = content.decode("utf-8")
+                existing.content = content
                 existing.updated_at = utc_now()
             else:
                 db.add(
                     File(
                         project_id=project.id,
                         name=file_name,
-                        content=content.decode("utf-8"),
+                        content=content,
                     )
                 )
 
