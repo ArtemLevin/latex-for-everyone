@@ -9,6 +9,16 @@ from app.services.artifact_paths import (
     UnsupportedArtifactTypeError,
     resolve_artifact_download,
 )
+from app.services.artifact_service import (
+    ArtifactCreationError,
+    ArtifactExpiredError,
+    ArtifactMissingFileError,
+    ArtifactNotFoundError,
+    create_artifact_record,
+    find_authorized_artifact_by_storage_filename,
+    mark_artifact_accessed,
+    safe_original_filename,
+)
 from app.services.compile_control import CompileControlService, CompileQueueFullError, CompileRateLimitError
 from app.services.latex_compiler import LatexCompiler
 from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
@@ -25,6 +35,41 @@ router = APIRouter()
 compiler = LatexCompiler()
 compile_control = CompileControlService()
 
+
+def create_compile_pdf_artifact(
+    db: Session,
+    *,
+    owner_id: str,
+    result: LatexCompileResult,
+    project_id: str | None = None,
+    compile_history_id: str | None = None,
+    original_filename: str = "main.pdf",
+):
+    if result.status != "success" or not result.pdf_filename:
+        return None
+    source = resolve_artifact_download("compile_pdf", result.pdf_filename).path
+    return create_artifact_record(
+        db,
+        owner_id=owner_id,
+        project_id=project_id,
+        compile_history_id=compile_history_id,
+        kind="compile_pdf",
+        format="pdf",
+        storage_root="compile_pdf",
+        source_path=source,
+        original_filename=original_filename,
+        content_disposition_type="inline",
+    )
+
+
+def file_response_for_artifact_download(db: Session, download):
+    mark_artifact_accessed(db, artifact=download.artifact)
+    return FileResponse(
+        path=str(download.target.path),
+        filename=download.artifact.original_filename,
+        media_type=download.artifact.media_type,
+        content_disposition_type=download.artifact.content_disposition_type,
+    )
 
 
 def get_request_client(request: Request) -> str:
@@ -162,12 +207,28 @@ async def compile_project(
     # Compile
     result = await run_latex_compile_checked(main_content, files, main_filename=main_file_name)
 
-    # Update history
+    # Update history and create owner-scoped artifact record for successful PDFs.
     history.status = result.status
     history.output = result.output
     history.error = result.error
     history.compile_time = result.compile_time
-    db.commit()
+    pdf_url = None
+    try:
+        artifact = create_compile_pdf_artifact(
+            db,
+            owner_id=owner_id,
+            project_id=project.id,
+            compile_history_id=history.id,
+            result=result,
+            original_filename=safe_original_filename(f"{project.name}.pdf", format="pdf"),
+        )
+        if artifact is not None:
+            pdf_url = artifact.download_url
+        db.commit()
+    except (ArtifactCreationError, ArtifactPathError):
+        db.rollback()
+        logger.exception("compile artifact creation failed project_id=%s history_id=%s", project.id, history.id)
+        raise HTTPException(status_code=500, detail="Compile artifact could not be registered")
     logger.info(
         "compile project completed project_id=%s history_id=%s main_file_name=%s status=%s compile_time=%s pdf_url=%s",
         request_body.project_id,
@@ -175,7 +236,7 @@ async def compile_project(
         main_file_name,
         result.status,
         result.compile_time,
-        result.pdf_url,
+        pdf_url,
     )
 
     return CompileResponse(
@@ -183,23 +244,44 @@ async def compile_project(
         output=result.output,
         error=result.error,
         compile_time=result.compile_time,
-        pdf_url=result.pdf_url,
+        pdf_url=pdf_url,
         history_id=history.id,
     )
 
 
 @router.post("/raw", response_model=CompileResponse)
-async def compile_raw_latex(request_body: RawCompileRequest, request: Request):
+async def compile_raw_latex(
+    request_body: RawCompileRequest,
+    request: Request,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
     logger.info("compile raw requested content_chars=%s files=%s", len(request_body.content), len(request_body.files))
     files_for_limits = {"__entrypoint__.tex": request_body.content, **request_body.files}
     enforce_compile_payload_limits(files_for_limits)
-    enforce_compile_rate_limit(f"client:{get_request_client(request)}:/api/compile/raw")
+    enforce_compile_rate_limit(f"owner:{owner_id}:/api/compile/raw")
     result = await run_latex_compile_checked(request_body.content, request_body.files)
+    pdf_url = None
+    try:
+        artifact = create_compile_pdf_artifact(
+            db,
+            owner_id=owner_id,
+            result=result,
+            original_filename="raw-compile.pdf",
+        )
+        if artifact is not None:
+            pdf_url = artifact.download_url
+        db.commit()
+    except (ArtifactCreationError, ArtifactPathError):
+        db.rollback()
+        logger.exception("raw compile artifact creation failed owner_id=%s", owner_id)
+        raise HTTPException(status_code=500, detail="Compile artifact could not be registered")
+
     logger.info(
         "compile raw completed status=%s compile_time=%s pdf_url=%s",
         result.status,
         result.compile_time,
-        result.pdf_url,
+        pdf_url,
     )
 
     return CompileResponse(
@@ -207,7 +289,7 @@ async def compile_raw_latex(request_body: RawCompileRequest, request: Request):
         output=result.output,
         error=result.error,
         compile_time=result.compile_time,
-        pdf_url=result.pdf_url,
+        pdf_url=pdf_url,
     )
 
 
@@ -245,26 +327,32 @@ async def get_compile_history_detail(
     return history
 
 
-@router.get("/download/{filename}")
-async def download_compiled_pdf(filename: str):
-    logger.info("compile pdf download requested filename=%s", filename)
+@router.get("/download/{filename}", deprecated=True)
+async def download_compiled_pdf(
+    filename: str,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    logger.info("legacy compile pdf download requested filename=%s owner_id=%s", filename, owner_id)
     try:
-        target = resolve_artifact_download("compile_pdf", filename)
+        resolve_artifact_download("compile_pdf", filename)
+        download = find_authorized_artifact_by_storage_filename(
+            db,
+            owner_id=owner_id,
+            kind="compile_pdf",
+            storage_filename=filename,
+        )
     except UnsupportedArtifactTypeError as exc:
-        logger.warning("compile pdf download rejected unsupported filename=%s", filename)
         raise HTTPException(status_code=400, detail="Unsupported compile artifact file type") from exc
     except ArtifactPathError as exc:
-        logger.warning("compile pdf download rejected invalid filename=%s", filename)
         raise HTTPException(status_code=400, detail="Invalid PDF filename") from exc
+    except ArtifactExpiredError as exc:
+        db.commit()
+        raise HTTPException(status_code=410, detail="Artifact expired") from exc
+    except ArtifactMissingFileError as exc:
+        db.commit()
+        raise HTTPException(status_code=404, detail="Artifact file not found") from exc
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="PDF not found") from exc
 
-    if not target.path.is_file():
-        logger.warning("compile pdf download missing filename=%s path=%s", filename, target.path)
-        raise HTTPException(status_code=404, detail="PDF not found")
-
-    logger.info("compile pdf download served filename=%s size=%s", filename, target.path.stat().st_size)
-    return FileResponse(
-        path=str(target.path),
-        filename=target.filename,
-        media_type=target.media_type,
-        content_disposition_type=target.content_disposition_type,
-    )
+    return file_response_for_artifact_download(db, download)

@@ -134,6 +134,7 @@ class LatexCompiler:
                 output=self._truncate_output(log_output[-1]) if log_output else "",
                 compile_time=compile_time,
                 pdf_url=pdf_url,
+                pdf_filename=pdf_filename if pdf_url else None,
             )
 
         except Exception as e:

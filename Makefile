@@ -5,7 +5,7 @@ ROOT_DIR := $(CURDIR)
 BACKEND_DIR := $(ROOT_DIR)/backend
 FRONTEND_DIR := $(ROOT_DIR)/frontend
 FRONTEND_JS_FILES := $(sort $(wildcard $(FRONTEND_DIR)/js/*.js))
-QUALITY_PY_FILES := $(BACKEND_DIR)/app/services/security_config.py $(BACKEND_DIR)/app/services/upload_limits.py $(BACKEND_DIR)/app/services/project_file_validation.py $(BACKEND_DIR)/app/services/compile_control.py $(BACKEND_DIR)/tests/test_security_contracts.py
+QUALITY_PY_FILES := $(BACKEND_DIR)/app/services/security_config.py $(BACKEND_DIR)/app/services/upload_limits.py $(BACKEND_DIR)/app/services/project_file_validation.py $(BACKEND_DIR)/app/services/compile_control.py $(BACKEND_DIR)/app/services/artifact_service.py $(BACKEND_DIR)/app/routers/artifacts.py $(BACKEND_DIR)/tests/test_artifact_service.py $(BACKEND_DIR)/tests/test_security_contracts.py
 
 # ---- Runtime configuration ------------------------------------------------
 HOST ?= 0.0.0.0

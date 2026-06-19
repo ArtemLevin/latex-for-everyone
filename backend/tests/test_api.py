@@ -2217,7 +2217,87 @@ Hello World!
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "success"
-    assert data["pdf_url"] == "/api/compile/download/test.pdf"
+    assert data["pdf_url"] is None
+
+
+def test_compile_raw_creates_owner_scoped_artifact(tmp_path, monkeypatch):
+    from app.routers import compile as compile_router
+
+    monkeypatch.setattr(compile_router.settings, "COMPILE_WORK_DIR", str(tmp_path))
+    compile_router.compile_control.clear_rate_limits()
+
+    def fake_compile(main_content, files):
+        pdf_dir = tmp_path / "pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        (pdf_dir / "raw.pdf").write_bytes(b"%PDF-1.4 raw")
+        return {
+            "status": "success",
+            "output": "Compiled",
+            "compile_time": "0.01s",
+            "pdf_filename": "raw.pdf",
+        }
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={"content": r"\documentclass{article}\begin{document}Raw\end{document}", "files": {}},
+    )
+
+    assert response.status_code == 200
+    pdf_url = response.json()["pdf_url"]
+    assert pdf_url.startswith("/api/artifacts/")
+    download = client.get(pdf_url)
+    assert download.status_code == 200
+    assert download.content == b"%PDF-1.4 raw"
+
+
+def test_compile_raw_rate_limit_returns_429(monkeypatch):
+    from app.config import settings
+    from app.routers import compile as compile_router
+
+    compile_router.compile_control.clear_rate_limits()
+    monkeypatch.setattr(settings, "COMPILE_RATE_LIMIT_PER_HOUR", 1)
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    payload = {
+        "content": r"\documentclass{article}\begin{document}Rate\end{document}",
+        "files": {},
+    }
+    first = client.post("/api/compile/raw", json=payload)
+    second = client.post("/api/compile/raw", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"].isdigit()
+    assert "Compile rate limit exceeded" in second.json()["detail"]
+    compile_router.compile_control.clear_rate_limits()
+
+
+def test_compile_queue_full_returns_503(monkeypatch):
+    from app.routers import compile as compile_router
+    from app.services.compile_control import CompileQueueFullError
+
+    async def fake_run_in_thread(*args, **kwargs):
+        raise CompileQueueFullError("Compile queue is full. Try again later.")
+
+    monkeypatch.setattr(compile_router.compile_control, "run_in_thread", fake_run_in_thread)
+    compile_router.compile_control.clear_rate_limits()
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Queued\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Compile queue is full. Try again later."
 
 
 def test_compile_raw_rate_limit_returns_429(monkeypatch):
@@ -2308,7 +2388,7 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
+    assert response.json()["pdf_url"] is None
 
 
 def test_compile_project_respects_project_owner(monkeypatch):
@@ -2481,7 +2561,7 @@ def test_compile_history_project_and_item_routes(monkeypatch):
     assert history_item_response.json()["project_id"] == project_id
 
 
-def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
+def test_compile_pdf_download_rejects_file_without_artifact_record(tmp_path, monkeypatch):
     from app.routers import compile as compile_router
 
     pdf_dir = tmp_path / "pdfs"
@@ -2491,10 +2571,7 @@ def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
     monkeypatch.setattr(compile_router.settings, "COMPILE_WORK_DIR", str(tmp_path))
 
     response = client.get("/api/compile/download/compiled.pdf")
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/pdf"
-    assert response.headers["content-disposition"].startswith('inline; filename="compiled.pdf"')
-    assert response.content == b"%PDF-1.4 test pdf"
+    assert response.status_code == 404
 
 
 def test_compile_pdf_download_rejects_invalid_filename():
@@ -2766,7 +2843,8 @@ def test_generation_router_hotfix_artifacts_are_not_present():
     assert "return [generation_job_service.to_response(job) for job in jobs]" not in operator_status_source
 
 
-def test_export_pdf_receives_frontend_content_payload(monkeypatch):
+def test_export_pdf_receives_frontend_content_payload(tmp_path, monkeypatch):
+    from app.config import settings
     from app.routers import export as export_router
 
     project_response = client.post(
@@ -2776,10 +2854,15 @@ def test_export_pdf_receives_frontend_content_payload(monkeypatch):
     project_id = project_response.json()["id"]
     frontend_content = r"\documentclass{article}\begin{document}Fresh PDF\end{document}"
 
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+
     def fake_generate_pdf(main_content, files):
         assert main_content == frontend_content
         assert files["main.tex"] == frontend_content
         assert files["notes.tex"] == "Notes"
+        output = tmp_path / "exports"
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "compiled.pdf").write_bytes(b"%PDF-1.4 fake")
         return {"success": True, "filename": "compiled.pdf", "size": 123}
 
     monkeypatch.setattr(export_router.pdf_generator, "generate_pdf", fake_generate_pdf)
@@ -2794,7 +2877,9 @@ def test_export_pdf_receives_frontend_content_payload(monkeypatch):
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["url"] == "/api/export/download/compiled.pdf"
+    assert data["url"].startswith("/api/artifacts/")
+    assert data["url"].endswith("/download")
+    assert data["filename"] == "PDF_Export_Project.pdf"
     assert data["format"] == "pdf"
 
 
@@ -2827,8 +2912,10 @@ def test_export_html_uses_frontend_content_payload(tmp_path, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["format"] == "html"
-    exported = tmp_path / "exports" / data["filename"]
-    assert exported.read_text(encoding="utf-8") == "<html>Fresh HTML</html>"
+    assert data["url"].startswith("/api/artifacts/")
+    download_response = client.get(data["url"])
+    assert download_response.status_code == 200
+    assert download_response.text == "<html>Fresh HTML</html>"
 
 
 def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
@@ -2856,10 +2943,47 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
     data = response.json()
     assert data["format"] == "tex"
 
-    exported = tmp_path / "exports" / data["filename"]
+    assert data["url"].startswith("/api/artifacts/")
+    download_response = client.get(data["url"])
+    assert download_response.status_code == 200
+    exported = tmp_path / "downloaded.zip"
+    exported.write_bytes(download_response.content)
     with ZipFile(exported) as archive:
         assert archive.read("main.tex").decode("utf-8") == frontend_content
         assert archive.read("notes.tex").decode("utf-8") == "Notes"
+
+
+def test_artifact_download_rejects_other_owner_for_export_html(tmp_path, monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+    from app.config import settings
+    from app.routers import export as export_router
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(export_router.pdf_generator, "generate_html", lambda main_content: "<html>private</html>")
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Private Artifact Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    export_response = client.post(
+        "/api/export/html",
+        json={"project_id": project_id, "format": "html", "content": {"main.tex": "private"}},
+        headers=owner_headers,
+    )
+    assert export_response.status_code == 200
+    download_url = export_response.json()["url"]
+
+    owner_download = client.get(download_url, headers=owner_headers)
+    assert owner_download.status_code == 200
+    assert owner_download.text == "<html>private</html>"
+
+    other_download = client.get(download_url, headers=other_headers)
+    assert other_download.status_code == 404
 
 
 def test_export_html_respects_project_owner(monkeypatch):
@@ -2918,7 +3042,7 @@ def test_export_tex_rejects_path_traversal_filename(tmp_path, monkeypatch):
     assert "Invalid export filename" in response.json()["detail"]
 
 
-def test_export_download_serves_existing_export_file(tmp_path, monkeypatch):
+def test_export_download_rejects_file_without_artifact_record(tmp_path, monkeypatch):
     from app.config import settings
 
     export_dir = tmp_path / "exports"
@@ -2929,9 +3053,7 @@ def test_export_download_serves_existing_export_file(tmp_path, monkeypatch):
 
     response = client.get("/api/export/download/document.html")
 
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert response.text == "<html>ok</html>"
+    assert response.status_code == 404
 
 
 def test_export_download_rejects_unsupported_file_type(tmp_path, monkeypatch):

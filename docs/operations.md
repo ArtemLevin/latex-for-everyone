@@ -251,3 +251,14 @@ moving to a production database that can handle concurrent job claims.
 **Likely cause:** all `COMPILE_CONCURRENCY_LIMIT` slots are occupied and no slot opened within `COMPILE_QUEUE_TIMEOUT_SECONDS`.
 
 **Action:** check running `pdflatex` processes and request volume, increase API replicas or `COMPILE_CONCURRENCY_LIMIT` only if CPU/memory allow it, and keep `COMPILE_TIMEOUT` bounded so stuck compiler processes do not exhaust capacity.
+
+## Artifact download ownership
+
+Compile and export outputs are persisted as owner-scoped artifact records before they are downloadable. Operators should treat `/api/artifacts/{artifact_id}/download` as the canonical download path; legacy filename-based download routes remain only for compatibility and require a matching artifact record for the current owner. Old files that predate artifact records are intentionally not backfilled because ownership cannot be reconstructed safely.
+
+Operational expectations:
+
+- investigate `404 Artifact file not found` as a storage/cleanup mismatch after confirming the artifact owner;
+- investigate `410 Artifact expired` as normal TTL expiry and ask the user to compile/export again;
+- do not manually expose files from compile/export directories without an artifact record;
+- keep artifact cleanup TTL aligned with `ARTIFACT_TTL_SECONDS`.

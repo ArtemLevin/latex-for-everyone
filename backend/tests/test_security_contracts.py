@@ -15,6 +15,8 @@ def test_makefile_exposes_stage_four_quality_gates():
 
     assert ".PHONY: lint" in makefile
     assert "QUALITY_PY_FILES :=" in makefile
+    assert "app/services/artifact_service.py" in makefile
+    assert "app/routers/artifacts.py" in makefile
     assert "ruff check $(QUALITY_PY_FILES)" in makefile
     assert ".PHONY: format-check" in makefile
     assert "ruff format --check $(QUALITY_PY_FILES)" in makefile

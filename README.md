@@ -613,6 +613,7 @@ node --check frontend/js/*.js
 - Frontend CSS and JavaScript are split out of `frontend/main.html`, and application JavaScript is grouped into ordered scripts under `frontend/js/`. A future cleanup can migrate these classic scripts to ES modules or TypeScript once a build step is introduced.
 - Local preview is an approximate HTML/KaTeX rendering path; authoritative PDF output comes from the backend LaTeX compiler.
 - Server-side compile/export requires a working LaTeX installation. Without `pdflatex`, compile endpoints return errors while the frontend can still use local preview fallback.
+- Compile/export downloads are owner-scoped artifacts. New responses return opaque `/api/artifacts/{artifact_id}/download` URLs; legacy `/api/compile/download/{filename}` and `/api/export/download/{filename}` routes are deprecated and return `404` unless the filename is backed by an artifact record owned by the current user.
 - Generated Russian documents require `russian.ldf`/T2A support from `texlive-lang-cyrillic`; otherwise `babel` may fail with `Unknown option 'russian'`.
 
 ## License

@@ -12,7 +12,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine
 from app.logging_config import configure_logging, reset_request_id, set_request_id
-from app.routers import compile, export, files, generation, lessons, projects, pupils, templates
+from app.routers import artifacts, compile, export, files, generation, lessons, projects, pupils, templates
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services import readiness
 from app.services.metrics import PROMETHEUS_CONTENT_TYPE, build_prometheus_metrics
@@ -274,6 +274,7 @@ app.include_router(pupils.router, prefix="/api/pupils", tags=["pupils"])
 app.include_router(lessons.router, prefix="/api/lessons", tags=["lessons"])
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(compile.router, prefix="/api/compile", tags=["compile"])
+app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"])
 app.include_router(export.router, prefix="/api/export", tags=["export"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(generation.router, prefix="/api/generation", tags=["generation"])
