@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON, Float
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Integer, JSON, Float, Index
 from sqlalchemy.orm import relationship
 from app.database import Base
 from app.time_utils import utc_now
@@ -21,6 +21,7 @@ class Project(Base):
     snapshots = relationship("ProjectSnapshot", back_populates="project", cascade="all, delete-orphan")
     generation_history = relationship("GenerationHistory", back_populates="project", cascade="all, delete-orphan")
     generation_jobs = relationship("GenerationJob", back_populates="project", cascade="all, delete-orphan")
+    artifacts = relationship("Artifact", back_populates="project")
 
 
 class Pupil(Base):
@@ -93,7 +94,9 @@ class LessonTranscript(Base):
 
     lesson = relationship("Lesson", back_populates="transcripts")
     recording = relationship("LessonAudioRecording", back_populates="transcripts")
-    generated_documents = relationship("LessonGeneratedDocument", back_populates="transcript", cascade="all, delete-orphan")
+    generated_documents = relationship(
+        "LessonGeneratedDocument", back_populates="transcript", cascade="all, delete-orphan"
+    )
 
 
 class LessonGeneratedDocument(Base):
@@ -135,6 +138,10 @@ class LessonProcessingJob(Base):
     document_ids = Column(JSON, nullable=False, default=list)
     error_message = Column(Text, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
+    worker_id = Column(String(255), nullable=True, index=True)
+    locked_at = Column(DateTime, nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True, index=True)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)
@@ -169,6 +176,40 @@ class CompileHistory(Base):
     created_at = Column(DateTime, default=utc_now)
 
     project = relationship("Project", back_populates="compile_history")
+    artifacts = relationship("Artifact", back_populates="compile_history")
+
+
+class Artifact(Base):
+    __tablename__ = "artifacts"
+    __table_args__ = (
+        Index("ix_artifacts_owner_created", "owner_id", "created_at"),
+        Index("ix_artifacts_owner_project", "owner_id", "project_id"),
+        Index("ix_artifacts_owner_storage", "owner_id", "storage_filename"),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    owner_id = Column(String(255), nullable=False, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    compile_history_id = Column(
+        String(36), ForeignKey("compile_history.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind = Column(String(50), nullable=False, index=True)
+    format = Column(String(20), nullable=False)
+    original_filename = Column(String(255), nullable=False)
+    storage_filename = Column(String(255), nullable=False, unique=True, index=True)
+    storage_root = Column(String(50), nullable=False)
+    media_type = Column(String(100), nullable=False)
+    content_disposition_type = Column(String(30), nullable=False, default="attachment")
+    size_bytes = Column(Integer, nullable=False)
+    sha256_checksum = Column(String(64), nullable=True)
+    status = Column(String(30), nullable=False, default="available", index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    created_at = Column(DateTime, default=utc_now, index=True)
+    accessed_at = Column(DateTime, nullable=True)
+    access_count = Column(Integer, nullable=False, default=0)
+
+    project = relationship("Project", back_populates="artifacts")
+    compile_history = relationship("CompileHistory", back_populates="artifacts")
 
 
 class ProjectSnapshot(Base):
@@ -200,6 +241,10 @@ class GenerationJob(Base):
     result_payload = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
+    worker_id = Column(String(255), nullable=True, index=True)
+    locked_at = Column(DateTime, nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True, index=True)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)

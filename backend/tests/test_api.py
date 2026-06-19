@@ -1,6 +1,7 @@
 """
 Tests for the Latexed API.
 """
+
 import hashlib
 from pathlib import Path
 import threading
@@ -37,6 +38,14 @@ def setup_db():
 
 
 client = TestClient(app)
+
+
+def enable_trusted_proxy_auth(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["testclient"])
+    monkeypatch.setattr(settings, "TRUSTED_USER_HEADER", "X-Latexed-User")
 
 
 def test_initialize_database_respects_auto_create_flag(monkeypatch):
@@ -161,13 +170,39 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     lesson_columns = {column["name"] for column in inspector.get_columns("lessons")}
     assert {"pupil_id", "teacher_id", "topic", "lesson_date", "status"}.issubset(lesson_columns)
     recording_columns = {column["name"] for column in inspector.get_columns("lesson_audio_recordings")}
-    assert {"lesson_id", "filename", "content_type", "size_bytes", "duration_seconds", "sha256_checksum", "storage_path", "status"}.issubset(recording_columns)
+    assert {
+        "lesson_id",
+        "filename",
+        "content_type",
+        "size_bytes",
+        "duration_seconds",
+        "sha256_checksum",
+        "storage_path",
+        "status",
+    }.issubset(recording_columns)
     recording_indexes = {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
-    assert {"ix_lesson_audio_recordings_lesson_id", "ix_lesson_audio_recordings_sha256_checksum"}.issubset(recording_indexes)
+    assert {"ix_lesson_audio_recordings_lesson_id", "ix_lesson_audio_recordings_sha256_checksum"}.issubset(
+        recording_indexes
+    )
     transcript_columns = {column["name"] for column in inspector.get_columns("lesson_transcripts")}
-    assert {"lesson_id", "recording_id", "provider", "language", "text", "edited_text", "review_status", "reviewed_at", "status", "error_message"}.issubset(transcript_columns)
+    assert {
+        "lesson_id",
+        "recording_id",
+        "provider",
+        "language",
+        "text",
+        "edited_text",
+        "review_status",
+        "reviewed_at",
+        "status",
+        "error_message",
+    }.issubset(transcript_columns)
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
-    assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id", "ix_lesson_transcripts_review_status"}.issubset(transcript_indexes)
+    assert {
+        "ix_lesson_transcripts_lesson_id",
+        "ix_lesson_transcripts_recording_id",
+        "ix_lesson_transcripts_review_status",
+    }.issubset(transcript_indexes)
     document_columns = {column["name"] for column in inspector.get_columns("lesson_generated_documents")}
     assert {
         "lesson_id",
@@ -189,7 +224,18 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_generated_documents_document_type",
     }.issubset(document_indexes)
     job_columns = {column["name"] for column in inspector.get_columns("lesson_processing_jobs")}
-    assert {"lesson_id", "teacher_id", "job_type", "status", "stage", "recording_id", "transcript_id", "document_types", "document_ids", "error_message"}.issubset(job_columns)
+    assert {
+        "lesson_id",
+        "teacher_id",
+        "job_type",
+        "status",
+        "stage",
+        "recording_id",
+        "transcript_id",
+        "document_types",
+        "document_ids",
+        "error_message",
+    }.issubset(job_columns)
     job_indexes = {index["name"] for index in inspector.get_indexes("lesson_processing_jobs")}
     assert {
         "ix_lesson_processing_jobs_lesson_id",
@@ -198,11 +244,30 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_processing_jobs_status",
     }.issubset(job_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
-    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
+    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(
+        generation_history_columns
+    )
     generation_job_columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
-    assert {"project_id", "owner_id", "idempotency_key", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
+    assert {
+        "project_id",
+        "owner_id",
+        "idempotency_key",
+        "status",
+        "stage",
+        "request_hash",
+        "prompt_hash",
+        "request_payload",
+        "result_payload",
+        "error_message",
+    }.issubset(generation_job_columns)
     generation_job_indexes = {index["name"] for index in inspector.get_indexes("generation_jobs")}
-    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash", "ix_generation_jobs_owner_id", "ix_generation_jobs_idempotency_key"}.issubset(generation_job_indexes)
+    assert {
+        "ix_generation_jobs_project_id",
+        "ix_generation_jobs_status",
+        "ix_generation_jobs_request_hash",
+        "ix_generation_jobs_owner_id",
+        "ix_generation_jobs_idempotency_key",
+    }.issubset(generation_job_indexes)
 
 
 def test_health_check():
@@ -219,27 +284,37 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
     monkeypatch.setattr(
         readiness,
         "check_database_ready",
-        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+        lambda db_engine: ReadinessCheckResponse(
+            status="ok", message="Database ok", details={"required_tables_present": True}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_compiler_ready",
-        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={"binary": "pdflatex", "path": "/usr/bin/pdflatex"}),
+        lambda: ReadinessCheckResponse(
+            status="ok", message="Compiler ok", details={"binary": "pdflatex", "path": "/usr/bin/pdflatex"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_latex_packages_ready",
-        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={"russian_ldf": True, "t2aenc_def": True}),
+        lambda compiler_check: ReadinessCheckResponse(
+            status="ok", message="Packages ok", details={"russian_ldf": True, "t2aenc_def": True}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_artifact_dirs_ready",
-        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+        lambda: ReadinessCheckResponse(
+            status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_transcription_ready",
-        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+        lambda: ReadinessCheckResponse(
+            status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -257,7 +332,15 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription", "generation_jobs", "ai_request_control"}
+    assert set(data["checks"]) == {
+        "database",
+        "compiler",
+        "latex_packages",
+        "artifact_dirs",
+        "transcription",
+        "generation_jobs",
+        "ai_request_control",
+    }
     assert data["checks"]["database"]["status"] == "ok"
     assert data["checks"]["compiler"]["status"] == "ok"
 
@@ -269,27 +352,37 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
     monkeypatch.setattr(
         readiness,
         "check_database_ready",
-        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+        lambda db_engine: ReadinessCheckResponse(
+            status="ok", message="Database ok", details={"required_tables_present": True}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_compiler_ready",
-        lambda: ReadinessCheckResponse(status="missing", message="pdflatex was not found on PATH", details={"binary": "pdflatex", "path": None}),
+        lambda: ReadinessCheckResponse(
+            status="missing", message="pdflatex was not found on PATH", details={"binary": "pdflatex", "path": None}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_latex_packages_ready",
-        lambda compiler_check: ReadinessCheckResponse(status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}),
+        lambda compiler_check: ReadinessCheckResponse(
+            status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_artifact_dirs_ready",
-        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+        lambda: ReadinessCheckResponse(
+            status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_transcription_ready",
-        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+        lambda: ReadinessCheckResponse(
+            status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -387,14 +480,32 @@ def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkey
     from app.schemas import ReadinessCheckResponse
     from app.services import readiness
 
-    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
-    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
-    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
-    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}),
+    )
     monkeypatch.setattr(
         readiness,
         "check_transcription_ready",
-        lambda: ReadinessCheckResponse(status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}),
+        lambda: ReadinessCheckResponse(
+            status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -468,15 +579,37 @@ def test_readiness_degraded_when_generation_jobs_are_stale(monkeypatch):
     from app.schemas import ReadinessCheckResponse
     from app.services import readiness
 
-    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
-    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
-    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
-    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
-    monkeypatch.setattr(readiness, "check_transcription_ready", lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}),
+    )
     monkeypatch.setattr(
         readiness,
         "check_generation_jobs_ready",
-        lambda: ReadinessCheckResponse(status="error", message="Generation worker has stale running jobs", details={"stale_running": 1}),
+        lambda: ReadinessCheckResponse(
+            status="error", message="Generation worker has stale running jobs", details={"stale_running": 1}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -496,16 +629,42 @@ def test_readiness_degraded_when_ai_request_control_is_unavailable(monkeypatch):
     from app.schemas import ReadinessCheckResponse
     from app.services import readiness
 
-    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
-    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
-    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
-    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
-    monkeypatch.setattr(readiness, "check_transcription_ready", lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}))
-    monkeypatch.setattr(readiness, "check_generation_jobs_ready", lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_generation_jobs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={}),
+    )
     monkeypatch.setattr(
         readiness,
         "check_ai_request_control_ready",
-        lambda: ReadinessCheckResponse(status="error", message="AI request control unavailable", details={"backend": "redis"}),
+        lambda: ReadinessCheckResponse(
+            status="error", message="AI request control unavailable", details={"backend": "redis"}
+        ),
     )
 
     response = client.get("/api/ready")
@@ -595,7 +754,8 @@ def test_delete_project():
     assert response.status_code == 404
 
 
-def test_project_ownership_uses_trusted_user_header():
+def test_project_ownership_uses_trusted_user_header(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     owner_headers = {"X-Latexed-User": "teacher-a"}
     other_headers = {"X-Latexed-User": "teacher-b"}
     create_response = client.post("/api/projects/", json={"name": "Scoped Project"}, headers=owner_headers)
@@ -608,11 +768,123 @@ def test_project_ownership_uses_trusted_user_header():
     assert client.get(f"/api/projects/{project['id']}", headers=other_headers).status_code == 404
 
 
-def test_blank_trusted_user_header_is_rejected():
+def test_blank_trusted_user_header_is_rejected(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     response = client.get("/api/projects/", headers={"X-Latexed-User": "   "})
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid user identity"
+
+
+def test_local_auth_mode_ignores_spoofed_trusted_user_header(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "LOCAL_USER_ID", "local-teacher")
+
+    response = client.post(
+        "/api/projects/",
+        json={"name": "Local Auth Project"},
+        headers={"X-Latexed-User": "attacker"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["owner_id"] == "local-teacher"
+
+
+def test_trusted_proxy_auth_requires_identity_header(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+
+    response = client.get("/api/projects/")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Trusted proxy identity header is required"
+
+
+def test_trusted_proxy_auth_rejects_untrusted_client(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["192.0.2.10"])
+
+    response = client.get("/api/projects/", headers={"X-Latexed-User": "teacher-a"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Trusted proxy identity is not allowed from this client"
+
+
+def test_security_config_rejects_unsafe_production_defaults(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "ALLOW_PRODUCTION_LOCAL_AUTH", True)
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["latexed.example.com"])
+    monkeypatch.setattr(settings, "SECRET_KEY", "change-me-in-production-please")
+
+    with pytest.raises(SecurityConfigurationError, match="SECRET_KEY"):
+        validate_security_settings()
+
+
+def test_security_config_rejects_wildcard_production_hosts(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "ALLOW_PRODUCTION_LOCAL_AUTH", True)
+    monkeypatch.setattr(settings, "SECRET_KEY", "not-default")
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["*"])
+
+    with pytest.raises(SecurityConfigurationError, match="ALLOWED_HOSTS"):
+        validate_security_settings()
+
+
+def test_security_config_requires_trusted_proxy_ips(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "development")
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", [])
+
+    with pytest.raises(SecurityConfigurationError, match="TRUSTED_PROXY_IPS"):
+        validate_security_settings()
+
+
+def test_security_config_accepts_hardened_trusted_proxy_production(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["172.20.0.0/16"])
+    monkeypatch.setattr(settings, "TRUSTED_USER_HEADER", "X-Latexed-User")
+    monkeypatch.setattr(settings, "SECRET_KEY", "not-default")
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["latexed.example.com"])
+
+    validate_security_settings()
+
+
+def test_nginx_drops_trusted_user_header_by_default():
+    nginx_conf = (Path(__file__).resolve().parents[1] / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+
+    assert 'proxy_set_header X-Latexed-User "";' in nginx_conf
+    assert "$http_x_latexed_user" not in nginx_conf
+
+
+def test_production_compose_declares_security_env():
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    for expected in [
+        "DEPLOYMENT_ENV=production",
+        "AUTH_MODE=${AUTH_MODE:-trusted_proxy}",
+        "TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}",
+        "ALLOWED_HOSTS=${ALLOWED_HOSTS}",
+        "ALLOW_PRODUCTION_LOCAL_AUTH=${ALLOW_PRODUCTION_LOCAL_AUTH:-false}",
+    ]:
+        assert expected in compose
 
 
 def create_test_pupil(display_name: str = "Николь") -> dict:
@@ -621,7 +893,9 @@ def create_test_pupil(display_name: str = "Николь") -> dict:
     return response.json()
 
 
-def create_test_lesson(pupil_id: str, topic: str = "Показательные уравнения", lesson_date: str = "2026-06-09T10:00:00Z") -> dict:
+def create_test_lesson(
+    pupil_id: str, topic: str = "Показательные уравнения", lesson_date: str = "2026-06-09T10:00:00Z"
+) -> dict:
     response = client.post(
         "/api/lessons/",
         json={"pupil_id": pupil_id, "topic": topic, "lesson_date": lesson_date},
@@ -701,7 +975,9 @@ def test_lesson_crud_and_filters():
     assert get_response.status_code == 200
     assert get_response.json()["topic"] == "Логарифмы"
 
-    update_response = client.patch(f"/api/lessons/{lesson['id']}", json={"topic": "Логарифмы и степени", "status": "completed"})
+    update_response = client.patch(
+        f"/api/lessons/{lesson['id']}", json={"topic": "Логарифмы и степени", "status": "completed"}
+    )
     assert update_response.status_code == 200
     assert update_response.json()["topic"] == "Логарифмы и степени"
     assert update_response.json()["status"] == "completed"
@@ -879,7 +1155,6 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Lesson not found"
 
 
-
 def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
     import shutil
     import sys
@@ -900,6 +1175,7 @@ def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
     if shutil.which("ffprobe") is None:
         pytest.skip("ffprobe is required to probe repository test_audio.mp3")
     assert module.get_audio_duration_seconds(test_audio) > 0
+
 
 def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     from app.config import settings
@@ -1078,7 +1354,6 @@ def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
     ]
 
 
-
 def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypatch, tmp_path, caplog):
     import logging
 
@@ -1105,6 +1380,7 @@ def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypa
     assert "Set TRANSCRIPTION_PROVIDER" in data["error_message"]
     assert any("lesson transcription provider unavailable" in record.message for record in caplog.records)
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
 
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
@@ -1177,7 +1453,9 @@ def test_lesson_transcription_respects_teacher_scope(monkeypatch, tmp_path):
         app.dependency_overrides.pop(get_current_teacher_id, None)
 
 
-def create_transcribed_lesson(monkeypatch, tmp_path, *, topic: str = "Quadratic & roots_1", transcript_text: str = "x_1 & 50% done"):
+def create_transcribed_lesson(
+    monkeypatch, tmp_path, *, topic: str = "Quadratic & roots_1", transcript_text: str = "x_1 & 50% done"
+):
     from app.config import settings
     from app.routers import lessons as lessons_router
     from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
@@ -1219,7 +1497,10 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={})
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Review the transcript or set allow_unreviewed=true to create draft lesson documents"
+    assert (
+        response.json()["detail"]
+        == "Review the transcript or set allow_unreviewed=true to create draft lesson documents"
+    )
 
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"allow_unreviewed": True})
 
@@ -1453,7 +1734,8 @@ def test_create_file():
     assert data["name"] == "test.tex"
 
 
-def test_direct_file_access_respects_project_owner():
+def test_direct_file_access_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     owner_headers = {"X-Latexed-User": "teacher-a"}
     other_headers = {"X-Latexed-User": "teacher-b"}
     project_response = client.post("/api/projects/", json={"name": "Scoped File Project"}, headers=owner_headers)
@@ -1493,6 +1775,114 @@ def test_create_file_rejects_unsafe_name():
 
     assert response.status_code == 400
     assert "Invalid LaTeX filename" in response.json()["detail"]
+
+
+def test_create_file_rejects_oversized_content(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILE_CHARS", 10)
+    project_response = client.post("/api/projects/", json={"name": "Oversized Create Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}",
+        json={"name": "too-large.tex", "content": "x" * 11},
+    )
+
+    assert response.status_code == 413
+    assert "too-large.tex" in response.json()["detail"]
+
+
+def test_update_file_rejects_project_total_limit(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_TOTAL_CHARS", 60)
+    project_response = client.post("/api/projects/", json={"name": "Total Limit Project", "template": "article"})
+    project_id = project_response.json()["id"]
+    main_file = client.get(f"/api/files/project/{project_id}").json()[0]
+
+    response = client.put(
+        f"/api/files/{main_file['id']}",
+        json={"content": "x" * 61},
+    )
+
+    assert response.status_code == 413
+    assert "LaTeX payload is too large" in response.json()["detail"]
+
+
+def test_upload_file_rejects_oversized_bytes_before_write(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_UPLOAD_FILE_BYTES", 5)
+    project_response = client.post("/api/projects/", json={"name": "Upload Size Project", "template": "article"})
+    project_id = project_response.json()["id"]
+    main_file = client.get(f"/api/files/project/{project_id}").json()[0]
+    original_content = main_file["content"]
+
+    response = client.post(
+        f"/api/files/{main_file['id']}/upload",
+        files={"file": ("main.tex", b"abcdef", "text/plain")},
+    )
+
+    assert response.status_code == 413
+    assert "exceeds 5 bytes" in response.json()["detail"]
+    unchanged = client.get(f"/api/files/{main_file['id']}").json()
+    assert unchanged["content"] == original_content
+
+
+def test_upload_file_rejects_invalid_utf8():
+    project_response = client.post("/api/projects/", json={"name": "Upload UTF Project", "template": "article"})
+    project_id = project_response.json()["id"]
+    main_file = client.get(f"/api/files/project/{project_id}").json()[0]
+
+    response = client.post(
+        f"/api/files/{main_file['id']}/upload",
+        files={"file": ("main.tex", b"\xff\xfe\x00", "text/plain")},
+    )
+
+    assert response.status_code == 422
+    assert "valid UTF-8" in response.json()["detail"]
+
+
+def test_upload_all_rejects_too_many_files(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILES", 1)
+    project_response = client.post("/api/projects/", json={"name": "Upload Count Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}/upload-all",
+        files=[
+            ("files", ("one.tex", b"one", "text/plain")),
+            ("files", ("two.tex", b"two", "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 413
+    assert "Too many uploaded files" in response.json()["detail"]
+
+
+def test_upload_all_rejects_total_bytes_and_is_atomic(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_UPLOAD_TOTAL_BYTES", 5)
+    project_response = client.post("/api/projects/", json={"name": "Upload Total Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}/upload-all",
+        files=[
+            ("files", ("one.tex", b"123", "text/plain")),
+            ("files", ("two.tex", b"456", "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 413
+    assert "total bytes" in response.json()["detail"]
+    file_names = {file["name"] for file in client.get(f"/api/files/project/{project_id}").json()}
+    assert "one.tex" not in file_names
+    assert "two.tex" not in file_names
 
 
 def test_file_service_keeps_single_main_file_invariant():
@@ -1659,7 +2049,9 @@ def test_latex_sanitizer_simplifies_safe_mode_risky_fragments():
         ),
     ],
 )
-def test_ai_output_failure_corpus_pipeline(fixture_name, expect_valid, expected_fragments, unexpected_fragments, expected_error):
+def test_ai_output_failure_corpus_pipeline(
+    fixture_name, expect_valid, expected_fragments, unexpected_fragments, expected_error
+):
     from app.services.latex_document_builder import build_latex_document
     from app.services.latex_sanitizer import sanitize_generated_latex_body, sanitize_generated_latex_body_for_safe_mode
     from app.services.latex_validator import validate_latex_document
@@ -1962,6 +2354,7 @@ def test_pdf_generator_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch,
 def test_compile_raw(monkeypatch):
     from app.routers import compile as compile_router
 
+    compile_router.compile_control.clear_rate_limits()
     content = r"""\documentclass{article}
 \begin{document}
 Hello World!
@@ -1986,12 +2379,93 @@ Hello World!
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "success"
-    assert data["pdf_url"] == "/api/compile/download/test.pdf"
+    assert data["pdf_url"] is None
+
+
+def test_compile_raw_creates_owner_scoped_artifact(tmp_path, monkeypatch):
+    from app.routers import compile as compile_router
+
+    monkeypatch.setattr(compile_router.settings, "COMPILE_WORK_DIR", str(tmp_path))
+    compile_router.compile_control.clear_rate_limits()
+
+    def fake_compile(main_content, files):
+        pdf_dir = tmp_path / "pdfs"
+        pdf_dir.mkdir(parents=True, exist_ok=True)
+        (pdf_dir / "raw.pdf").write_bytes(b"%PDF-1.4 raw")
+        return {
+            "status": "success",
+            "output": "Compiled",
+            "compile_time": "0.01s",
+            "pdf_filename": "raw.pdf",
+        }
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    response = client.post(
+        "/api/compile/raw",
+        json={"content": r"\documentclass{article}\begin{document}Raw\end{document}", "files": {}},
+    )
+
+    assert response.status_code == 200
+    pdf_url = response.json()["pdf_url"]
+    assert pdf_url.startswith("/api/artifacts/")
+    download = client.get(pdf_url)
+    assert download.status_code == 200
+    assert download.content == b"%PDF-1.4 raw"
+
+
+def test_compile_raw_rate_limit_returns_429(monkeypatch):
+    from app.config import settings
+    from app.routers import compile as compile_router
+
+    compile_router.compile_control.clear_rate_limits()
+    monkeypatch.setattr(settings, "COMPILE_RATE_LIMIT_PER_HOUR", 1)
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    payload = {
+        "content": r"\documentclass{article}\begin{document}Rate\end{document}",
+        "files": {},
+    }
+    first = client.post("/api/compile/raw", json=payload)
+    second = client.post("/api/compile/raw", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"].isdigit()
+    assert "Compile rate limit exceeded" in second.json()["detail"]
+    compile_router.compile_control.clear_rate_limits()
+
+
+def test_compile_queue_full_returns_503(monkeypatch):
+    from app.routers import compile as compile_router
+    from app.services.compile_control import CompileQueueFullError
+
+    async def fake_run_in_thread(*args, **kwargs):
+        raise CompileQueueFullError("Compile queue is full. Try again later.")
+
+    monkeypatch.setattr(compile_router.compile_control, "run_in_thread", fake_run_in_thread)
+    compile_router.compile_control.clear_rate_limits()
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Queued\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Compile queue is full. Try again later."
 
 
 def test_compile_project_uses_requested_main_file_name(monkeypatch):
     from app.routers import compile as compile_router
 
+    compile_router.compile_control.clear_rate_limits()
     selected_content = r"\documentclass{article}\begin{document}Selected\end{document}"
 
     def fake_compile(main_content, files, main_filename="main.tex"):
@@ -2028,12 +2502,14 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
     )
 
     assert response.status_code == 200
-    assert response.json()["pdf_url"] == "/api/compile/download/selected.pdf"
+    assert response.json()["pdf_url"] is None
 
 
 def test_compile_project_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import compile as compile_router
 
+    compile_router.compile_control.clear_rate_limits()
     called = False
 
     def fake_compile(main_content, files, main_filename="main.tex"):
@@ -2199,7 +2675,7 @@ def test_compile_history_project_and_item_routes(monkeypatch):
     assert history_item_response.json()["project_id"] == project_id
 
 
-def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
+def test_compile_pdf_download_rejects_file_without_artifact_record(tmp_path, monkeypatch):
     from app.routers import compile as compile_router
 
     pdf_dir = tmp_path / "pdfs"
@@ -2209,10 +2685,7 @@ def test_compile_pdf_download_serves_existing_pdf(tmp_path, monkeypatch):
     monkeypatch.setattr(compile_router.settings, "COMPILE_WORK_DIR", str(tmp_path))
 
     response = client.get("/api/compile/download/compiled.pdf")
-    assert response.status_code == 200
-    assert response.headers["content-type"] == "application/pdf"
-    assert response.headers["content-disposition"].startswith('inline; filename="compiled.pdf"')
-    assert response.content == b"%PDF-1.4 test pdf"
+    assert response.status_code == 404
 
 
 def test_compile_pdf_download_rejects_invalid_filename():
@@ -2376,7 +2849,116 @@ def test_frontend_generation_ui_contract():
     assert "window.open" not in preview_content
 
 
-def test_export_pdf_receives_frontend_content_payload(monkeypatch):
+def _generation_job_payload(project_id: str, *, materials: str = "Материалы для генерации") -> dict:
+    return {
+        "project_id": project_id,
+        "provider": "ollama",
+        "materials": materials,
+        "fields": {
+            "level": "ЕГЭ",
+            "language": "русский",
+            "content_source_mode": "materials_only",
+            "latex_mode": "safe",
+            "alpha_code": 1,
+            "beta_code": 1,
+            "gamma_code": 4,
+            "grade": "11 класс",
+            "subject": "математика",
+            "topic": "Квадратные уравнения",
+            "priority_method": "нейросеть выбирает самостоятельно по отношению к уровню и классу",
+            "graph_analytic": "по ситуации",
+        },
+    }
+
+
+def test_create_generation_job_queues_without_running_provider(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+
+    project_response = client.post("/api/projects/", json={"name": "Generation Job Project"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/jobs",
+        json=_generation_job_payload(project_id, materials="Уникальные материалы для queued job"),
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["id"]
+    assert data["project_id"] == project_id
+    assert data["status"] == "queued"
+    assert data["stage"] == "queued"
+    assert data["request_hash"]
+    assert data["prompt_hash"]
+    assert data["attempts"] == 0
+
+
+def test_create_generation_job_replays_existing_idempotency_key(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+
+    project_response = client.post("/api/projects/", json={"name": "Idempotent Generation Job Project"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    payload = _generation_job_payload(project_id, materials="Материалы для idempotency replay")
+    headers = {"Idempotency-Key": "generation-job-replay-1"}
+
+    first_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+    second_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    first = first_response.json()
+    second = second_response.json()
+    assert second["id"] == first["id"]
+    assert second["request_hash"] == first["request_hash"]
+    assert second["idempotency_key"] == "generation-job-replay-1"
+
+
+def test_generation_jobs_operator_status_returns_summary(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_STALE_AFTER_SECONDS", 60)
+
+    response = client.get("/api/generation/jobs/operator/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["execution_mode"] == "external"
+    assert data["stale_after_seconds"] == 60
+    assert data["counts"] == {
+        "queued": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "canceled": 0,
+    }
+    assert data["backlog"] == 0
+    assert data["stale_running"] == 0
+    assert data["stale_samples"] == []
+
+
+def test_generation_router_hotfix_artifacts_are_not_present():
+    source = (Path(__file__).resolve().parents[2] / "backend" / "app" / "routers" / "generation.py").read_text(
+        encoding="utf-8"
+    )
+    operator_status_source = source.split('@router.get("/jobs/operator/status"', 1)[1].split(
+        '@router.post("/jobs/operator/recover-stale"',
+        1,
+    )[0]
+
+    assert "create_job(\n            db,\n            job=job" not in source
+    assert "return [generation_job_service.to_response(job) for job in jobs]" not in operator_status_source
+
+
+def test_export_pdf_receives_frontend_content_payload(tmp_path, monkeypatch):
+    from app.config import settings
     from app.routers import export as export_router
 
     project_response = client.post(
@@ -2386,10 +2968,15 @@ def test_export_pdf_receives_frontend_content_payload(monkeypatch):
     project_id = project_response.json()["id"]
     frontend_content = r"\documentclass{article}\begin{document}Fresh PDF\end{document}"
 
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+
     def fake_generate_pdf(main_content, files):
         assert main_content == frontend_content
         assert files["main.tex"] == frontend_content
         assert files["notes.tex"] == "Notes"
+        output = tmp_path / "exports"
+        output.mkdir(parents=True, exist_ok=True)
+        (output / "compiled.pdf").write_bytes(b"%PDF-1.4 fake")
         return {"success": True, "filename": "compiled.pdf", "size": 123}
 
     monkeypatch.setattr(export_router.pdf_generator, "generate_pdf", fake_generate_pdf)
@@ -2404,7 +2991,9 @@ def test_export_pdf_receives_frontend_content_payload(monkeypatch):
     )
     assert response.status_code == 200
     data = response.json()
-    assert data["url"] == "/api/export/download/compiled.pdf"
+    assert data["url"].startswith("/api/artifacts/")
+    assert data["url"].endswith("/download")
+    assert data["filename"] == "PDF_Export_Project.pdf"
     assert data["format"] == "pdf"
 
 
@@ -2437,8 +3026,10 @@ def test_export_html_uses_frontend_content_payload(tmp_path, monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["format"] == "html"
-    exported = tmp_path / "exports" / data["filename"]
-    assert exported.read_text(encoding="utf-8") == "<html>Fresh HTML</html>"
+    assert data["url"].startswith("/api/artifacts/")
+    download_response = client.get(data["url"])
+    assert download_response.status_code == 200
+    assert download_response.text == "<html>Fresh HTML</html>"
 
 
 def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
@@ -2466,13 +3057,51 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
     data = response.json()
     assert data["format"] == "tex"
 
-    exported = tmp_path / "exports" / data["filename"]
+    assert data["url"].startswith("/api/artifacts/")
+    download_response = client.get(data["url"])
+    assert download_response.status_code == 200
+    exported = tmp_path / "downloaded.zip"
+    exported.write_bytes(download_response.content)
     with ZipFile(exported) as archive:
         assert archive.read("main.tex").decode("utf-8") == frontend_content
         assert archive.read("notes.tex").decode("utf-8") == "Notes"
 
 
+def test_artifact_download_rejects_other_owner_for_export_html(tmp_path, monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+    from app.config import settings
+    from app.routers import export as export_router
+
+    monkeypatch.setattr(settings, "UPLOAD_DIR", str(tmp_path))
+    monkeypatch.setattr(export_router.pdf_generator, "generate_html", lambda main_content: "<html>private</html>")
+    owner_headers = {"X-Latexed-User": "teacher-a"}
+    other_headers = {"X-Latexed-User": "teacher-b"}
+
+    project_response = client.post(
+        "/api/projects/",
+        json={"name": "Private Artifact Project", "template": "article"},
+        headers=owner_headers,
+    )
+    project_id = project_response.json()["id"]
+
+    export_response = client.post(
+        "/api/export/html",
+        json={"project_id": project_id, "format": "html", "content": {"main.tex": "private"}},
+        headers=owner_headers,
+    )
+    assert export_response.status_code == 200
+    download_url = export_response.json()["url"]
+
+    owner_download = client.get(download_url, headers=owner_headers)
+    assert owner_download.status_code == 200
+    assert owner_download.text == "<html>private</html>"
+
+    other_download = client.get(download_url, headers=other_headers)
+    assert other_download.status_code == 404
+
+
 def test_export_html_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import export as export_router
 
     called = False
@@ -2527,7 +3156,7 @@ def test_export_tex_rejects_path_traversal_filename(tmp_path, monkeypatch):
     assert "Invalid export filename" in response.json()["detail"]
 
 
-def test_export_download_serves_existing_export_file(tmp_path, monkeypatch):
+def test_export_download_rejects_file_without_artifact_record(tmp_path, monkeypatch):
     from app.config import settings
 
     export_dir = tmp_path / "exports"
@@ -2538,9 +3167,7 @@ def test_export_download_serves_existing_export_file(tmp_path, monkeypatch):
 
     response = client.get("/api/export/download/document.html")
 
-    assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/html")
-    assert response.text == "<html>ok</html>"
+    assert response.status_code == 404
 
 
 def test_export_download_rejects_unsupported_file_type(tmp_path, monkeypatch):
@@ -2799,6 +3426,7 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
 
 def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import generation as generation_router
 
     monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
@@ -2960,6 +3588,7 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
 
 def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import generation as generation_router
 
     monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
@@ -3096,26 +3725,19 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     from app.schemas import GenerationTokenUsageResponse
     from app.services.token_counter import add_estimated_usage, estimate_token_count
 
-    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
-    generation_router.rate_limit_buckets.clear()
-    owner_headers = {"X-Latexed-User": "teacher-a"}
-    other_headers = {"X-Latexed-User": "teacher-b"}
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Scoped Prompt Project", "template": "article"},
-        headers=owner_headers,
-    )
-    project_id = project_response.json()["id"]
+    assert estimate_token_count(r"\section{Тема} x^2 + 1") == 10
 
-    response = client.post(
-        "/api/generation/prompt",
-        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
-        headers=other_headers,
+    usage = add_estimated_usage(
+        GenerationTokenUsageResponse(),
+        input_text="Промпт один",
+        output_text=r"\section{Ответ}",
     )
 
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Project not found"
-    assert generation_router.rate_limit_buckets == {}
+    assert usage.input_tokens == 2
+    assert usage.output_tokens == 5
+    assert usage.total_tokens == 7
+    assert usage.source == "estimated"
+
 
 def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
@@ -3274,7 +3896,10 @@ def test_generation_generate_wraps_provider_body_with_fixed_preamble(monkeypatch
     assert data["validation"]["warnings"] == []
     assert data["token_usage"]["input_tokens"] > 0
     assert data["token_usage"]["output_tokens"] > 0
-    assert data["token_usage"]["total_tokens"] == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
+    assert (
+        data["token_usage"]["total_tokens"]
+        == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
+    )
     assert data["token_usage"]["source"] == "estimated"
 
 
@@ -3335,6 +3960,7 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
 
 
 def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3379,7 +4005,25 @@ def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
     assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
 
 
-def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
+def _run_one_generation_worker_job(monkeypatch, fake_generate, *, timeout_seconds=None):
+    import asyncio
+    from app.services import generation_job_worker
+
+    monkeypatch.setattr(generation_job_worker.ai_generator, "generate", fake_generate)
+    db = SessionTesting()
+    try:
+        return asyncio.run(
+            generation_job_worker.run_generation_job_once(
+                db=db,
+                worker_id="test-worker",
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    finally:
+        db.close()
+
+
+def test_generation_job_create_enqueues_and_worker_persists_completed_result(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3402,6 +4046,21 @@ def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
 
     assert response.status_code == 202
     job = response.json()
+    assert response.headers["Location"] == f"/api/generation/jobs/{job['id']}"
+    assert job["status"] == "queued"
+    assert job["stage"] == "queued"
+    assert job["attempts"] == 0
+    assert job["result"] is None
+    assert job["request_hash"]
+    assert job["prompt_hash"]
+
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
+    assert processed.id == job["id"]
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    job = status_response.json()
     assert job["status"] == "completed"
     assert job["stage"] == "completed"
     assert job["attempts"] == 1
@@ -3413,10 +4072,7 @@ def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
     assert job["result"]["status"] == "success"
     assert "Persisted generation result" in job["result"]["latex_code"]
 
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["id"] == job["id"]
-    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
+    assert job["worker_id"] == "test-worker"
 
 
 def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
@@ -3449,7 +4105,7 @@ def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
     assert second_response.status_code == 202
     assert second_response.json()["id"] == first_response.json()["id"]
     assert second_response.json()["idempotency_key"] == "generation-job-retry-1"
-    assert calls == 1
+    assert calls == 0
 
 
 def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
@@ -3486,7 +4142,7 @@ def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
     assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
 
 
-def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
+def test_generation_job_background_mode_enqueues_then_worker_completes(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3502,7 +4158,9 @@ def test_generation_job_background_mode_returns_queued_then_completes(monkeypatc
     monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
+    from app.services import generation_job_worker
+
+    monkeypatch.setattr(generation_job_worker.ai_generator, "generate", fake_generate)
     generation_router.rate_limit_buckets.clear()
 
     response = client.post(
@@ -3514,6 +4172,9 @@ def test_generation_job_background_mode_returns_queued_then_completes(monkeypatc
     job = response.json()
     assert job["status"] == "queued"
     assert job["stage"] == "queued"
+
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
 
     status_response = client.get(f"/api/generation/jobs/{job['id']}")
     assert status_response.status_code == 200
@@ -3666,6 +4327,7 @@ def test_generation_worker_recovers_stale_running_job(monkeypatch):
 
 
 def test_generation_operator_status_and_recover_stale_are_owner_scoped(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from datetime import timedelta
     from app.config import settings
     from app.routers import generation as generation_router
@@ -3739,11 +4401,7 @@ def test_generation_job_cancel_queued_background_job(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
 
-    async def noop_background_runner(job_id):
-        return None
-
     monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
-    monkeypatch.setattr(generation_router, "run_generation_job_background", noop_background_runner)
     generation_router.rate_limit_buckets.clear()
 
     create_response = client.post(
@@ -3792,6 +4450,14 @@ def test_generation_job_timeout_marks_job_failed(monkeypatch):
 
     assert response.status_code == 202
     job = response.json()
+    assert job["status"] == "queued"
+
+    processed = _run_one_generation_worker_job(monkeypatch, slow_generate, timeout_seconds=0.01)
+    assert processed is not None
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    job = status_response.json()
     assert job["status"] == "failed"
     assert job["stage"] == "failed"
     assert job["error_message"] == "AI generation job timed out."
@@ -3824,18 +4490,23 @@ def test_generation_job_persists_provider_failure(monkeypatch):
 
     assert response.status_code == 202
     job = response.json()
+    assert job["status"] == "queued"
+
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    job = status_response.json()
     assert job["status"] == "failed"
     assert job["stage"] == "failed"
     assert job["attempts"] == 1
     assert job["result"] is None
     assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
 
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["status"] == "failed"
-
 
 def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3865,6 +4536,8 @@ def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
     )
     assert job_response.status_code == 202
     job_id = job_response.json()["id"]
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
 
     list_response = client.get(
         f"/api/generation/jobs?project_id={project_id}&status=completed",
@@ -3897,7 +4570,11 @@ def test_generation_failed_job_can_be_retried(monkeypatch):
         json={"fields": {"topic": "Retry failed job"}, "materials": "Материал."},
     )
     assert create_response.status_code == 202
-    failed_job = create_response.json()
+    queued_job = create_response.json()
+    assert queued_job["status"] == "queued"
+    failed_processed = _run_one_generation_worker_job(monkeypatch, failing_generate)
+    assert failed_processed is not None
+    failed_job = client.get(f"/api/generation/jobs/{queued_job['id']}").json()
     assert failed_job["status"] == "failed"
 
     async def successful_generate(prompt, provider, model):
@@ -3915,9 +4592,16 @@ def test_generation_failed_job_can_be_retried(monkeypatch):
     assert retry_response.status_code == 200
     retried_job = retry_response.json()
     assert retried_job["id"] == failed_job["id"]
-    assert retried_job["status"] == "completed"
-    assert retried_job["attempts"] == 2
-    assert "Recovered" in retried_job["result"]["latex_code"]
+    assert retried_job["status"] == "queued"
+    assert retried_job["attempts"] == 1
+    assert retried_job["result"] is None
+
+    completed_processed = _run_one_generation_worker_job(monkeypatch, successful_generate)
+    assert completed_processed is not None
+    completed_job = client.get(f"/api/generation/jobs/{failed_job['id']}").json()
+    assert completed_job["status"] == "completed"
+    assert completed_job["attempts"] == 2
+    assert "Recovered" in completed_job["result"]["latex_code"]
 
 
 def test_generation_completed_job_retry_is_rejected(monkeypatch):
@@ -3942,6 +4626,10 @@ def test_generation_completed_job_retry_is_rejected(monkeypatch):
     )
     assert create_response.status_code == 202
     job = create_response.json()
+    assert job["status"] == "queued"
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
+    job = client.get(f"/api/generation/jobs/{job['id']}").json()
     assert job["status"] == "completed"
 
     retry_response = client.post(f"/api/generation/jobs/{job['id']}/retry")
@@ -3958,6 +4646,8 @@ def test_generation_job_not_found_returns_404():
 
 
 def test_generation_history_records_provider_failure(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+    from app.config import settings
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
@@ -4001,130 +4691,6 @@ def test_generation_history_records_provider_failure(monkeypatch):
     assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
 
 
-def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    async def fake_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{Job}Persisted generation result"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-
-    response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Job API"}, "materials": "Материалы для job."},
-    )
-
-    assert response.status_code == 202
-    job = response.json()
-    assert job["status"] == "completed"
-    assert job["stage"] == "completed"
-    assert job["attempts"] == 1
-    assert job["request_hash"]
-    assert job["prompt_hash"]
-    assert job["queue_wait_seconds"] is not None
-    assert job["run_duration_seconds"] is not None
-    assert job["total_duration_seconds"] is not None
-    assert job["result"]["status"] == "success"
-    assert "Persisted generation result" in job["result"]["latex_code"]
-
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["id"] == job["id"]
-    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
-
-
-def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    calls = 0
-
-    async def fake_generate(prompt, provider, model):
-        nonlocal calls
-        calls += 1
-        return (
-            "```latex\n"
-            r"\section{Idempotent}Single provider call"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    payload = {"fields": {"topic": "Idempotency"}, "materials": "Материал."}
-    headers = {"Idempotency-Key": "generation-job-retry-1"}
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
-    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    from app.services import generation_orchestrator as orchestrator_module
-
-    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    headers = {"Idempotency-Key": "generation-job-retry-2"}
-
-    first_response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Первый"}, "materials": "Материал."},
-        headers=headers,
-    )
-    second_response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Другой"}, "materials": "Материал."},
-        headers=headers,
-    )
-
-    assert first_response.status_code == 202
-    assert second_response.status_code == 409
-    assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
-
-
-def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    async def fake_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{Background}Completed from background task"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
-    generation_router.rate_limit_buckets.clear()
-
-    response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Background"}, "materials": "Материал."},
-    )
-
-    assert response.status_code == 202
-    job = response.json()
-    assert job["status"] == "queued"
-    assert job["stage"] == "queued"
-
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    completed_job = status_response.json()
-    assert completed_job["status"] == "completed"
-    assert "Completed from background task" in completed_job["result"]["latex_code"]
-
-
 def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
@@ -4146,29 +4712,18 @@ def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     generation_router.rate_limit_buckets.clear()
 
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
-    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    from app.services import generation_orchestrator as orchestrator_module
-
-    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
-
     response = client.post(
-        "/api/generation/generate",
-        json={"fields": {"topic": "Safe mode", "latex_mode": "safe"}, "materials": "Сделать пособие."},
+        "/api/generation/jobs",
+        json={"fields": {"topic": "External mode"}, "materials": "Материал."},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     data = response.json()
-    assert len(prompts) == 1
-    assert len(compile_inputs) == 1
-    assert "Схема упрощена" in compile_inputs[0]
-    assert "tikzpicture" not in compile_inputs[0]
-    assert "Схема упрощена" in data["latex_code"]
-    assert "tikzpicture" not in data["latex_code"]
-    assert data["compile_check"]["success"] is True
-    assert data["compile_check"]["repaired"] is False
+    assert data["status"] == "queued"
+    assert data["stage"] == "queued"
+    assert data["attempts"] == 0
+    assert data["result"] is None
+    assert calls == 0
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
