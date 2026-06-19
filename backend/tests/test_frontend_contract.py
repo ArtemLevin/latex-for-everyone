@@ -74,7 +74,12 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert generation_js.count("async function generateLatexFromAi") == 1
     assert generation_js.count("async function retryLastGeneration") == 1
     assert generation_js.count("async function regenerateWithLatexMode") == 1
-    assert generation_js.count("await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');") == 1
+    assert (
+        generation_js.count(
+            "await runGenerationRequest(cloneGenerationRequest(lastGenerationRequest), 'retryGenerationBtn');"
+        )
+        == 1
+    )
     assert "finally {" in generation_js
     state_js = (FRONTEND_DIR / "js" / "01-state.js").read_text(encoding="utf-8")
 
@@ -113,7 +118,7 @@ def test_generation_frontend_does_not_auto_retry_after_request_completion():
     assert "/generation/jobs/{id}/cancel" in readme
     assert "/generation/jobs/{id}/retry" in readme
     assert "make generation-worker" in readme
-    assert "backend/scripts/run_generation_jobs.py" in readme
+    assert "python -m app.workers.generation_worker" in readme
     assert "AI_GENERATION_JOB_STALE_AFTER_SECONDS" in readme
     assert "--recover-stale-only" in readme
     assert "`generation_jobs` check" in readme

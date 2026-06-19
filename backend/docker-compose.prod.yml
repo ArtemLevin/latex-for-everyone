@@ -13,6 +13,12 @@ services:
     environment:
       - DATABASE_URL=postgresql+psycopg2://latexed:${POSTGRES_PASSWORD}@db:5432/latexed
       - DEBUG=false
+      - DEPLOYMENT_ENV=production
+      - AUTH_MODE=${AUTH_MODE:-trusted_proxy}
+      - TRUSTED_USER_HEADER=${TRUSTED_USER_HEADER:-X-Latexed-User}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}
+      - ALLOW_PRODUCTION_LOCAL_AUTH=${ALLOW_PRODUCTION_LOCAL_AUTH:-false}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - CORS_ORIGINS=["https://app.latexted.ru"]
       - SECRET_KEY=${SECRET_KEY}
     volumes:
@@ -88,19 +94,27 @@ services:
         condition: service_healthy
     restart: always
 
-  worker:
+  generation-worker:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: latexed-worker
+    container_name: latexed-generation-worker
     command: >
       bash -c "
         cd /app &&
-        celery -A app.worker.celery_app worker --loglevel=info --concurrency=2
+        python -m app.workers.generation_worker --recover-stale
       "
     environment:
       - DATABASE_URL=postgresql+psycopg2://latexed:${POSTGRES_PASSWORD}@db:5432/latexed
       - REDIS_URL=redis://redis:6379/0
+      - AI_GENERATION_JOB_WORKER_ENABLED=true
+      - AI_GENERATION_JOB_STALE_AFTER_SECONDS=${AI_GENERATION_JOB_STALE_AFTER_SECONDS:-1800}
+      - DEPLOYMENT_ENV=production
+      - AUTH_MODE=${AUTH_MODE:-trusted_proxy}
+      - TRUSTED_USER_HEADER=${TRUSTED_USER_HEADER:-X-Latexed-User}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}
+      - ALLOW_PRODUCTION_LOCAL_AUTH=${ALLOW_PRODUCTION_LOCAL_AUTH:-false}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
       - SECRET_KEY=${SECRET_KEY}
     volumes:
       - latexed_data:/tmp/latexed_uploads
