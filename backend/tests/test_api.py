@@ -39,6 +39,14 @@ def setup_db():
 client = TestClient(app)
 
 
+def enable_trusted_proxy_auth(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["testclient"])
+    monkeypatch.setattr(settings, "TRUSTED_USER_HEADER", "X-Latexed-User")
+
+
 def test_initialize_database_respects_auto_create_flag(monkeypatch):
     from app import main as main_module
     from app.config import settings
@@ -595,7 +603,8 @@ def test_delete_project():
     assert response.status_code == 404
 
 
-def test_project_ownership_uses_trusted_user_header():
+def test_project_ownership_uses_trusted_user_header(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     owner_headers = {"X-Latexed-User": "teacher-a"}
     other_headers = {"X-Latexed-User": "teacher-b"}
     create_response = client.post("/api/projects/", json={"name": "Scoped Project"}, headers=owner_headers)
@@ -608,11 +617,123 @@ def test_project_ownership_uses_trusted_user_header():
     assert client.get(f"/api/projects/{project['id']}", headers=other_headers).status_code == 404
 
 
-def test_blank_trusted_user_header_is_rejected():
+def test_blank_trusted_user_header_is_rejected(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     response = client.get("/api/projects/", headers={"X-Latexed-User": "   "})
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid user identity"
+
+
+def test_local_auth_mode_ignores_spoofed_trusted_user_header(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "LOCAL_USER_ID", "local-teacher")
+
+    response = client.post(
+        "/api/projects/",
+        json={"name": "Local Auth Project"},
+        headers={"X-Latexed-User": "attacker"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["owner_id"] == "local-teacher"
+
+
+def test_trusted_proxy_auth_requires_identity_header(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+
+    response = client.get("/api/projects/")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Trusted proxy identity header is required"
+
+
+def test_trusted_proxy_auth_rejects_untrusted_client(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["192.0.2.10"])
+
+    response = client.get("/api/projects/", headers={"X-Latexed-User": "teacher-a"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Trusted proxy identity is not allowed from this client"
+
+
+def test_security_config_rejects_unsafe_production_defaults(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "ALLOW_PRODUCTION_LOCAL_AUTH", True)
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["latexed.example.com"])
+    monkeypatch.setattr(settings, "SECRET_KEY", "change-me-in-production-please")
+
+    with pytest.raises(SecurityConfigurationError, match="SECRET_KEY"):
+        validate_security_settings()
+
+
+def test_security_config_rejects_wildcard_production_hosts(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "ALLOW_PRODUCTION_LOCAL_AUTH", True)
+    monkeypatch.setattr(settings, "SECRET_KEY", "not-default")
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["*"])
+
+    with pytest.raises(SecurityConfigurationError, match="ALLOWED_HOSTS"):
+        validate_security_settings()
+
+
+def test_security_config_requires_trusted_proxy_ips(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "development")
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", [])
+
+    with pytest.raises(SecurityConfigurationError, match="TRUSTED_PROXY_IPS"):
+        validate_security_settings()
+
+
+def test_security_config_accepts_hardened_trusted_proxy_production(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["172.20.0.0/16"])
+    monkeypatch.setattr(settings, "TRUSTED_USER_HEADER", "X-Latexed-User")
+    monkeypatch.setattr(settings, "SECRET_KEY", "not-default")
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["latexed.example.com"])
+
+    validate_security_settings()
+
+
+def test_nginx_drops_trusted_user_header_by_default():
+    nginx_conf = (Path(__file__).resolve().parents[1] / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+
+    assert 'proxy_set_header X-Latexed-User "";' in nginx_conf
+    assert "$http_x_latexed_user" not in nginx_conf
+
+
+def test_production_compose_declares_security_env():
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    for expected in [
+        "DEPLOYMENT_ENV=production",
+        "AUTH_MODE=${AUTH_MODE:-trusted_proxy}",
+        "TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}",
+        "ALLOWED_HOSTS=${ALLOWED_HOSTS}",
+        "ALLOW_PRODUCTION_LOCAL_AUTH=${ALLOW_PRODUCTION_LOCAL_AUTH:-false}",
+    ]:
+        assert expected in compose
 
 
 def create_test_pupil(display_name: str = "Николь") -> dict:
@@ -1453,7 +1574,8 @@ def test_create_file():
     assert data["name"] == "test.tex"
 
 
-def test_direct_file_access_respects_project_owner():
+def test_direct_file_access_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     owner_headers = {"X-Latexed-User": "teacher-a"}
     other_headers = {"X-Latexed-User": "teacher-b"}
     project_response = client.post("/api/projects/", json={"name": "Scoped File Project"}, headers=owner_headers)
@@ -2032,6 +2154,7 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
 
 
 def test_compile_project_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import compile as compile_router
 
     called = False
@@ -2581,6 +2704,7 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
 
 
 def test_export_html_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import export as export_router
 
     called = False
@@ -2907,6 +3031,7 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
 
 def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import generation as generation_router
 
     monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
@@ -3068,6 +3193,7 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
 
 def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import generation as generation_router
 
     monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
@@ -3436,6 +3562,7 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
 
 
 def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3767,6 +3894,7 @@ def test_generation_worker_recovers_stale_running_job(monkeypatch):
 
 
 def test_generation_operator_status_and_recover_stale_are_owner_scoped(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from datetime import timedelta
     from app.config import settings
     from app.routers import generation as generation_router
@@ -3937,6 +4065,7 @@ def test_generation_job_persists_provider_failure(monkeypatch):
 
 
 def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -4059,6 +4188,7 @@ def test_generation_job_not_found_returns_404():
 
 
 def test_generation_history_records_provider_failure(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 

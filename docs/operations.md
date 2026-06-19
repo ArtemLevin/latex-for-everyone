@@ -199,3 +199,29 @@ moving to a production database that can handle concurrent job claims.
 - Generation jobs are durable in the database, but this is not yet a full queue
   system with priorities and dead-letter routing.
 - `/api/metrics` exposes core operational gauges/counters; add deployment-specific dashboards and alert routing before relying on dashboard-only alerts.
+
+## Security configuration runbook
+
+### Startup fails with an unsafe security configuration
+
+**Symptom:** the API exits during startup with a `SecurityConfigurationError`.
+
+**Likely cause:** `DEPLOYMENT_ENV=production` is set while `SECRET_KEY` still uses the development default, `ALLOWED_HOSTS` contains `*`, `AUTH_MODE=trusted_proxy` has no `TRUSTED_PROXY_IPS`, or `AUTH_MODE=local` was not explicitly allowed with `ALLOW_PRODUCTION_LOCAL_AUTH=true`.
+
+**Action:** set a unique `SECRET_KEY`, configure exact public/reverse-proxy hostnames in `ALLOWED_HOSTS`, and choose one explicit auth mode. For multi-user deployments, use `AUTH_MODE=trusted_proxy` and populate `TRUSTED_PROXY_IPS`. For intentionally single-user production deployments, use `AUTH_MODE=local` with `ALLOW_PRODUCTION_LOCAL_AUTH=true` and keep the backend private.
+
+### Users resolve to the wrong owner or all data appears as one teacher
+
+**Symptom:** all created projects/lessons are owned by `local-teacher` or by the same configured user.
+
+**Likely cause:** the service is running in `AUTH_MODE=local`, which intentionally ignores `X-Latexed-User` and uses `LOCAL_USER_ID`.
+
+**Action:** keep `AUTH_MODE=local` for local/single-user installs. For multi-user deployments, configure a real authentication proxy, set `AUTH_MODE=trusted_proxy`, set `TRUSTED_PROXY_IPS`, and ensure the proxy sets `X-Latexed-User` from authenticated state rather than forwarding browser input.
+
+### Trusted-proxy requests return 401 or 403
+
+**Symptom:** API requests fail with `Trusted proxy identity header is required` or `Trusted proxy identity is not allowed from this client`.
+
+**Likely cause:** the proxy did not set the configured identity header, or the proxy IP/CIDR is missing from `TRUSTED_PROXY_IPS`.
+
+**Action:** verify the reverse proxy strips incoming `X-Latexed-User`, sets its own authenticated identity value, and connects from an address listed in `TRUSTED_PROXY_IPS`.

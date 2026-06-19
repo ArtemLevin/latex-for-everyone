@@ -1,3 +1,4 @@
+import ipaddress
 import uuid
 
 from fastapi import Depends, HTTPException, Request, status
@@ -9,6 +10,7 @@ from app.models import Project
 
 
 DEFAULT_TEACHER_ID = "local-teacher"
+SUPPORTED_AUTH_MODES = {"local", "trusted_proxy"}
 
 
 def _normalize_identity(value: str) -> str:
@@ -18,10 +20,67 @@ def _normalize_identity(value: str) -> str:
     return identity
 
 
-def get_current_user_id(request: Request) -> str:
-    """Resolve the MVP trusted-proxy identity, falling back to local single-user mode."""
+def _normalize_auth_mode() -> str:
+    mode = settings.AUTH_MODE.strip().lower()
+    if mode not in SUPPORTED_AUTH_MODES:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Invalid auth configuration")
+    return mode
+
+
+def _resolve_local_identity() -> str:
+    return _normalize_identity(settings.LOCAL_USER_ID or DEFAULT_TEACHER_ID)
+
+
+def _request_client_host(request: Request) -> str:
+    return request.client.host if request.client else ""
+
+
+def _trusted_proxy_matches(client_host: str, trusted_proxy: str) -> bool:
+    trusted_proxy = trusted_proxy.strip()
+    if not trusted_proxy:
+        return False
+    if client_host == trusted_proxy:
+        return True
+    try:
+        client_ip = ipaddress.ip_address(client_host)
+    except ValueError:
+        return False
+    try:
+        if "/" in trusted_proxy:
+            return client_ip in ipaddress.ip_network(trusted_proxy, strict=False)
+        return client_ip == ipaddress.ip_address(trusted_proxy)
+    except ValueError:
+        return False
+
+
+def _is_trusted_proxy_request(request: Request) -> bool:
+    client_host = _request_client_host(request)
+    return any(_trusted_proxy_matches(client_host, proxy) for proxy in settings.TRUSTED_PROXY_IPS)
+
+
+def _resolve_trusted_proxy_identity(request: Request) -> str:
+    if not settings.TRUSTED_PROXY_IPS:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Trusted proxy auth is not configured")
+    if not _is_trusted_proxy_request(request):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Trusted proxy identity is not allowed from this client")
+
     header_value = request.headers.get(settings.TRUSTED_USER_HEADER)
-    return _normalize_identity(header_value or settings.LOCAL_USER_ID or DEFAULT_TEACHER_ID)
+    if header_value is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Trusted proxy identity header is required")
+    return _normalize_identity(header_value)
+
+
+def get_current_user_id(request: Request) -> str:
+    """Resolve identity through an explicit auth mode.
+
+    ``local`` mode intentionally ignores any client-supplied trusted identity
+    header. ``trusted_proxy`` mode accepts the configured header only from
+    configured trusted proxy addresses.
+    """
+    mode = _normalize_auth_mode()
+    if mode == "local":
+        return _resolve_local_identity()
+    return _resolve_trusted_proxy_identity(request)
 
 
 def get_project(
