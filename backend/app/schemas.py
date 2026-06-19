@@ -90,7 +90,17 @@ class LessonCreate(BaseModel):
 class LessonUpdate(BaseModel):
     topic: Optional[str] = Field(default=None, min_length=1, max_length=255)
     lesson_date: Optional[datetime] = None
-    status: Optional[Literal["draft", "recording_uploaded", "transcribing", "transcript_ready", "generating_documents", "completed", "failed"]] = None
+    status: Optional[
+        Literal[
+            "draft",
+            "recording_uploaded",
+            "transcribing",
+            "transcript_ready",
+            "generating_documents",
+            "completed",
+            "failed",
+        ]
+    ] = None
 
 
 class LessonResponse(BaseModel):
@@ -375,6 +385,10 @@ class GenerationJobResponse(BaseModel):
     result: Optional[GenerationResultResponse] = None
     error_message: Optional[str] = None
     attempts: int
+    worker_id: Optional[str] = None
+    locked_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
+    next_attempt_at: Optional[datetime] = None
     queue_wait_seconds: Optional[float] = None
     run_duration_seconds: Optional[float] = None
     total_duration_seconds: Optional[float] = None
@@ -398,6 +412,9 @@ class GenerationJobStaleSampleResponse(BaseModel):
     status: str
     stage: str
     attempts: int
+    worker_id: Optional[str] = None
+    locked_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     updated_at: datetime
 

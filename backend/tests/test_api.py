@@ -1,6 +1,7 @@
 """
 Tests for the Latexed API.
 """
+
 import hashlib
 from pathlib import Path
 import threading
@@ -169,13 +170,39 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
     lesson_columns = {column["name"] for column in inspector.get_columns("lessons")}
     assert {"pupil_id", "teacher_id", "topic", "lesson_date", "status"}.issubset(lesson_columns)
     recording_columns = {column["name"] for column in inspector.get_columns("lesson_audio_recordings")}
-    assert {"lesson_id", "filename", "content_type", "size_bytes", "duration_seconds", "sha256_checksum", "storage_path", "status"}.issubset(recording_columns)
+    assert {
+        "lesson_id",
+        "filename",
+        "content_type",
+        "size_bytes",
+        "duration_seconds",
+        "sha256_checksum",
+        "storage_path",
+        "status",
+    }.issubset(recording_columns)
     recording_indexes = {index["name"] for index in inspector.get_indexes("lesson_audio_recordings")}
-    assert {"ix_lesson_audio_recordings_lesson_id", "ix_lesson_audio_recordings_sha256_checksum"}.issubset(recording_indexes)
+    assert {"ix_lesson_audio_recordings_lesson_id", "ix_lesson_audio_recordings_sha256_checksum"}.issubset(
+        recording_indexes
+    )
     transcript_columns = {column["name"] for column in inspector.get_columns("lesson_transcripts")}
-    assert {"lesson_id", "recording_id", "provider", "language", "text", "edited_text", "review_status", "reviewed_at", "status", "error_message"}.issubset(transcript_columns)
+    assert {
+        "lesson_id",
+        "recording_id",
+        "provider",
+        "language",
+        "text",
+        "edited_text",
+        "review_status",
+        "reviewed_at",
+        "status",
+        "error_message",
+    }.issubset(transcript_columns)
     transcript_indexes = {index["name"] for index in inspector.get_indexes("lesson_transcripts")}
-    assert {"ix_lesson_transcripts_lesson_id", "ix_lesson_transcripts_recording_id", "ix_lesson_transcripts_review_status"}.issubset(transcript_indexes)
+    assert {
+        "ix_lesson_transcripts_lesson_id",
+        "ix_lesson_transcripts_recording_id",
+        "ix_lesson_transcripts_review_status",
+    }.issubset(transcript_indexes)
     document_columns = {column["name"] for column in inspector.get_columns("lesson_generated_documents")}
     assert {
         "lesson_id",
@@ -197,7 +224,18 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_generated_documents_document_type",
     }.issubset(document_indexes)
     job_columns = {column["name"] for column in inspector.get_columns("lesson_processing_jobs")}
-    assert {"lesson_id", "teacher_id", "job_type", "status", "stage", "recording_id", "transcript_id", "document_types", "document_ids", "error_message"}.issubset(job_columns)
+    assert {
+        "lesson_id",
+        "teacher_id",
+        "job_type",
+        "status",
+        "stage",
+        "recording_id",
+        "transcript_id",
+        "document_types",
+        "document_ids",
+        "error_message",
+    }.issubset(job_columns)
     job_indexes = {index["name"] for index in inspector.get_indexes("lesson_processing_jobs")}
     assert {
         "ix_lesson_processing_jobs_lesson_id",
@@ -206,11 +244,30 @@ def test_alembic_baseline_creates_current_schema(monkeypatch, tmp_path):
         "ix_lesson_processing_jobs_status",
     }.issubset(job_indexes)
     generation_history_columns = {column["name"] for column in inspector.get_columns("generation_history")}
-    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(generation_history_columns)
+    assert {"owner_id", "input_tokens", "output_tokens", "total_tokens", "token_count_source"}.issubset(
+        generation_history_columns
+    )
     generation_job_columns = {column["name"] for column in inspector.get_columns("generation_jobs")}
-    assert {"project_id", "owner_id", "idempotency_key", "status", "stage", "request_hash", "prompt_hash", "request_payload", "result_payload", "error_message"}.issubset(generation_job_columns)
+    assert {
+        "project_id",
+        "owner_id",
+        "idempotency_key",
+        "status",
+        "stage",
+        "request_hash",
+        "prompt_hash",
+        "request_payload",
+        "result_payload",
+        "error_message",
+    }.issubset(generation_job_columns)
     generation_job_indexes = {index["name"] for index in inspector.get_indexes("generation_jobs")}
-    assert {"ix_generation_jobs_project_id", "ix_generation_jobs_status", "ix_generation_jobs_request_hash", "ix_generation_jobs_owner_id", "ix_generation_jobs_idempotency_key"}.issubset(generation_job_indexes)
+    assert {
+        "ix_generation_jobs_project_id",
+        "ix_generation_jobs_status",
+        "ix_generation_jobs_request_hash",
+        "ix_generation_jobs_owner_id",
+        "ix_generation_jobs_idempotency_key",
+    }.issubset(generation_job_indexes)
 
 
 def test_health_check():
@@ -227,27 +284,37 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
     monkeypatch.setattr(
         readiness,
         "check_database_ready",
-        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+        lambda db_engine: ReadinessCheckResponse(
+            status="ok", message="Database ok", details={"required_tables_present": True}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_compiler_ready",
-        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={"binary": "pdflatex", "path": "/usr/bin/pdflatex"}),
+        lambda: ReadinessCheckResponse(
+            status="ok", message="Compiler ok", details={"binary": "pdflatex", "path": "/usr/bin/pdflatex"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_latex_packages_ready",
-        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={"russian_ldf": True, "t2aenc_def": True}),
+        lambda compiler_check: ReadinessCheckResponse(
+            status="ok", message="Packages ok", details={"russian_ldf": True, "t2aenc_def": True}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_artifact_dirs_ready",
-        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+        lambda: ReadinessCheckResponse(
+            status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_transcription_ready",
-        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+        lambda: ReadinessCheckResponse(
+            status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -265,7 +332,15 @@ def test_readiness_ready_when_all_checks_pass(monkeypatch):
     assert response.status_code == 200
     data = response.json()
     assert data["status"] == "ready"
-    assert set(data["checks"]) == {"database", "compiler", "latex_packages", "artifact_dirs", "transcription", "generation_jobs", "ai_request_control"}
+    assert set(data["checks"]) == {
+        "database",
+        "compiler",
+        "latex_packages",
+        "artifact_dirs",
+        "transcription",
+        "generation_jobs",
+        "ai_request_control",
+    }
     assert data["checks"]["database"]["status"] == "ok"
     assert data["checks"]["compiler"]["status"] == "ok"
 
@@ -277,27 +352,37 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
     monkeypatch.setattr(
         readiness,
         "check_database_ready",
-        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={"required_tables_present": True}),
+        lambda db_engine: ReadinessCheckResponse(
+            status="ok", message="Database ok", details={"required_tables_present": True}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_compiler_ready",
-        lambda: ReadinessCheckResponse(status="missing", message="pdflatex was not found on PATH", details={"binary": "pdflatex", "path": None}),
+        lambda: ReadinessCheckResponse(
+            status="missing", message="pdflatex was not found on PATH", details={"binary": "pdflatex", "path": None}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_latex_packages_ready",
-        lambda compiler_check: ReadinessCheckResponse(status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}),
+        lambda compiler_check: ReadinessCheckResponse(
+            status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_artifact_dirs_ready",
-        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}),
+        lambda: ReadinessCheckResponse(
+            status="ok", message="Artifact dirs ok", details={"compile_work_dir": "ok", "upload_dir": "ok"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
         "check_transcription_ready",
-        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}),
+        lambda: ReadinessCheckResponse(
+            status="skipped", message="Transcription disabled", details={"effective_provider": "disabled"}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -395,14 +480,32 @@ def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkey
     from app.schemas import ReadinessCheckResponse
     from app.services import readiness
 
-    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
-    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
-    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
-    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}),
+    )
     monkeypatch.setattr(
         readiness,
         "check_transcription_ready",
-        lambda: ReadinessCheckResponse(status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}),
+        lambda: ReadinessCheckResponse(
+            status="missing", message="Transcription runtime missing", details={"missing_requirements": ["ffmpeg"]}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -476,15 +579,37 @@ def test_readiness_degraded_when_generation_jobs_are_stale(monkeypatch):
     from app.schemas import ReadinessCheckResponse
     from app.services import readiness
 
-    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
-    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
-    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
-    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
-    monkeypatch.setattr(readiness, "check_transcription_ready", lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}),
+    )
     monkeypatch.setattr(
         readiness,
         "check_generation_jobs_ready",
-        lambda: ReadinessCheckResponse(status="error", message="Generation worker has stale running jobs", details={"stale_running": 1}),
+        lambda: ReadinessCheckResponse(
+            status="error", message="Generation worker has stale running jobs", details={"stale_running": 1}
+        ),
     )
     monkeypatch.setattr(
         readiness,
@@ -504,16 +629,42 @@ def test_readiness_degraded_when_ai_request_control_is_unavailable(monkeypatch):
     from app.schemas import ReadinessCheckResponse
     from app.services import readiness
 
-    monkeypatch.setattr(readiness, "check_database_ready", lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}))
-    monkeypatch.setattr(readiness, "check_compiler_ready", lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}))
-    monkeypatch.setattr(readiness, "check_latex_packages_ready", lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}))
-    monkeypatch.setattr(readiness, "check_artifact_dirs_ready", lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}))
-    monkeypatch.setattr(readiness, "check_transcription_ready", lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}))
-    monkeypatch.setattr(readiness, "check_generation_jobs_ready", lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={}))
+    monkeypatch.setattr(
+        readiness,
+        "check_database_ready",
+        lambda db_engine: ReadinessCheckResponse(status="ok", message="Database ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_compiler_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Compiler ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_latex_packages_ready",
+        lambda compiler_check: ReadinessCheckResponse(status="ok", message="Packages ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_artifact_dirs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Artifact dirs ok", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_transcription_ready",
+        lambda: ReadinessCheckResponse(status="skipped", message="Transcription disabled", details={}),
+    )
+    monkeypatch.setattr(
+        readiness,
+        "check_generation_jobs_ready",
+        lambda: ReadinessCheckResponse(status="ok", message="Generation jobs ok", details={}),
+    )
     monkeypatch.setattr(
         readiness,
         "check_ai_request_control_ready",
-        lambda: ReadinessCheckResponse(status="error", message="AI request control unavailable", details={"backend": "redis"}),
+        lambda: ReadinessCheckResponse(
+            status="error", message="AI request control unavailable", details={"backend": "redis"}
+        ),
     )
 
     response = client.get("/api/ready")
@@ -742,7 +893,9 @@ def create_test_pupil(display_name: str = "Николь") -> dict:
     return response.json()
 
 
-def create_test_lesson(pupil_id: str, topic: str = "Показательные уравнения", lesson_date: str = "2026-06-09T10:00:00Z") -> dict:
+def create_test_lesson(
+    pupil_id: str, topic: str = "Показательные уравнения", lesson_date: str = "2026-06-09T10:00:00Z"
+) -> dict:
     response = client.post(
         "/api/lessons/",
         json={"pupil_id": pupil_id, "topic": topic, "lesson_date": lesson_date},
@@ -822,7 +975,9 @@ def test_lesson_crud_and_filters():
     assert get_response.status_code == 200
     assert get_response.json()["topic"] == "Логарифмы"
 
-    update_response = client.patch(f"/api/lessons/{lesson['id']}", json={"topic": "Логарифмы и степени", "status": "completed"})
+    update_response = client.patch(
+        f"/api/lessons/{lesson['id']}", json={"topic": "Логарифмы и степени", "status": "completed"}
+    )
     assert update_response.status_code == 200
     assert update_response.json()["topic"] == "Логарифмы и степени"
     assert update_response.json()["status"] == "completed"
@@ -1000,7 +1155,6 @@ def test_lesson_audio_upload_rejects_unknown_lesson(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Lesson not found"
 
 
-
 def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
     import shutil
     import sys
@@ -1021,6 +1175,7 @@ def test_legacy_transcription_loader_uses_root_transcribe_script(monkeypatch):
     if shutil.which("ffprobe") is None:
         pytest.skip("ffprobe is required to probe repository test_audio.mp3")
     assert module.get_audio_duration_seconds(test_audio) > 0
+
 
 def test_lesson_transcription_success_with_fake_provider(monkeypatch, tmp_path):
     from app.config import settings
@@ -1199,7 +1354,6 @@ def test_faster_whisper_provider_maps_segments(monkeypatch, tmp_path):
     ]
 
 
-
 def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypatch, tmp_path, caplog):
     import logging
 
@@ -1226,6 +1380,7 @@ def test_lesson_transcription_disabled_provider_logs_actionable_warning(monkeypa
     assert "Set TRANSCRIPTION_PROVIDER" in data["error_message"]
     assert any("lesson transcription provider unavailable" in record.message for record in caplog.records)
     assert not any(record.levelno >= logging.ERROR for record in caplog.records)
+
 
 def test_lesson_transcription_provider_failure_creates_failed_transcript(monkeypatch, tmp_path):
     from app.config import settings
@@ -1298,7 +1453,9 @@ def test_lesson_transcription_respects_teacher_scope(monkeypatch, tmp_path):
         app.dependency_overrides.pop(get_current_teacher_id, None)
 
 
-def create_transcribed_lesson(monkeypatch, tmp_path, *, topic: str = "Quadratic & roots_1", transcript_text: str = "x_1 & 50% done"):
+def create_transcribed_lesson(
+    monkeypatch, tmp_path, *, topic: str = "Quadratic & roots_1", transcript_text: str = "x_1 & 50% done"
+):
     from app.config import settings
     from app.routers import lessons as lessons_router
     from app.services.transcription import FakeTranscriptionProvider, TranscriptionService
@@ -1340,7 +1497,10 @@ def test_lesson_document_generation_success_and_download(monkeypatch, tmp_path):
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={})
 
     assert response.status_code == 409
-    assert response.json()["detail"] == "Review the transcript or set allow_unreviewed=true to create draft lesson documents"
+    assert (
+        response.json()["detail"]
+        == "Review the transcript or set allow_unreviewed=true to create draft lesson documents"
+    )
 
     response = client.post(f"/api/lessons/{lesson['id']}/documents/generate", json={"allow_unreviewed": True})
 
@@ -1889,7 +2049,9 @@ def test_latex_sanitizer_simplifies_safe_mode_risky_fragments():
         ),
     ],
 )
-def test_ai_output_failure_corpus_pipeline(fixture_name, expect_valid, expected_fragments, unexpected_fragments, expected_error):
+def test_ai_output_failure_corpus_pipeline(
+    fixture_name, expect_valid, expected_fragments, unexpected_fragments, expected_error
+):
     from app.services.latex_document_builder import build_latex_document
     from app.services.latex_sanitizer import sanitize_generated_latex_body, sanitize_generated_latex_body_for_safe_mode
     from app.services.latex_validator import validate_latex_document
@@ -2250,54 +2412,6 @@ def test_compile_raw_creates_owner_scoped_artifact(tmp_path, monkeypatch):
     download = client.get(pdf_url)
     assert download.status_code == 200
     assert download.content == b"%PDF-1.4 raw"
-
-
-def test_compile_raw_rate_limit_returns_429(monkeypatch):
-    from app.config import settings
-    from app.routers import compile as compile_router
-
-    compile_router.compile_control.clear_rate_limits()
-    monkeypatch.setattr(settings, "COMPILE_RATE_LIMIT_PER_HOUR", 1)
-
-    def fake_compile(main_content, files, main_filename="main.tex"):
-        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
-
-    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
-
-    payload = {
-        "content": r"\documentclass{article}\begin{document}Rate\end{document}",
-        "files": {},
-    }
-    first = client.post("/api/compile/raw", json=payload)
-    second = client.post("/api/compile/raw", json=payload)
-
-    assert first.status_code == 200
-    assert second.status_code == 429
-    assert second.headers["Retry-After"].isdigit()
-    assert "Compile rate limit exceeded" in second.json()["detail"]
-    compile_router.compile_control.clear_rate_limits()
-
-
-def test_compile_queue_full_returns_503(monkeypatch):
-    from app.routers import compile as compile_router
-    from app.services.compile_control import CompileQueueFullError
-
-    async def fake_run_in_thread(*args, **kwargs):
-        raise CompileQueueFullError("Compile queue is full. Try again later.")
-
-    monkeypatch.setattr(compile_router.compile_control, "run_in_thread", fake_run_in_thread)
-    compile_router.compile_control.clear_rate_limits()
-
-    response = client.post(
-        "/api/compile/raw",
-        json={
-            "content": r"\documentclass{article}\begin{document}Queued\end{document}",
-            "files": {},
-        },
-    )
-
-    assert response.status_code == 503
-    assert response.json()["detail"] == "Compile queue is full. Try again later."
 
 
 def test_compile_raw_rate_limit_returns_429(monkeypatch):
@@ -2834,8 +2948,8 @@ def test_generation_router_hotfix_artifacts_are_not_present():
     source = (Path(__file__).resolve().parents[2] / "backend" / "app" / "routers" / "generation.py").read_text(
         encoding="utf-8"
     )
-    operator_status_source = source.split("@router.get(\"/jobs/operator/status\"", 1)[1].split(
-        "@router.post(\"/jobs/operator/recover-stale\"",
+    operator_status_source = source.split('@router.get("/jobs/operator/status"', 1)[1].split(
+        '@router.post("/jobs/operator/recover-stale"',
         1,
     )[0]
 
@@ -3782,7 +3896,10 @@ def test_generation_generate_wraps_provider_body_with_fixed_preamble(monkeypatch
     assert data["validation"]["warnings"] == []
     assert data["token_usage"]["input_tokens"] > 0
     assert data["token_usage"]["output_tokens"] > 0
-    assert data["token_usage"]["total_tokens"] == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
+    assert (
+        data["token_usage"]["total_tokens"]
+        == data["token_usage"]["input_tokens"] + data["token_usage"]["output_tokens"]
+    )
     assert data["token_usage"]["source"] == "estimated"
 
 
@@ -3888,7 +4005,25 @@ def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
     assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
 
 
-def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
+def _run_one_generation_worker_job(monkeypatch, fake_generate, *, timeout_seconds=None):
+    import asyncio
+    from app.services import generation_job_worker
+
+    monkeypatch.setattr(generation_job_worker.ai_generator, "generate", fake_generate)
+    db = SessionTesting()
+    try:
+        return asyncio.run(
+            generation_job_worker.run_generation_job_once(
+                db=db,
+                worker_id="test-worker",
+                timeout_seconds=timeout_seconds,
+            )
+        )
+    finally:
+        db.close()
+
+
+def test_generation_job_create_enqueues_and_worker_persists_completed_result(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3911,6 +4046,21 @@ def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
 
     assert response.status_code == 202
     job = response.json()
+    assert response.headers["Location"] == f"/api/generation/jobs/{job['id']}"
+    assert job["status"] == "queued"
+    assert job["stage"] == "queued"
+    assert job["attempts"] == 0
+    assert job["result"] is None
+    assert job["request_hash"]
+    assert job["prompt_hash"]
+
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
+    assert processed.id == job["id"]
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    job = status_response.json()
     assert job["status"] == "completed"
     assert job["stage"] == "completed"
     assert job["attempts"] == 1
@@ -3922,10 +4072,7 @@ def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
     assert job["result"]["status"] == "success"
     assert "Persisted generation result" in job["result"]["latex_code"]
 
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["id"] == job["id"]
-    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
+    assert job["worker_id"] == "test-worker"
 
 
 def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
@@ -3958,7 +4105,7 @@ def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
     assert second_response.status_code == 202
     assert second_response.json()["id"] == first_response.json()["id"]
     assert second_response.json()["idempotency_key"] == "generation-job-retry-1"
-    assert calls == 1
+    assert calls == 0
 
 
 def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
@@ -3995,7 +4142,7 @@ def test_generation_job_idempotency_key_rejects_different_payload(monkeypatch):
     assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
 
 
-def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
+def test_generation_job_background_mode_enqueues_then_worker_completes(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -4011,7 +4158,9 @@ def test_generation_job_background_mode_returns_queued_then_completes(monkeypatc
     monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
     monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
+    from app.services import generation_job_worker
+
+    monkeypatch.setattr(generation_job_worker.ai_generator, "generate", fake_generate)
     generation_router.rate_limit_buckets.clear()
 
     response = client.post(
@@ -4023,6 +4172,9 @@ def test_generation_job_background_mode_returns_queued_then_completes(monkeypatc
     job = response.json()
     assert job["status"] == "queued"
     assert job["stage"] == "queued"
+
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
 
     status_response = client.get(f"/api/generation/jobs/{job['id']}")
     assert status_response.status_code == 200
@@ -4249,11 +4401,7 @@ def test_generation_job_cancel_queued_background_job(monkeypatch):
     from app.config import settings
     from app.routers import generation as generation_router
 
-    async def noop_background_runner(job_id):
-        return None
-
     monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
-    monkeypatch.setattr(generation_router, "run_generation_job_background", noop_background_runner)
     generation_router.rate_limit_buckets.clear()
 
     create_response = client.post(
@@ -4302,6 +4450,14 @@ def test_generation_job_timeout_marks_job_failed(monkeypatch):
 
     assert response.status_code == 202
     job = response.json()
+    assert job["status"] == "queued"
+
+    processed = _run_one_generation_worker_job(monkeypatch, slow_generate, timeout_seconds=0.01)
+    assert processed is not None
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    job = status_response.json()
     assert job["status"] == "failed"
     assert job["stage"] == "failed"
     assert job["error_message"] == "AI generation job timed out."
@@ -4334,15 +4490,19 @@ def test_generation_job_persists_provider_failure(monkeypatch):
 
     assert response.status_code == 202
     job = response.json()
+    assert job["status"] == "queued"
+
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
+
+    status_response = client.get(f"/api/generation/jobs/{job['id']}")
+    assert status_response.status_code == 200
+    job = status_response.json()
     assert job["status"] == "failed"
     assert job["stage"] == "failed"
     assert job["attempts"] == 1
     assert job["result"] is None
     assert job["error_message"] == "AI provider request failed. Check backend logs or provider configuration."
-
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["status"] == "failed"
 
 
 def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
@@ -4376,6 +4536,8 @@ def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
     )
     assert job_response.status_code == 202
     job_id = job_response.json()["id"]
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
 
     list_response = client.get(
         f"/api/generation/jobs?project_id={project_id}&status=completed",
@@ -4408,7 +4570,11 @@ def test_generation_failed_job_can_be_retried(monkeypatch):
         json={"fields": {"topic": "Retry failed job"}, "materials": "Материал."},
     )
     assert create_response.status_code == 202
-    failed_job = create_response.json()
+    queued_job = create_response.json()
+    assert queued_job["status"] == "queued"
+    failed_processed = _run_one_generation_worker_job(monkeypatch, failing_generate)
+    assert failed_processed is not None
+    failed_job = client.get(f"/api/generation/jobs/{queued_job['id']}").json()
     assert failed_job["status"] == "failed"
 
     async def successful_generate(prompt, provider, model):
@@ -4426,9 +4592,16 @@ def test_generation_failed_job_can_be_retried(monkeypatch):
     assert retry_response.status_code == 200
     retried_job = retry_response.json()
     assert retried_job["id"] == failed_job["id"]
-    assert retried_job["status"] == "completed"
-    assert retried_job["attempts"] == 2
-    assert "Recovered" in retried_job["result"]["latex_code"]
+    assert retried_job["status"] == "queued"
+    assert retried_job["attempts"] == 1
+    assert retried_job["result"] is None
+
+    completed_processed = _run_one_generation_worker_job(monkeypatch, successful_generate)
+    assert completed_processed is not None
+    completed_job = client.get(f"/api/generation/jobs/{failed_job['id']}").json()
+    assert completed_job["status"] == "completed"
+    assert completed_job["attempts"] == 2
+    assert "Recovered" in completed_job["result"]["latex_code"]
 
 
 def test_generation_completed_job_retry_is_rejected(monkeypatch):
@@ -4453,6 +4626,10 @@ def test_generation_completed_job_retry_is_rejected(monkeypatch):
     )
     assert create_response.status_code == 202
     job = create_response.json()
+    assert job["status"] == "queued"
+    processed = _run_one_generation_worker_job(monkeypatch, fake_generate)
+    assert processed is not None
+    job = client.get(f"/api/generation/jobs/{job['id']}").json()
     assert job["status"] == "completed"
 
     retry_response = client.post(f"/api/generation/jobs/{job['id']}/retry")
@@ -4512,130 +4689,6 @@ def test_generation_history_records_provider_failure(monkeypatch):
     assert client.get(f"/api/generation/history/project/{project_id}", headers=other_headers).status_code == 404
     assert client.get(f"/api/generation/history/item/{history_item['id']}", headers=other_headers).status_code == 404
     assert client.get(f"/api/generation/jobs/{job_id}", headers=other_headers).status_code == 404
-
-
-def test_generation_job_create_runs_and_persists_completed_result(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    async def fake_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{Job}Persisted generation result"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-
-    response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Job API"}, "materials": "Материалы для job."},
-    )
-
-    assert response.status_code == 202
-    job = response.json()
-    assert job["status"] == "completed"
-    assert job["stage"] == "completed"
-    assert job["attempts"] == 1
-    assert job["request_hash"]
-    assert job["prompt_hash"]
-    assert job["queue_wait_seconds"] is not None
-    assert job["run_duration_seconds"] is not None
-    assert job["total_duration_seconds"] is not None
-    assert job["result"]["status"] == "success"
-    assert "Persisted generation result" in job["result"]["latex_code"]
-
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    assert status_response.json()["id"] == job["id"]
-    assert status_response.json()["result"]["latex_code"] == job["result"]["latex_code"]
-
-
-def test_generation_job_idempotency_key_replays_existing_job(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    calls = 0
-
-    async def fake_generate(prompt, provider, model):
-        nonlocal calls
-        calls += 1
-        return (
-            "```latex\n"
-            r"\section{Idempotent}Single provider call"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    payload = {"fields": {"topic": "Idempotency"}, "materials": "Материал."}
-    headers = {"Idempotency-Key": "generation-job-retry-1"}
-
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
-    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    from app.services import generation_orchestrator as orchestrator_module
-
-    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    generation_router.rate_limit_buckets.clear()
-    headers = {"Idempotency-Key": "generation-job-retry-2"}
-
-    first_response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Первый"}, "materials": "Материал."},
-        headers=headers,
-    )
-    second_response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Другой"}, "materials": "Материал."},
-        headers=headers,
-    )
-
-    assert first_response.status_code == 202
-    assert second_response.status_code == 409
-    assert second_response.json()["detail"] == "Idempotency key was already used for a different generation request."
-
-
-def test_generation_job_background_mode_returns_queued_then_completes(monkeypatch):
-    from app.config import settings
-    from app.routers import generation as generation_router
-
-    async def fake_generate(prompt, provider, model):
-        return (
-            "```latex\n"
-            r"\section{Background}Completed from background task"
-            "\n```",
-            "ollama",
-            "qwen2.5:3b",
-        )
-
-    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "background")
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", False)
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router, "SessionLocal", SessionTesting)
-    generation_router.rate_limit_buckets.clear()
-
-    response = client.post(
-        "/api/generation/jobs",
-        json={"fields": {"topic": "Background"}, "materials": "Материал."},
-    )
-
-    assert response.status_code == 202
-    job = response.json()
-    assert job["status"] == "queued"
-    assert job["stage"] == "queued"
-
-    status_response = client.get(f"/api/generation/jobs/{job['id']}")
-    assert status_response.status_code == 200
-    completed_job = status_response.json()
-    assert completed_job["status"] == "completed"
-    assert "Completed from background task" in completed_job["result"]["latex_code"]
 
 
 def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):

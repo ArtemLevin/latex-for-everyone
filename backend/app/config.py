@@ -64,7 +64,7 @@ class Settings(BaseSettings):
 
     # Lesson audio/storage foundation
     LESSON_ARTIFACT_ROOT: Optional[str] = None
-    MAX_LESSON_AUDIO_SIZE: int = 1000 * 1024 * 1024   # 1000MB
+    MAX_LESSON_AUDIO_SIZE: int = 1000 * 1024 * 1024  # 1000MB
     LESSON_AUDIO_ALLOWED_CONTENT_TYPES: str = "audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a"
     LESSON_AUDIO_ALLOWED_EXTENSIONS: str = ".webm,.wav,.mp3,.m4a,.ogg"
     LESSON_AUDIO_DURATION_PROBE_ENABLED: bool = True
@@ -89,9 +89,17 @@ class Settings(BaseSettings):
     # AI Generation
     AI_PROVIDER: str = "ollama"
     AI_GENERATION_TIMEOUT: int = 120_000
-    AI_GENERATION_JOB_EXECUTION_MODE: str = "inline"  # inline, background, or external worker
+    AI_GENERATION_JOB_EXECUTION_MODE: str = "external"  # deprecated for /jobs; jobs are always worker-run
+    AI_GENERATION_SYNC_ENDPOINT_ENABLED: bool = True
+    AI_GENERATION_JOB_WORKER_ENABLED: bool = True
+    AI_GENERATION_JOB_WORKER_ID: Optional[str] = None
+    AI_GENERATION_JOB_WORKER_CONCURRENCY: int = 1
+    AI_GENERATION_JOB_CLAIM_BATCH_SIZE: int = 1
+    AI_GENERATION_JOB_IDLE_SLEEP_SECONDS: float = 1.0
+    AI_GENERATION_JOB_POLL_INTERVAL_SECONDS: float = 1.0
+    AI_GENERATION_JOB_HEARTBEAT_SECONDS: int = 30
     AI_GENERATION_JOB_TIMEOUT_SECONDS: int = 0  # 0 disables persisted job timeout
-    AI_GENERATION_JOB_STALE_AFTER_SECONDS: int = 0  # 0 disables stale running-job recovery
+    AI_GENERATION_JOB_STALE_AFTER_SECONDS: int = 1800  # 0 disables stale running-job recovery
     AI_PROVIDER_STATUS_TIMEOUT: int = 10
     AI_RATE_LIMIT_PER_MINUTE: int = 20
     AI_REQUEST_CONTROL_BACKEND: str = "memory"  # memory or redis

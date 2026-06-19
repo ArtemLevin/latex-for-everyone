@@ -24,8 +24,6 @@ configure_logging()
 logger = logging.getLogger(__name__)
 
 
-
-
 LESSON_WORKFLOW_COMPAT_TABLE_COLUMNS = {
     "lesson_audio_recordings": {
         "duration_seconds": "FLOAT",
@@ -67,12 +65,26 @@ GENERATION_HISTORY_COMPAT_COLUMNS = {
 
 GENERATION_RUNTIME_COMPAT_TABLE_COLUMNS = {
     "generation_history": GENERATION_HISTORY_COMPAT_COLUMNS,
-    "generation_jobs": {"owner_id": "VARCHAR(255) DEFAULT 'local-teacher'", "idempotency_key": "VARCHAR(128)"},
+    "generation_jobs": {
+        "owner_id": "VARCHAR(255) DEFAULT 'local-teacher'",
+        "idempotency_key": "VARCHAR(128)",
+        "worker_id": "VARCHAR(255)",
+        "locked_at": "DATETIME",
+        "heartbeat_at": "DATETIME",
+        "next_attempt_at": "DATETIME",
+    },
 }
 
 GENERATION_RUNTIME_COMPAT_INDEXES = {
     "generation_history": {"ix_generation_history_owner_id": "owner_id"},
-    "generation_jobs": {"ix_generation_jobs_owner_id": "owner_id", "ix_generation_jobs_idempotency_key": "idempotency_key"},
+    "generation_jobs": {
+        "ix_generation_jobs_owner_id": "owner_id",
+        "ix_generation_jobs_idempotency_key": "idempotency_key",
+        "ix_generation_jobs_worker_id": "worker_id",
+        "ix_generation_jobs_locked_at": "locked_at",
+        "ix_generation_jobs_heartbeat_at": "heartbeat_at",
+        "ix_generation_jobs_next_attempt_at": "next_attempt_at",
+    },
 }
 
 
@@ -93,9 +105,7 @@ def ensure_generation_history_compat_columns() -> None:
             continue
         existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
         missing_columns = {
-            name: definition
-            for name, definition in expected_columns.items()
-            if name not in existing_columns
+            name: definition for name, definition in expected_columns.items() if name not in existing_columns
         }
         if missing_columns:
             pending_columns[table_name] = missing_columns
@@ -138,9 +148,7 @@ def ensure_lesson_workflow_compat_columns() -> None:
             continue
         existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
         missing_columns = {
-            name: definition
-            for name, definition in expected_columns.items()
-            if name not in existing_columns
+            name: definition for name, definition in expected_columns.items() if name not in existing_columns
         }
         if missing_columns:
             pending_columns[table_name] = missing_columns
@@ -245,7 +253,11 @@ async def add_request_logging(request: Request, call_next):
     response.headers["X-Process-Time"] = f"{process_time_ms / 1000:.6f}"
     response.headers["X-Request-ID"] = request_id
 
-    log_method = logger.warning if response.status_code >= 400 or process_time_ms >= settings.LOG_SLOW_REQUEST_MS else logger.info
+    log_method = (
+        logger.warning
+        if response.status_code >= 400 or process_time_ms >= settings.LOG_SLOW_REQUEST_MS
+        else logger.info
+    )
     log_method(
         "request completed method=%s path=%s status=%s duration_ms=%.2f client=%s",
         request.method,
@@ -262,10 +274,7 @@ async def add_request_logging(request: Request, call_next):
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error("unhandled exception path=%s error=%s", request.url.path, exc, exc_info=True)
-    return JSONResponse(
-        status_code=500,
-        content={"detail": "Internal server error"}
-    )
+    return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
 # Routers
@@ -319,6 +328,7 @@ async def root():
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",

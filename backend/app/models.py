@@ -94,7 +94,9 @@ class LessonTranscript(Base):
 
     lesson = relationship("Lesson", back_populates="transcripts")
     recording = relationship("LessonAudioRecording", back_populates="transcripts")
-    generated_documents = relationship("LessonGeneratedDocument", back_populates="transcript", cascade="all, delete-orphan")
+    generated_documents = relationship(
+        "LessonGeneratedDocument", back_populates="transcript", cascade="all, delete-orphan"
+    )
 
 
 class LessonGeneratedDocument(Base):
@@ -136,6 +138,10 @@ class LessonProcessingJob(Base):
     document_ids = Column(JSON, nullable=False, default=list)
     error_message = Column(Text, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
+    worker_id = Column(String(255), nullable=True, index=True)
+    locked_at = Column(DateTime, nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True, index=True)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)
@@ -184,7 +190,9 @@ class Artifact(Base):
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     owner_id = Column(String(255), nullable=False, index=True)
     project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
-    compile_history_id = Column(String(36), ForeignKey("compile_history.id", ondelete="SET NULL"), nullable=True, index=True)
+    compile_history_id = Column(
+        String(36), ForeignKey("compile_history.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     kind = Column(String(50), nullable=False, index=True)
     format = Column(String(20), nullable=False)
     original_filename = Column(String(255), nullable=False)
@@ -233,6 +241,10 @@ class GenerationJob(Base):
     result_payload = Column(JSON, nullable=True)
     error_message = Column(Text, nullable=True)
     attempts = Column(Integer, nullable=False, default=0)
+    worker_id = Column(String(255), nullable=True, index=True)
+    locked_at = Column(DateTime, nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True, index=True)
+    next_attempt_at = Column(DateTime, nullable=True, index=True)
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=utc_now)

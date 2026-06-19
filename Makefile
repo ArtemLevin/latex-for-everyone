@@ -153,16 +153,16 @@ docker-logs: ## Follow docker compose logs.
 
 # ---- Workers ---------------------------------------------------------------
 .PHONY: generation-worker
-generation-worker: ## Run queued AI generation jobs for AI_GENERATION_JOB_EXECUTION_MODE=external.
-	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py
+generation-worker: ## Run queued AI generation jobs with the DB-backed worker.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker
 
 .PHONY: generation-worker-once
 generation-worker-once: ## Run at most one queued AI generation job and exit.
-	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --once
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker --once
 
 .PHONY: generation-worker-recover-stale
 generation-worker-recover-stale: ## Requeue stale running AI generation jobs and exit.
-	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --recover-stale-only
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker --recover-stale-only
 
 # ---- Cleanup ---------------------------------------------------------------
 .PHONY: clean

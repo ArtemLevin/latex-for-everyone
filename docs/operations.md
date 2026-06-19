@@ -32,7 +32,7 @@ summaries instead.
 |---------|--------------|-------------|
 | `429 Too Many Requests` from `/api/generation/*` | Per-client AI rate limit was exceeded. | Wait for `Retry-After`; do not add frontend auto-retry loops. If this happens during normal use, review duplicate submits, `AI_RATE_LIMIT_PER_MINUTE`, and whether `AI_REQUEST_CONTROL_BACKEND=redis` is needed for multi-replica deployments. |
 | `409` duplicate generation submit | Same in-flight request fingerprint is already running. | Wait for current job/poll result; use idempotency keys for safe client retries. |
-| Job stays `queued` | `AI_GENERATION_JOB_EXECUTION_MODE=external` but worker is not running, or worker cannot reach DB/provider. | Start `make generation-worker` or inspect worker process logs. Use `GET /api/generation/jobs/operator/status` for backlog. |
+| Job stays `queued` | `/api/generation/jobs` is enqueue-only and no generation worker is running, or the worker cannot reach DB/provider. | Start `make generation-worker` or inspect worker process logs. Use `GET /api/generation/jobs/operator/status` for backlog. |
 | Job stays `running` longer than expected | Provider call is slow, worker was interrupted, or stale recovery threshold is disabled/too high. | Check `run_duration_seconds`, worker logs and `/api/ready` `generation_jobs.stale_running`. If stale, run recovery below. |
 | `/api/ready` is `degraded` with `generation_jobs` error | Stale running generation jobs were detected. | Run `make generation-worker-recover-stale` or call `POST /api/generation/jobs/operator/recover-stale` for the current owner. |
 | `/api/ready` is `degraded` with `ai_request_control` error | Redis request-control backend is misconfigured or unreachable. | Check `AI_REQUEST_CONTROL_BACKEND`, `AI_REQUEST_CONTROL_REDIS_URL`, Redis network access and credentials; fall back to `memory` only for single-replica deployments. |
@@ -44,8 +44,8 @@ summaries instead.
 make generation-worker
 make generation-worker-once
 make generation-worker-recover-stale
-PYTHONPATH=backend python backend/scripts/run_generation_jobs.py --once --job-id <job-id>
-PYTHONPATH=backend python backend/scripts/run_generation_jobs.py --recover-stale-only --stale-after-seconds 600
+cd backend && PYTHONPATH=. python -m app.workers.generation_worker --once --job-id <job-id>
+cd backend && PYTHONPATH=. python -m app.workers.generation_worker --recover-stale-only --stale-after-seconds 600
 ```
 
 Recommended starting points:
@@ -95,13 +95,13 @@ Do not include full prompts, full source materials, full transcripts, generated 
 
 ## Deployment notes
 
-For external workers, run the web process and worker process separately. In
+Generation jobs are always enqueue-only, so run the web process and worker process separately. In
 systemd or Docker, configure process supervision to restart failed workers and
 alert on `/api/ready` degraded generation-job checks. A minimal deployment has:
 
 1. web process: FastAPI backend;
 2. frontend static server or same-origin static hosting;
-3. one or more `generation-worker` processes when `AI_GENERATION_JOB_EXECUTION_MODE=external`;
+3. one or more `generation-worker` processes for queued `/api/generation/jobs` work;
 4. scheduled `clean-artifacts-dry-run` reporting and a deliberate cleanup schedule;
 5. readiness probes that alert on `not_ready` immediately and on sustained `degraded` status.
 
@@ -131,8 +131,8 @@ After=network.target
 [Service]
 WorkingDirectory=/srv/latexed
 Environment=PYTHONPATH=/srv/latexed/backend
-Environment=AI_GENERATION_JOB_EXECUTION_MODE=external
-ExecStart=/srv/latexed/.venv/bin/python backend/scripts/run_generation_jobs.py --recover-stale --stale-after-seconds 900
+Environment=AI_GENERATION_JOB_STALE_AFTER_SECONDS=900
+ExecStart=/srv/latexed/.venv/bin/python -m app.workers.generation_worker --recover-stale --stale-after-seconds 900
 Restart=always
 RestartSec=5
 User=latexed
@@ -149,11 +149,11 @@ services:
   generation-worker:
     image: latexed-backend:latest
     command: >
-      python backend/scripts/run_generation_jobs.py
+      python -m app.workers.generation_worker
       --recover-stale
       --stale-after-seconds 900
     environment:
-      AI_GENERATION_JOB_EXECUTION_MODE: external
+      AI_GENERATION_JOB_STALE_AFTER_SECONDS: "900"
       DATABASE_URL: ${DATABASE_URL}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     volumes:
