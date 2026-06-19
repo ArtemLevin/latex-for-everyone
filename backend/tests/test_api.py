@@ -2376,6 +2376,114 @@ def test_frontend_generation_ui_contract():
     assert "window.open" not in preview_content
 
 
+def _generation_job_payload(project_id: str, *, materials: str = "Материалы для генерации") -> dict:
+    return {
+        "project_id": project_id,
+        "provider": "ollama",
+        "materials": materials,
+        "fields": {
+            "level": "ЕГЭ",
+            "language": "русский",
+            "content_source_mode": "materials_only",
+            "latex_mode": "safe",
+            "alpha_code": 1,
+            "beta_code": 1,
+            "gamma_code": 4,
+            "grade": "11 класс",
+            "subject": "математика",
+            "topic": "Квадратные уравнения",
+            "priority_method": "нейросеть выбирает самостоятельно по отношению к уровню и классу",
+            "graph_analytic": "по ситуации",
+        },
+    }
+
+
+def test_create_generation_job_queues_without_running_provider(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+
+    project_response = client.post("/api/projects/", json={"name": "Generation Job Project"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/jobs",
+        json=_generation_job_payload(project_id, materials="Уникальные материалы для queued job"),
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["id"]
+    assert data["project_id"] == project_id
+    assert data["status"] == "queued"
+    assert data["stage"] == "queued"
+    assert data["request_hash"]
+    assert data["prompt_hash"]
+    assert data["attempts"] == 0
+
+
+def test_create_generation_job_replays_existing_idempotency_key(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+
+    project_response = client.post("/api/projects/", json={"name": "Idempotent Generation Job Project"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    payload = _generation_job_payload(project_id, materials="Материалы для idempotency replay")
+    headers = {"Idempotency-Key": "generation-job-replay-1"}
+
+    first_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+    second_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    first = first_response.json()
+    second = second_response.json()
+    assert second["id"] == first["id"]
+    assert second["request_hash"] == first["request_hash"]
+    assert second["idempotency_key"] == "generation-job-replay-1"
+
+
+def test_generation_jobs_operator_status_returns_summary(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_STALE_AFTER_SECONDS", 60)
+
+    response = client.get("/api/generation/jobs/operator/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["execution_mode"] == "external"
+    assert data["stale_after_seconds"] == 60
+    assert data["counts"] == {
+        "queued": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "canceled": 0,
+    }
+    assert data["backlog"] == 0
+    assert data["stale_running"] == 0
+    assert data["stale_samples"] == []
+
+
+def test_generation_router_hotfix_artifacts_are_not_present():
+    source = (Path(__file__).resolve().parents[2] / "backend" / "app" / "routers" / "generation.py").read_text(
+        encoding="utf-8"
+    )
+    operator_status_source = source.split("@router.get(\"/jobs/operator/status\"", 1)[1].split(
+        "@router.post(\"/jobs/operator/recover-stale\"",
+        1,
+    )[0]
+
+    assert "create_job(\n            db,\n            job=job" not in source
+    assert "return [generation_job_service.to_response(job) for job in jobs]" not in operator_status_source
+
+
 def test_export_pdf_receives_frontend_content_payload(monkeypatch):
     from app.routers import export as export_router
 
@@ -3096,26 +3204,19 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     from app.schemas import GenerationTokenUsageResponse
     from app.services.token_counter import add_estimated_usage, estimate_token_count
 
-    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
-    generation_router.rate_limit_buckets.clear()
-    owner_headers = {"X-Latexed-User": "teacher-a"}
-    other_headers = {"X-Latexed-User": "teacher-b"}
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Scoped Prompt Project", "template": "article"},
-        headers=owner_headers,
-    )
-    project_id = project_response.json()["id"]
+    assert estimate_token_count(r"\section{Тема} x^2 + 1") == 10
 
-    response = client.post(
-        "/api/generation/prompt",
-        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
-        headers=other_headers,
+    usage = add_estimated_usage(
+        GenerationTokenUsageResponse(),
+        input_text="Промпт один",
+        output_text=r"\section{Ответ}",
     )
 
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Project not found"
-    assert generation_router.rate_limit_buckets == {}
+    assert usage.input_tokens == 2
+    assert usage.output_tokens == 5
+    assert usage.total_tokens == 7
+    assert usage.source == "estimated"
+
 
 def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
@@ -3958,6 +4059,7 @@ def test_generation_job_not_found_returns_404():
 
 
 def test_generation_history_records_provider_failure(monkeypatch):
+    from app.config import settings
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
@@ -4146,29 +4248,18 @@ def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     generation_router.rate_limit_buckets.clear()
 
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
-    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    from app.services import generation_orchestrator as orchestrator_module
-
-    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
-
     response = client.post(
-        "/api/generation/generate",
-        json={"fields": {"topic": "Safe mode", "latex_mode": "safe"}, "materials": "Сделать пособие."},
+        "/api/generation/jobs",
+        json={"fields": {"topic": "External mode"}, "materials": "Материал."},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     data = response.json()
-    assert len(prompts) == 1
-    assert len(compile_inputs) == 1
-    assert "Схема упрощена" in compile_inputs[0]
-    assert "tikzpicture" not in compile_inputs[0]
-    assert "Схема упрощена" in data["latex_code"]
-    assert "tikzpicture" not in data["latex_code"]
-    assert data["compile_check"]["success"] is True
-    assert data["compile_check"]["repaired"] is False
+    assert data["status"] == "queued"
+    assert data["stage"] == "queued"
+    assert data["attempts"] == 0
+    assert data["result"] is None
+    assert calls == 0
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
