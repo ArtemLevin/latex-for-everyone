@@ -2300,6 +2300,54 @@ def test_compile_queue_full_returns_503(monkeypatch):
     assert response.json()["detail"] == "Compile queue is full. Try again later."
 
 
+def test_compile_raw_rate_limit_returns_429(monkeypatch):
+    from app.config import settings
+    from app.routers import compile as compile_router
+
+    compile_router.compile_control.clear_rate_limits()
+    monkeypatch.setattr(settings, "COMPILE_RATE_LIMIT_PER_HOUR", 1)
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    payload = {
+        "content": r"\documentclass{article}\begin{document}Rate\end{document}",
+        "files": {},
+    }
+    first = client.post("/api/compile/raw", json=payload)
+    second = client.post("/api/compile/raw", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"].isdigit()
+    assert "Compile rate limit exceeded" in second.json()["detail"]
+    compile_router.compile_control.clear_rate_limits()
+
+
+def test_compile_queue_full_returns_503(monkeypatch):
+    from app.routers import compile as compile_router
+    from app.services.compile_control import CompileQueueFullError
+
+    async def fake_run_in_thread(*args, **kwargs):
+        raise CompileQueueFullError("Compile queue is full. Try again later.")
+
+    monkeypatch.setattr(compile_router.compile_control, "run_in_thread", fake_run_in_thread)
+    compile_router.compile_control.clear_rate_limits()
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Queued\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Compile queue is full. Try again later."
+
+
 def test_compile_project_uses_requested_main_file_name(monkeypatch):
     from app.routers import compile as compile_router
 
