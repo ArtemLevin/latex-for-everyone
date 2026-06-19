@@ -114,6 +114,11 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
+| `make lint` | Run Ruff lint checks for backend app and tests. |
+| `make format-check` | Check Ruff formatting for backend app and tests. |
+| `make format` | Format backend app and tests with Ruff. |
+| `make test-security` | Run focused security/upload/compile/generation regression tests. |
+| `make test-coverage` | Run backend tests with terminal coverage details for `backend/app`. |
 | `make frontend-e2e` | Run optional Playwright browser smoke tests for local preview, generation duplicate-submit guard, and lesson review/document controls. Skips when Playwright/browser binaries are unavailable. |
 | `make generation-worker` | Run the external AI generation worker loop for queued jobs. |
 | `make generation-worker-once` | Claim and run at most one queued AI generation job, useful for smoke tests and one-shot workers. |
@@ -578,8 +583,18 @@ Individual checks:
 ```bash
 make compileall
 make frontend-check
+make lint
+make format-check
+make test-security
+make test-coverage
 make test
 ```
+
+Quality gate expectations:
+
+- `make check` is the default pre-PR gate and runs Python syntax checks, frontend JavaScript syntax checks, Ruff lint, Ruff format check, and backend tests.
+- `make test-security` is a fast focused regression suite for security-sensitive auth, upload, compile, generation, and deployment-contract paths.
+- `make test-coverage` is intended for release and refactor work where maintainers need to inspect coverage movement before merging.
 
 Direct `uv` test invocation from the repository root also works because `pyproject.toml` configures the backend Python path:
 

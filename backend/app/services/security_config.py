@@ -37,6 +37,4 @@ def validate_security_settings() -> None:
     if _has_wildcard_allowed_hosts():
         raise SecurityConfigurationError("ALLOWED_HOSTS must not contain '*' in production deployments")
     if auth_mode == "local" and not settings.ALLOW_PRODUCTION_LOCAL_AUTH:
-        raise SecurityConfigurationError(
-            "AUTH_MODE=local in production requires ALLOW_PRODUCTION_LOCAL_AUTH=true"
-        )
+        raise SecurityConfigurationError("AUTH_MODE=local in production requires ALLOW_PRODUCTION_LOCAL_AUTH=true")
