@@ -105,6 +105,10 @@ Use the smallest relevant checks first:
 ```bash
 make frontend-check    # frontend/js changes
 make compileall        # Python syntax check
+make lint              # Ruff lint for backend app/tests
+make format-check      # Ruff formatting check for backend app/tests
+make test-security     # focused auth/upload/compile/generation regression checks
+make test-coverage     # backend coverage report for release/refactor confidence
 make test              # backend tests
 make check             # broad check when dependencies are available
 make latex-check       # TeX Live environment validation when compile/export work depends on it
@@ -162,3 +166,14 @@ Before finalizing:
 - Are tests/checks appropriate for changed files?
 - Are environment limitations explicit and not hidden?
 - Did you avoid introducing stale booking-domain examples?
+
+
+### CI quality gates
+
+Pull requests should keep the GitHub Actions workflow green across three independent gates:
+
+1. `backend-quality` installs the locked uv environment, runs `make compileall`, `make lint`, `make format-check`, and `make test`.
+2. `frontend-static` runs `make frontend-check` without requiring backend dependencies.
+3. `docker-build` verifies the backend container image can still be built after the quality gates pass.
+
+When a change touches security-sensitive flows from earlier hardening stages, prefer running `make test-security` locally before the full suite so failures point at the relevant regression area quickly.

@@ -225,6 +225,7 @@ class LatexCompileResult(BaseModel):
     error: Optional[str] = None
     compile_time: Optional[str] = None
     pdf_url: Optional[str] = None
+    pdf_filename: Optional[str] = None
 
 
 class CompileResponse(BaseModel):
