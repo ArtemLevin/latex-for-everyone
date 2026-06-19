@@ -29,8 +29,12 @@ class Settings(BaseSettings):
     ARTIFACT_TTL_SECONDS: int = 24 * 60 * 60
 
     # Security
+    DEPLOYMENT_ENV: str = "development"
+    AUTH_MODE: str = "local"  # local or trusted_proxy
     LOCAL_USER_ID: str = "local-teacher"
     TRUSTED_USER_HEADER: str = "X-Latexed-User"
+    TRUSTED_PROXY_IPS: list[str] = []
+    ALLOW_PRODUCTION_LOCAL_AUTH: bool = False
     SECRET_KEY: str = "change-me-in-production-please"
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days

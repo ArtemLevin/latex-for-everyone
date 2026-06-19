@@ -16,6 +16,7 @@ from app.routers import compile, export, files, generation, lessons, projects, p
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services import readiness
 from app.services.metrics import PROMETHEUS_CONTENT_TYPE, build_prometheus_metrics
+from app.services.security_config import validate_security_settings
 
 
 # Logging
@@ -178,6 +179,7 @@ def initialize_database() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    validate_security_settings()
     initialize_database()
     yield
 

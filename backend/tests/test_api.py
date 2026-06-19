@@ -39,6 +39,14 @@ def setup_db():
 client = TestClient(app)
 
 
+def enable_trusted_proxy_auth(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["testclient"])
+    monkeypatch.setattr(settings, "TRUSTED_USER_HEADER", "X-Latexed-User")
+
+
 def test_initialize_database_respects_auto_create_flag(monkeypatch):
     from app import main as main_module
     from app.config import settings
@@ -595,7 +603,8 @@ def test_delete_project():
     assert response.status_code == 404
 
 
-def test_project_ownership_uses_trusted_user_header():
+def test_project_ownership_uses_trusted_user_header(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     owner_headers = {"X-Latexed-User": "teacher-a"}
     other_headers = {"X-Latexed-User": "teacher-b"}
     create_response = client.post("/api/projects/", json={"name": "Scoped Project"}, headers=owner_headers)
@@ -608,11 +617,123 @@ def test_project_ownership_uses_trusted_user_header():
     assert client.get(f"/api/projects/{project['id']}", headers=other_headers).status_code == 404
 
 
-def test_blank_trusted_user_header_is_rejected():
+def test_blank_trusted_user_header_is_rejected(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     response = client.get("/api/projects/", headers={"X-Latexed-User": "   "})
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Invalid user identity"
+
+
+def test_local_auth_mode_ignores_spoofed_trusted_user_header(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "LOCAL_USER_ID", "local-teacher")
+
+    response = client.post(
+        "/api/projects/",
+        json={"name": "Local Auth Project"},
+        headers={"X-Latexed-User": "attacker"},
+    )
+
+    assert response.status_code == 201
+    assert response.json()["owner_id"] == "local-teacher"
+
+
+def test_trusted_proxy_auth_requires_identity_header(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+
+    response = client.get("/api/projects/")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Trusted proxy identity header is required"
+
+
+def test_trusted_proxy_auth_rejects_untrusted_client(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["192.0.2.10"])
+
+    response = client.get("/api/projects/", headers={"X-Latexed-User": "teacher-a"})
+
+    assert response.status_code == 403
+    assert response.json()["detail"] == "Trusted proxy identity is not allowed from this client"
+
+
+def test_security_config_rejects_unsafe_production_defaults(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "ALLOW_PRODUCTION_LOCAL_AUTH", True)
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["latexed.example.com"])
+    monkeypatch.setattr(settings, "SECRET_KEY", "change-me-in-production-please")
+
+    with pytest.raises(SecurityConfigurationError, match="SECRET_KEY"):
+        validate_security_settings()
+
+
+def test_security_config_rejects_wildcard_production_hosts(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "local")
+    monkeypatch.setattr(settings, "ALLOW_PRODUCTION_LOCAL_AUTH", True)
+    monkeypatch.setattr(settings, "SECRET_KEY", "not-default")
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["*"])
+
+    with pytest.raises(SecurityConfigurationError, match="ALLOWED_HOSTS"):
+        validate_security_settings()
+
+
+def test_security_config_requires_trusted_proxy_ips(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import SecurityConfigurationError, validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "development")
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", [])
+
+    with pytest.raises(SecurityConfigurationError, match="TRUSTED_PROXY_IPS"):
+        validate_security_settings()
+
+
+def test_security_config_accepts_hardened_trusted_proxy_production(monkeypatch):
+    from app.config import settings
+    from app.services.security_config import validate_security_settings
+
+    monkeypatch.setattr(settings, "DEPLOYMENT_ENV", "production")
+    monkeypatch.setattr(settings, "AUTH_MODE", "trusted_proxy")
+    monkeypatch.setattr(settings, "TRUSTED_PROXY_IPS", ["172.20.0.0/16"])
+    monkeypatch.setattr(settings, "TRUSTED_USER_HEADER", "X-Latexed-User")
+    monkeypatch.setattr(settings, "SECRET_KEY", "not-default")
+    monkeypatch.setattr(settings, "ALLOWED_HOSTS", ["latexed.example.com"])
+
+    validate_security_settings()
+
+
+def test_nginx_drops_trusted_user_header_by_default():
+    nginx_conf = (Path(__file__).resolve().parents[1] / "nginx" / "nginx.conf").read_text(encoding="utf-8")
+
+    assert 'proxy_set_header X-Latexed-User "";' in nginx_conf
+    assert "$http_x_latexed_user" not in nginx_conf
+
+
+def test_production_compose_declares_security_env():
+    compose = (Path(__file__).resolve().parents[1] / "docker-compose.prod.yml").read_text(encoding="utf-8")
+
+    for expected in [
+        "DEPLOYMENT_ENV=production",
+        "AUTH_MODE=${AUTH_MODE:-trusted_proxy}",
+        "TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}",
+        "ALLOWED_HOSTS=${ALLOWED_HOSTS}",
+        "ALLOW_PRODUCTION_LOCAL_AUTH=${ALLOW_PRODUCTION_LOCAL_AUTH:-false}",
+    ]:
+        assert expected in compose
 
 
 def create_test_pupil(display_name: str = "Николь") -> dict:
@@ -1453,7 +1574,8 @@ def test_create_file():
     assert data["name"] == "test.tex"
 
 
-def test_direct_file_access_respects_project_owner():
+def test_direct_file_access_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     owner_headers = {"X-Latexed-User": "teacher-a"}
     other_headers = {"X-Latexed-User": "teacher-b"}
     project_response = client.post("/api/projects/", json={"name": "Scoped File Project"}, headers=owner_headers)
@@ -2032,6 +2154,7 @@ def test_compile_project_uses_requested_main_file_name(monkeypatch):
 
 
 def test_compile_project_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import compile as compile_router
 
     called = False
@@ -2376,6 +2499,114 @@ def test_frontend_generation_ui_contract():
     assert "window.open" not in preview_content
 
 
+def _generation_job_payload(project_id: str, *, materials: str = "Материалы для генерации") -> dict:
+    return {
+        "project_id": project_id,
+        "provider": "ollama",
+        "materials": materials,
+        "fields": {
+            "level": "ЕГЭ",
+            "language": "русский",
+            "content_source_mode": "materials_only",
+            "latex_mode": "safe",
+            "alpha_code": 1,
+            "beta_code": 1,
+            "gamma_code": 4,
+            "grade": "11 класс",
+            "subject": "математика",
+            "topic": "Квадратные уравнения",
+            "priority_method": "нейросеть выбирает самостоятельно по отношению к уровню и классу",
+            "graph_analytic": "по ситуации",
+        },
+    }
+
+
+def test_create_generation_job_queues_without_running_provider(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+
+    project_response = client.post("/api/projects/", json={"name": "Generation Job Project"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        "/api/generation/jobs",
+        json=_generation_job_payload(project_id, materials="Уникальные материалы для queued job"),
+    )
+
+    assert response.status_code == 202
+    data = response.json()
+    assert data["id"]
+    assert data["project_id"] == project_id
+    assert data["status"] == "queued"
+    assert data["stage"] == "queued"
+    assert data["request_hash"]
+    assert data["prompt_hash"]
+    assert data["attempts"] == 0
+
+
+def test_create_generation_job_replays_existing_idempotency_key(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+
+    project_response = client.post("/api/projects/", json={"name": "Idempotent Generation Job Project"})
+    assert project_response.status_code == 201
+    project_id = project_response.json()["id"]
+
+    payload = _generation_job_payload(project_id, materials="Материалы для idempotency replay")
+    headers = {"Idempotency-Key": "generation-job-replay-1"}
+
+    first_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+    second_response = client.post("/api/generation/jobs", json=payload, headers=headers)
+
+    assert first_response.status_code == 202
+    assert second_response.status_code == 202
+    first = first_response.json()
+    second = second_response.json()
+    assert second["id"] == first["id"]
+    assert second["request_hash"] == first["request_hash"]
+    assert second["idempotency_key"] == "generation-job-replay-1"
+
+
+def test_generation_jobs_operator_status_returns_summary(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_EXECUTION_MODE", "external")
+    monkeypatch.setattr(settings, "AI_GENERATION_JOB_STALE_AFTER_SECONDS", 60)
+
+    response = client.get("/api/generation/jobs/operator/status")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["execution_mode"] == "external"
+    assert data["stale_after_seconds"] == 60
+    assert data["counts"] == {
+        "queued": 0,
+        "running": 0,
+        "completed": 0,
+        "failed": 0,
+        "canceled": 0,
+    }
+    assert data["backlog"] == 0
+    assert data["stale_running"] == 0
+    assert data["stale_samples"] == []
+
+
+def test_generation_router_hotfix_artifacts_are_not_present():
+    source = (Path(__file__).resolve().parents[2] / "backend" / "app" / "routers" / "generation.py").read_text(
+        encoding="utf-8"
+    )
+    operator_status_source = source.split("@router.get(\"/jobs/operator/status\"", 1)[1].split(
+        "@router.post(\"/jobs/operator/recover-stale\"",
+        1,
+    )[0]
+
+    assert "create_job(\n            db,\n            job=job" not in source
+    assert "return [generation_job_service.to_response(job) for job in jobs]" not in operator_status_source
+
+
 def test_export_pdf_receives_frontend_content_payload(monkeypatch):
     from app.routers import export as export_router
 
@@ -2473,6 +2704,7 @@ def test_export_tex_uses_frontend_content_payload(tmp_path, monkeypatch):
 
 
 def test_export_html_respects_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import export as export_router
 
     called = False
@@ -2799,6 +3031,7 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
 
 def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import generation as generation_router
 
     monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
@@ -2960,6 +3193,7 @@ def test_generation_prompt_rejects_unsupported_materials_control_characters():
 
 
 def test_generation_prompt_with_project_respects_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.routers import generation as generation_router
 
     monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
@@ -3096,26 +3330,19 @@ def test_estimated_token_counter_splits_text_and_latex_commands():
     from app.schemas import GenerationTokenUsageResponse
     from app.services.token_counter import add_estimated_usage, estimate_token_count
 
-    monkeypatch.setattr(generation_router.settings, "AI_RATE_LIMIT_PER_MINUTE", 1)
-    generation_router.rate_limit_buckets.clear()
-    owner_headers = {"X-Latexed-User": "teacher-a"}
-    other_headers = {"X-Latexed-User": "teacher-b"}
-    project_response = client.post(
-        "/api/projects/",
-        json={"name": "Scoped Prompt Project", "template": "article"},
-        headers=owner_headers,
-    )
-    project_id = project_response.json()["id"]
+    assert estimate_token_count(r"\section{Тема} x^2 + 1") == 10
 
-    response = client.post(
-        "/api/generation/prompt",
-        json={"project_id": project_id, "fields": {"topic": "Доступ"}, "materials": "Материалы."},
-        headers=other_headers,
+    usage = add_estimated_usage(
+        GenerationTokenUsageResponse(),
+        input_text="Промпт один",
+        output_text=r"\section{Ответ}",
     )
 
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Project not found"
-    assert generation_router.rate_limit_buckets == {}
+    assert usage.input_tokens == 2
+    assert usage.output_tokens == 5
+    assert usage.total_tokens == 7
+    assert usage.source == "estimated"
+
 
 def test_ai_generation_service_defaults_to_qwen25_3b_for_ollama(monkeypatch):
     from app.config import settings
@@ -3335,6 +3562,7 @@ def test_generation_history_records_success_and_supports_project_and_item_routes
 
 
 def test_generation_history_and_job_reads_respect_project_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3666,6 +3894,7 @@ def test_generation_worker_recovers_stale_running_job(monkeypatch):
 
 
 def test_generation_operator_status_and_recover_stale_are_owner_scoped(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from datetime import timedelta
     from app.config import settings
     from app.routers import generation as generation_router
@@ -3836,6 +4065,7 @@ def test_generation_job_persists_provider_failure(monkeypatch):
 
 
 def test_generation_jobs_can_be_listed_by_status_project_and_owner(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
     from app.config import settings
     from app.routers import generation as generation_router
 
@@ -3958,6 +4188,8 @@ def test_generation_job_not_found_returns_404():
 
 
 def test_generation_history_records_provider_failure(monkeypatch):
+    enable_trusted_proxy_auth(monkeypatch)
+    from app.config import settings
     from app.routers import generation as generation_router
 
     async def fake_generate(prompt, provider, model):
@@ -4146,29 +4378,18 @@ def test_generation_job_external_mode_leaves_job_queued_for_worker(monkeypatch):
     monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
     generation_router.rate_limit_buckets.clear()
 
-    monkeypatch.setattr(settings, "AI_COMPILE_CHECK_ENABLED", True)
-    monkeypatch.setattr(settings, "AI_REPAIR_ATTEMPTS", 1)
-    from app.services import generation_orchestrator as orchestrator_module
-
-    monkeypatch.setattr(orchestrator_module.shutil, "which", lambda compiler: "/usr/bin/pdflatex")
-    monkeypatch.setattr(generation_router.ai_generator, "generate", fake_generate)
-    monkeypatch.setattr(generation_router.generation_compiler, "compile", fake_compile)
-
     response = client.post(
-        "/api/generation/generate",
-        json={"fields": {"topic": "Safe mode", "latex_mode": "safe"}, "materials": "Сделать пособие."},
+        "/api/generation/jobs",
+        json={"fields": {"topic": "External mode"}, "materials": "Материал."},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 202
     data = response.json()
-    assert len(prompts) == 1
-    assert len(compile_inputs) == 1
-    assert "Схема упрощена" in compile_inputs[0]
-    assert "tikzpicture" not in compile_inputs[0]
-    assert "Схема упрощена" in data["latex_code"]
-    assert "tikzpicture" not in data["latex_code"]
-    assert data["compile_check"]["success"] is True
-    assert data["compile_check"]["repaired"] is False
+    assert data["status"] == "queued"
+    assert data["stage"] == "queued"
+    assert data["attempts"] == 0
+    assert data["result"] is None
+    assert calls == 0
 
 
 def test_generation_generate_timeout_returns_actionable_message(monkeypatch):
