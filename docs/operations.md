@@ -225,3 +225,29 @@ moving to a production database that can handle concurrent job claims.
 **Likely cause:** the proxy did not set the configured identity header, or the proxy IP/CIDR is missing from `TRUSTED_PROXY_IPS`.
 
 **Action:** verify the reverse proxy strips incoming `X-Latexed-User`, sets its own authenticated identity value, and connects from an address listed in `TRUSTED_PROXY_IPS`.
+
+## Upload and compile DoS protection runbook
+
+### File upload returns 413 or 422
+
+**Symptom:** project file upload returns `413 Payload Too Large` or `422 Unprocessable Entity`.
+
+**Likely cause:** a single upload exceeded `MAX_LATEX_UPLOAD_FILE_BYTES`, a multi-file upload exceeded `MAX_LATEX_UPLOAD_TOTAL_BYTES`/`MAX_LATEX_FILES`, the resulting project exceeded LaTeX character limits, or the uploaded text was not valid UTF-8.
+
+**Action:** ask the user to split the project into fewer/smaller LaTeX text files, remove binary assets from LaTeX upload flows, or raise limits deliberately after checking worker memory and database capacity. Do not raise `MAX_UPLOAD_SIZE` as a substitute for LaTeX-specific limits.
+
+### Compile returns 429
+
+**Symptom:** compile endpoints return `429 Too Many Requests` with a `Retry-After` header.
+
+**Likely cause:** the caller exceeded `COMPILE_RATE_LIMIT_PER_HOUR` for the owner/client key.
+
+**Action:** wait for the retry window, reduce frontend/manual retry frequency, or tune `COMPILE_RATE_LIMIT_PER_HOUR` for the deployment. Treat repeated 429s as a signal of abusive traffic or a stuck frontend retry loop.
+
+### Compile returns 503 queue full
+
+**Symptom:** compile endpoints return `503` with `Compile queue is full. Try again later.`
+
+**Likely cause:** all `COMPILE_CONCURRENCY_LIMIT` slots are occupied and no slot opened within `COMPILE_QUEUE_TIMEOUT_SECONDS`.
+
+**Action:** check running `pdflatex` processes and request volume, increase API replicas or `COMPILE_CONCURRENCY_LIMIT` only if CPU/memory allow it, and keep `COMPILE_TIMEOUT` bounded so stuck compiler processes do not exhaust capacity.

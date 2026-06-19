@@ -1617,6 +1617,114 @@ def test_create_file_rejects_unsafe_name():
     assert "Invalid LaTeX filename" in response.json()["detail"]
 
 
+def test_create_file_rejects_oversized_content(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILE_CHARS", 10)
+    project_response = client.post("/api/projects/", json={"name": "Oversized Create Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}",
+        json={"name": "too-large.tex", "content": "x" * 11},
+    )
+
+    assert response.status_code == 413
+    assert "too-large.tex" in response.json()["detail"]
+
+
+def test_update_file_rejects_project_total_limit(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_TOTAL_CHARS", 60)
+    project_response = client.post("/api/projects/", json={"name": "Total Limit Project", "template": "article"})
+    project_id = project_response.json()["id"]
+    main_file = client.get(f"/api/files/project/{project_id}").json()[0]
+
+    response = client.put(
+        f"/api/files/{main_file['id']}",
+        json={"content": "x" * 61},
+    )
+
+    assert response.status_code == 413
+    assert "LaTeX payload is too large" in response.json()["detail"]
+
+
+def test_upload_file_rejects_oversized_bytes_before_write(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_UPLOAD_FILE_BYTES", 5)
+    project_response = client.post("/api/projects/", json={"name": "Upload Size Project", "template": "article"})
+    project_id = project_response.json()["id"]
+    main_file = client.get(f"/api/files/project/{project_id}").json()[0]
+    original_content = main_file["content"]
+
+    response = client.post(
+        f"/api/files/{main_file['id']}/upload",
+        files={"file": ("main.tex", b"abcdef", "text/plain")},
+    )
+
+    assert response.status_code == 413
+    assert "exceeds 5 bytes" in response.json()["detail"]
+    unchanged = client.get(f"/api/files/{main_file['id']}").json()
+    assert unchanged["content"] == original_content
+
+
+def test_upload_file_rejects_invalid_utf8():
+    project_response = client.post("/api/projects/", json={"name": "Upload UTF Project", "template": "article"})
+    project_id = project_response.json()["id"]
+    main_file = client.get(f"/api/files/project/{project_id}").json()[0]
+
+    response = client.post(
+        f"/api/files/{main_file['id']}/upload",
+        files={"file": ("main.tex", b"\xff\xfe\x00", "text/plain")},
+    )
+
+    assert response.status_code == 422
+    assert "valid UTF-8" in response.json()["detail"]
+
+
+def test_upload_all_rejects_too_many_files(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_FILES", 1)
+    project_response = client.post("/api/projects/", json={"name": "Upload Count Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}/upload-all",
+        files=[
+            ("files", ("one.tex", b"one", "text/plain")),
+            ("files", ("two.tex", b"two", "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 413
+    assert "Too many uploaded files" in response.json()["detail"]
+
+
+def test_upload_all_rejects_total_bytes_and_is_atomic(monkeypatch):
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "MAX_LATEX_UPLOAD_TOTAL_BYTES", 5)
+    project_response = client.post("/api/projects/", json={"name": "Upload Total Project"})
+    project_id = project_response.json()["id"]
+
+    response = client.post(
+        f"/api/files/project/{project_id}/upload-all",
+        files=[
+            ("files", ("one.tex", b"123", "text/plain")),
+            ("files", ("two.tex", b"456", "text/plain")),
+        ],
+    )
+
+    assert response.status_code == 413
+    assert "total bytes" in response.json()["detail"]
+    file_names = {file["name"] for file in client.get(f"/api/files/project/{project_id}").json()}
+    assert "one.tex" not in file_names
+    assert "two.tex" not in file_names
+
+
 def test_file_service_keeps_single_main_file_invariant():
     project_response = client.post("/api/projects/", json={"name": "Main File Project"})
     project_id = project_response.json()["id"]
@@ -2084,6 +2192,7 @@ def test_pdf_generator_sanitizes_enumitem_list_true_before_pdflatex(monkeypatch,
 def test_compile_raw(monkeypatch):
     from app.routers import compile as compile_router
 
+    compile_router.compile_control.clear_rate_limits()
     content = r"""\documentclass{article}
 \begin{document}
 Hello World!
@@ -2111,9 +2220,58 @@ Hello World!
     assert data["pdf_url"] == "/api/compile/download/test.pdf"
 
 
+def test_compile_raw_rate_limit_returns_429(monkeypatch):
+    from app.config import settings
+    from app.routers import compile as compile_router
+
+    compile_router.compile_control.clear_rate_limits()
+    monkeypatch.setattr(settings, "COMPILE_RATE_LIMIT_PER_HOUR", 1)
+
+    def fake_compile(main_content, files, main_filename="main.tex"):
+        return {"status": "success", "output": "Compiled", "compile_time": "0.01s"}
+
+    monkeypatch.setattr(compile_router.compiler, "compile", fake_compile)
+
+    payload = {
+        "content": r"\documentclass{article}\begin{document}Rate\end{document}",
+        "files": {},
+    }
+    first = client.post("/api/compile/raw", json=payload)
+    second = client.post("/api/compile/raw", json=payload)
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["Retry-After"].isdigit()
+    assert "Compile rate limit exceeded" in second.json()["detail"]
+    compile_router.compile_control.clear_rate_limits()
+
+
+def test_compile_queue_full_returns_503(monkeypatch):
+    from app.routers import compile as compile_router
+    from app.services.compile_control import CompileQueueFullError
+
+    async def fake_run_in_thread(*args, **kwargs):
+        raise CompileQueueFullError("Compile queue is full. Try again later.")
+
+    monkeypatch.setattr(compile_router.compile_control, "run_in_thread", fake_run_in_thread)
+    compile_router.compile_control.clear_rate_limits()
+
+    response = client.post(
+        "/api/compile/raw",
+        json={
+            "content": r"\documentclass{article}\begin{document}Queued\end{document}",
+            "files": {},
+        },
+    )
+
+    assert response.status_code == 503
+    assert response.json()["detail"] == "Compile queue is full. Try again later."
+
+
 def test_compile_project_uses_requested_main_file_name(monkeypatch):
     from app.routers import compile as compile_router
 
+    compile_router.compile_control.clear_rate_limits()
     selected_content = r"\documentclass{article}\begin{document}Selected\end{document}"
 
     def fake_compile(main_content, files, main_filename="main.tex"):
@@ -2157,6 +2315,7 @@ def test_compile_project_respects_project_owner(monkeypatch):
     enable_trusted_proxy_auth(monkeypatch)
     from app.routers import compile as compile_router
 
+    compile_router.compile_control.clear_rate_limits()
     called = False
 
     def fake_compile(main_content, files, main_filename="main.tex"):

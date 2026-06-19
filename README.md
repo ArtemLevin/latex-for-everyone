@@ -373,6 +373,12 @@ Deprecated compatibility routes are still available for compile history:
 | `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; must be exact public/reverse-proxy hostnames when `DEPLOYMENT_ENV=production` |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
+| `COMPILE_CONCURRENCY_LIMIT` | `2` | Maximum concurrent `pdflatex` executions per API process |
+| `COMPILE_QUEUE_TIMEOUT_SECONDS` | `5` | How long a compile request may wait for a concurrency slot before returning `503` |
+| `COMPILE_RATE_LIMIT_PER_HOUR` | `100` | Per-owner/per-client compile requests allowed per hour; `0` disables the limit |
+| `MAX_LATEX_UPLOAD_FILE_BYTES` | `2097152` | Maximum bytes read for one uploaded LaTeX text file |
+| `MAX_LATEX_UPLOAD_TOTAL_BYTES` | `10485760` | Maximum aggregate bytes accepted by multi-file upload |
+| `UPLOAD_READ_CHUNK_BYTES` | `65536` | Chunk size used while reading uploads with bounds |
 | `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
 | `MAX_LATEX_FILES` | `100` | Maximum number of LaTeX project files accepted by compile/export payloads; set `0` to disable |
 | `MAX_LATEX_FILE_CHARS` | `500000` | Maximum characters allowed in a single LaTeX file for compile/export payloads; set `0` to disable |
