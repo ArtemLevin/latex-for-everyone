@@ -195,6 +195,41 @@ def prepare_project_compile_payload(
     return project, main_file_name, main_content, files
 
 
+def get_request_client(request: Request) -> str:
+    return request.client.host if request.client else "unknown"
+
+
+def enforce_compile_rate_limit(key: str) -> None:
+    try:
+        compile_control.check_rate_limit(key=key)
+    except CompileRateLimitError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Compile rate limit exceeded. Try again in {exc.retry_after_seconds} seconds.",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
+
+
+async def run_latex_compile_checked(
+    main_content: str,
+    files: dict[str, str],
+    *,
+    main_filename: str | None = None,
+) -> LatexCompileResult:
+    try:
+        if main_filename is None:
+            raw_result = await compile_control.run_in_thread(compiler.compile, main_content, files)
+        else:
+            raw_result = await compile_control.run_in_thread(
+                compiler.compile,
+                main_content,
+                files,
+                main_filename=main_filename,
+            )
+    except CompileQueueFullError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return LatexCompileResult.model_validate(raw_result)
+
 def enforce_compile_payload_limits(files: dict[str, str]) -> None:
     try:
         enforce_latex_file_policy(
