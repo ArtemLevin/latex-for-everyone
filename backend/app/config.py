@@ -25,15 +25,69 @@ class Settings(BaseSettings):
     MAX_LATEX_FILE_CHARS: int = 500_000
     MAX_LATEX_TOTAL_CHARS: int = 2_000_000
     MAX_COMPILER_OUTPUT_CHARS: int = 20_000
+    MAX_LATEX_UPLOAD_FILE_BYTES: int = 2 * 1024 * 1024
+    MAX_LATEX_UPLOAD_TOTAL_BYTES: int = 10 * 1024 * 1024
+    UPLOAD_READ_CHUNK_BYTES: int = 64 * 1024
+    COMPILE_CONCURRENCY_LIMIT: int = 2
+    COMPILE_QUEUE_TIMEOUT_SECONDS: int = 5
     LATEX_ALLOWED_EXTENSIONS: str = ".tex,.bib,.cls,.sty"
     ARTIFACT_TTL_SECONDS: int = 24 * 60 * 60
+    COMPILE_EXECUTION_MODE: str = "sandbox"  # sandbox or local_subprocess; production must use sandbox
+    COMPILE_JOB_EXECUTION_MODE: str = "worker"  # worker or inline_dev
+    COMPILE_WORKER_ID: Optional[str] = None
+    COMPILE_WORKER_IDLE_SLEEP_SECONDS: float = 1.0
+    COMPILE_JOB_STALE_AFTER_SECONDS: int = 900
+    COMPILE_SANDBOX_IMAGE: str = "latexed-latex-sandbox:latest"
+    COMPILE_SANDBOX_RUNTIME: str = "docker"
+    COMPILE_SANDBOX_NETWORK_DISABLED: bool = True
+    COMPILE_SANDBOX_MEMORY: str = "256m"
+    COMPILE_SANDBOX_CPUS: float = 1.0
+    COMPILE_SANDBOX_PIDS_LIMIT: int = 128
+    COMPILE_SANDBOX_TMPFS_SIZE: str = "64m"
+    COMPILE_SANDBOX_OUTPUT_SIZE_BYTES: int = 64 * 1024 * 1024
+    COMPILE_SANDBOX_TIMEOUT_SECONDS: int = 45
+    COMPILE_SANDBOX_UID: int = 10001
+    COMPILE_SANDBOX_GID: int = 10001
+    COMPILE_SANDBOX_READ_ONLY_ROOTFS: bool = True
+    COMPILE_SANDBOX_CAP_DROP_ALL: bool = True
+    COMPILE_SANDBOX_NO_NEW_PRIVILEGES: bool = True
+    COMPILE_SANDBOX_SECCOMP_PROFILE: str = "default"
+    COMPILE_SANDBOX_APPARMOR_PROFILE: Optional[str] = None
+    COMPILE_SANDBOX_OPENIN_ANY: str = "p"
+    COMPILE_SANDBOX_OPENOUT_ANY: str = "p"
+    COMPILE_SANDBOX_SHELL_ESCAPE: str = "disabled"
+    COMPILE_SANDBOX_ROOT: str = "/tmp/latexed_sandbox_compiles"
+    COMPILE_SANDBOX_KEEP_FAILED_WORKDIR: bool = False
+    COMPILE_SANDBOX_DEBUG_RETENTION_SECONDS: int = 3600
+    COMPILE_SYNC_ENDPOINT_ENABLED: bool = True
 
     # Security
+    DEPLOYMENT_ENV: str = "development"
+    AUTH_MODE: str = "local"  # local, password, or trusted_proxy
     LOCAL_USER_ID: str = "local-teacher"
     TRUSTED_USER_HEADER: str = "X-Latexed-User"
+    TRUSTED_PROXY_IPS: list[str] = []
+    ALLOW_PRODUCTION_LOCAL_AUTH: bool = False
     SECRET_KEY: str = "change-me-in-production-please"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REFRESH_TOKEN_ROTATION_ENABLED: bool = True
+    AUTH_COOKIE_MODE: bool = True
+    AUTH_COOKIE_SECURE: bool = False
+    AUTH_COOKIE_SAMESITE: str = "lax"
+    AUTH_ACCESS_COOKIE_NAME: str = "latexed_access"
+    AUTH_REFRESH_COOKIE_NAME: str = "latexed_refresh"
+    AUTH_PASSWORD_MIN_LENGTH: int = 10
+    AUTH_REGISTRATION_ENABLED: bool = False
+    AUTH_BOOTSTRAP_ADMIN_EMAIL: Optional[str] = None
+    AUTH_BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = None
+    AUTH_TOKEN_ISSUER: str = "latexed-api"
+    AUTH_TOKEN_AUDIENCE: str = "latexed-web"
+    AUTH_REFRESH_TOKEN_PEPPER: Optional[str] = None
+    AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
+    TRUSTED_PROXY_AUTO_PROVISION_USERS: bool = True
+    TRUSTED_PROXY_DEFAULT_ROLE: str = "teacher"
     # Keep local defaults permissive for development/TestClient; production deployments
     # should override this with the exact reverse-proxy and public hostnames.
     ALLOWED_HOSTS: list[str] = ["*"]
@@ -55,7 +109,7 @@ class Settings(BaseSettings):
 
     # Lesson audio/storage foundation
     LESSON_ARTIFACT_ROOT: Optional[str] = None
-    MAX_LESSON_AUDIO_SIZE: int = 1000 * 1024 * 1024   # 1000MB
+    MAX_LESSON_AUDIO_SIZE: int = 1000 * 1024 * 1024  # 1000MB
     LESSON_AUDIO_ALLOWED_CONTENT_TYPES: str = "audio/webm,audio/wav,audio/mpeg,audio/mp4,audio/ogg,audio/x-m4a"
     LESSON_AUDIO_ALLOWED_EXTENSIONS: str = ".webm,.wav,.mp3,.m4a,.ogg"
     LESSON_AUDIO_DURATION_PROBE_ENABLED: bool = True
@@ -80,9 +134,17 @@ class Settings(BaseSettings):
     # AI Generation
     AI_PROVIDER: str = "ollama"
     AI_GENERATION_TIMEOUT: int = 120_000
-    AI_GENERATION_JOB_EXECUTION_MODE: str = "inline"  # inline, background, or external worker
+    AI_GENERATION_JOB_EXECUTION_MODE: str = "external"  # deprecated for /jobs; jobs are always worker-run
+    AI_GENERATION_SYNC_ENDPOINT_ENABLED: bool = True
+    AI_GENERATION_JOB_WORKER_ENABLED: bool = True
+    AI_GENERATION_JOB_WORKER_ID: Optional[str] = None
+    AI_GENERATION_JOB_WORKER_CONCURRENCY: int = 1
+    AI_GENERATION_JOB_CLAIM_BATCH_SIZE: int = 1
+    AI_GENERATION_JOB_IDLE_SLEEP_SECONDS: float = 1.0
+    AI_GENERATION_JOB_POLL_INTERVAL_SECONDS: float = 1.0
+    AI_GENERATION_JOB_HEARTBEAT_SECONDS: int = 30
     AI_GENERATION_JOB_TIMEOUT_SECONDS: int = 0  # 0 disables persisted job timeout
-    AI_GENERATION_JOB_STALE_AFTER_SECONDS: int = 0  # 0 disables stale running-job recovery
+    AI_GENERATION_JOB_STALE_AFTER_SECONDS: int = 1800  # 0 disables stale running-job recovery
     AI_PROVIDER_STATUS_TIMEOUT: int = 10
     AI_RATE_LIMIT_PER_MINUTE: int = 20
     AI_REQUEST_CONTROL_BACKEND: str = "memory"  # memory or redis

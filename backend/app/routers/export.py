@@ -13,6 +13,17 @@ from app.services.artifact_paths import (
     export_root,
     resolve_artifact_download,
 )
+from app.services.artifact_service import (
+    ArtifactCreationError,
+    ArtifactExpiredError,
+    ArtifactMissingFileError,
+    ArtifactNotFoundError,
+    create_artifact_record,
+    find_authorized_artifact_by_storage_filename,
+    make_storage_filename,
+    mark_artifact_accessed,
+    safe_original_filename,
+)
 from app.services.latex_file_policy import LatexFilePolicyError, enforce_latex_file_policy, parse_allowed_extensions, validate_latex_filename
 from app.services.pdf_generator import PDFGenerator
 from app.services.payload_limits import PayloadLimitError, enforce_latex_payload_limits
@@ -24,6 +35,38 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 pdf_generator = PDFGenerator()
+
+
+def create_export_artifact(
+    db: Session,
+    *,
+    owner_id: str,
+    project_id: str,
+    format: str,
+    source_path,
+    original_filename: str,
+):
+    return create_artifact_record(
+        db,
+        owner_id=owner_id,
+        project_id=project_id,
+        kind="export",
+        format=format,
+        storage_root="export",
+        source_path=source_path,
+        original_filename=original_filename,
+        content_disposition_type="attachment",
+    )
+
+
+def file_response_for_artifact_download(db: Session, download):
+    mark_artifact_accessed(db, artifact=download.artifact)
+    return FileResponse(
+        path=str(download.target.path),
+        filename=download.artifact.original_filename,
+        media_type=download.artifact.media_type,
+        content_disposition_type=download.artifact.content_disposition_type,
+    )
 
 
 def enforce_export_payload_limits(files: dict[str, str]) -> None:
@@ -96,12 +139,27 @@ async def export_pdf(
         logger.error("export pdf produced unsafe filename project_id=%s filename=%s", request.project_id, result.filename)
         raise HTTPException(status_code=500, detail="PDF export produced an invalid artifact filename") from exc
 
-    logger.info("export pdf completed project_id=%s filename=%s size=%s", request.project_id, target.filename, result.size)
+    try:
+        artifact = create_export_artifact(
+            db,
+            owner_id=owner_id,
+            project_id=project.id,
+            format="pdf",
+            source_path=target.path,
+            original_filename=safe_original_filename(f"{project.name}.pdf", format="pdf"),
+        )
+        db.commit()
+    except ArtifactCreationError as exc:
+        db.rollback()
+        logger.exception("export pdf artifact creation failed project_id=%s", project.id)
+        raise HTTPException(status_code=500, detail="PDF export artifact could not be registered") from exc
+
+    logger.info("export pdf completed project_id=%s artifact_id=%s size=%s", request.project_id, artifact.id, artifact.size_bytes)
     return ExportResponse(
-        url=f"/api/export/download/{target.filename}",
-        filename=target.filename,
+        url=artifact.download_url,
+        filename=artifact.original_filename,
         format="pdf",
-        size=result.size,
+        size=artifact.size_bytes,
     )
 
 
@@ -141,18 +199,34 @@ async def export_html(
         trusted_roots=(output_dir,),
     )
 
-    filename = f"{project.id}.html"
-    filepath = resolve_artifact_download("export", filename).path
+    storage_filename = make_storage_filename("html")
+    filepath = resolve_artifact_download("export", storage_filename).path
 
     filepath.write_text(html_content, encoding="utf-8")
 
-    size = filepath.stat().st_size
-    logger.info("export html completed project_id=%s filename=%s size=%s", request.project_id, filename, size)
+    try:
+        artifact = create_export_artifact(
+            db,
+            owner_id=owner_id,
+            project_id=project.id,
+            format="html",
+            source_path=filepath,
+            original_filename=safe_original_filename(f"{project.name}.html", format="html"),
+        )
+        db.commit()
+    except ArtifactCreationError as exc:
+        db.rollback()
+        if filepath.exists():
+            filepath.unlink()
+        logger.exception("export html artifact creation failed project_id=%s", project.id)
+        raise HTTPException(status_code=500, detail="HTML export artifact could not be registered") from exc
+
+    logger.info("export html completed project_id=%s artifact_id=%s size=%s", request.project_id, artifact.id, artifact.size_bytes)
     return ExportResponse(
-        url=f"/api/export/download/{filename}",
-        filename=filename,
+        url=artifact.download_url,
+        filename=artifact.original_filename,
         format="html",
-        size=size,
+        size=artifact.size_bytes,
     )
 
 
@@ -188,40 +262,65 @@ async def export_tex(
         trusted_roots=(output_dir,),
     )
 
-    filename = f"{project.id}.zip"
-    filepath = resolve_artifact_download("export", filename).path
+    storage_filename = make_storage_filename("tex_zip")
+    filepath = resolve_artifact_download("export", storage_filename).path
 
     with ZipFile(filepath, "w") as zf:
         for name, content in files.items():
             zf.writestr(validate_export_entry_name(name), content)
 
-    size = filepath.stat().st_size
-    logger.info("export tex completed project_id=%s filename=%s files=%s size=%s", request.project_id, filename, len(files), size)
+    try:
+        artifact = create_export_artifact(
+            db,
+            owner_id=owner_id,
+            project_id=project.id,
+            format="tex_zip",
+            source_path=filepath,
+            original_filename=safe_original_filename(f"{project.name}.zip", format="tex_zip"),
+        )
+        db.commit()
+    except ArtifactCreationError as exc:
+        db.rollback()
+        if filepath.exists():
+            filepath.unlink()
+        logger.exception("export tex artifact creation failed project_id=%s", project.id)
+        raise HTTPException(status_code=500, detail="TEX export artifact could not be registered") from exc
+
+    logger.info("export tex completed project_id=%s artifact_id=%s files=%s size=%s", request.project_id, artifact.id, len(files), artifact.size_bytes)
     return ExportResponse(
-        url=f"/api/export/download/{filename}",
-        filename=filename,
+        url=artifact.download_url,
+        filename=artifact.original_filename,
         format="tex",
-        size=size,
+        size=artifact.size_bytes,
     )
 
 
-@router.get("/download/{filename}")
-async def download_export(filename: str):
-    logger.info("export download requested filename=%s", filename)
+@router.get("/download/{filename}", deprecated=True)
+async def download_export(
+    filename: str,
+    owner_id: str = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    logger.info("legacy export download requested filename=%s owner_id=%s", filename, owner_id)
     try:
-        target = resolve_artifact_download("export", filename)
+        resolve_artifact_download("export", filename)
+        download = find_authorized_artifact_by_storage_filename(
+            db,
+            owner_id=owner_id,
+            kind="export",
+            storage_filename=filename,
+        )
     except UnsupportedArtifactTypeError as exc:
         raise HTTPException(status_code=400, detail="Unsupported export file type") from exc
     except ArtifactPathError as exc:
         raise HTTPException(status_code=400, detail="Invalid export filename") from exc
+    except ArtifactExpiredError as exc:
+        db.commit()
+        raise HTTPException(status_code=410, detail="Artifact expired") from exc
+    except ArtifactMissingFileError as exc:
+        db.commit()
+        raise HTTPException(status_code=404, detail="Artifact file not found") from exc
+    except ArtifactNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="File not found") from exc
 
-    if not target.path.is_file():
-        logger.warning("export download missing filename=%s path=%s", filename, target.path)
-        raise HTTPException(status_code=404, detail="File not found")
-
-    logger.info("export download served filename=%s media_type=%s size=%s", filename, target.media_type, target.path.stat().st_size)
-    return FileResponse(
-        path=str(target.path),
-        filename=target.filename,
-        media_type=target.media_type,
-    )
+    return file_response_for_artifact_download(db, download)

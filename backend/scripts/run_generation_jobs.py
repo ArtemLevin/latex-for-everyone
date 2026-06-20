@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run queued Latexed AI generation jobs.
+"""Compatibility wrapper for running queued Latexed AI generation jobs.
 
-The API can be configured with AI_GENERATION_JOB_EXECUTION_MODE=external to
-persist jobs without running provider calls in the web process. This command is
-the small worker entrypoint for that mode.
+The canonical entrypoint is ``python -m app.workers.generation_worker``. The
+``/api/generation/jobs`` API always persists queued jobs without running
+provider calls in the web process; this script remains for existing runbooks.
 """
 import argparse
 import asyncio

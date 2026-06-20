@@ -3,7 +3,44 @@
 
 set -e
 
+required_env() {
+    local name="$1"
+    if [ -z "${!name:-}" ]; then
+        echo "❌ $name is required for production deployment"
+        exit 1
+    fi
+}
+
+validate_security_env() {
+    required_env SECRET_KEY
+    required_env ALLOWED_HOSTS
+
+    if [ "$SECRET_KEY" = "change-me-in-production-please" ]; then
+        echo "❌ SECRET_KEY must be changed before production deployment"
+        exit 1
+    fi
+
+    if [ "$ALLOWED_HOSTS" = '["*"]' ] || [ "$ALLOWED_HOSTS" = "*" ]; then
+        echo "❌ ALLOWED_HOSTS must list exact production hostnames"
+        exit 1
+    fi
+
+    local auth_mode="${AUTH_MODE:-trusted_proxy}"
+    if [ "$auth_mode" = "trusted_proxy" ]; then
+        required_env TRUSTED_PROXY_IPS
+    elif [ "$auth_mode" = "local" ]; then
+        if [ "${ALLOW_PRODUCTION_LOCAL_AUTH:-false}" != "true" ]; then
+            echo "❌ AUTH_MODE=local in production requires ALLOW_PRODUCTION_LOCAL_AUTH=true"
+            exit 1
+        fi
+    else
+        echo "❌ AUTH_MODE must be local or trusted_proxy"
+        exit 1
+    fi
+}
+
 echo "🚀 Deploying Latexed Backend..."
+validate_security_env
 
 # Check Docker
 if ! command -v docker &> /dev/null; then

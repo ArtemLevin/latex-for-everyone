@@ -1,12 +1,21 @@
     // ==================== BACKEND API ====================
     async function apiRequest(path, options = {}) {
-        const response = await fetch(`${API_BASE_URL}${path}`, {
+        const requestOptions = {
             ...options,
+            credentials: 'include',
             headers: {
                 'Content-Type': 'application/json',
                 ...(options.headers || {})
             }
-        });
+        };
+        let response = await fetch(`${API_BASE_URL}${path}`, requestOptions);
+
+        if (response.status === 401 && !options.skipAuthRefresh && path !== '/auth/refresh' && path !== '/auth/login') {
+            const refreshed = await tryRefreshAuthSession();
+            if (refreshed) {
+                response = await fetch(`${API_BASE_URL}${path}`, requestOptions);
+            }
+        }
 
         if (!response.ok) {
             let message = `HTTP ${response.status}`;
@@ -24,6 +33,21 @@
 
         if (response.status === 204) return null;
         return response.json();
+    }
+
+    async function tryRefreshAuthSession() {
+        try {
+            const response = await fetch(`${API_BASE_URL}/auth/refresh`, {
+                method: 'POST',
+                credentials: 'include',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({})
+            });
+            return response.ok;
+        } catch (error) {
+            showToast('Сессия истекла. Выполните вход заново.', 'error');
+            return false;
+        }
     }
 
     function resolveApiUrl(url) {

@@ -90,7 +90,17 @@ class LessonCreate(BaseModel):
 class LessonUpdate(BaseModel):
     topic: Optional[str] = Field(default=None, min_length=1, max_length=255)
     lesson_date: Optional[datetime] = None
-    status: Optional[Literal["draft", "recording_uploaded", "transcribing", "transcript_ready", "generating_documents", "completed", "failed"]] = None
+    status: Optional[
+        Literal[
+            "draft",
+            "recording_uploaded",
+            "transcribing",
+            "transcript_ready",
+            "generating_documents",
+            "completed",
+            "failed",
+        ]
+    ] = None
 
 
 class LessonResponse(BaseModel):
@@ -225,6 +235,7 @@ class LatexCompileResult(BaseModel):
     error: Optional[str] = None
     compile_time: Optional[str] = None
     pdf_url: Optional[str] = None
+    pdf_filename: Optional[str] = None
 
 
 class CompileResponse(BaseModel):
@@ -234,6 +245,29 @@ class CompileResponse(BaseModel):
     compile_time: Optional[str] = None
     pdf_url: Optional[str] = None
     history_id: Optional[str] = None
+
+
+class CompileJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    history_id: Optional[str] = None
+    compile_history_id: Optional[str] = None
+    status: str
+    stage: str
+    pdf_url: Optional[str] = None
+    error: Optional[str] = None
+    output: Optional[str] = None
+    compile_time: Optional[str] = None
+    pdf_artifact_id: Optional[str] = None
+    attempts: int = 0
+    cancel_requested: bool = False
+    queued_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class CompileHistoryResponse(BaseModel):
@@ -374,6 +408,10 @@ class GenerationJobResponse(BaseModel):
     result: Optional[GenerationResultResponse] = None
     error_message: Optional[str] = None
     attempts: int
+    worker_id: Optional[str] = None
+    locked_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
+    next_attempt_at: Optional[datetime] = None
     queue_wait_seconds: Optional[float] = None
     run_duration_seconds: Optional[float] = None
     total_duration_seconds: Optional[float] = None
@@ -397,6 +435,9 @@ class GenerationJobStaleSampleResponse(BaseModel):
     status: str
     stage: str
     attempts: int
+    worker_id: Optional[str] = None
+    locked_at: Optional[datetime] = None
+    heartbeat_at: Optional[datetime] = None
     started_at: Optional[datetime] = None
     updated_at: datetime
 
@@ -494,3 +535,38 @@ class PaginationResponse(BaseModel):
     page: int
     per_page: int
     items: list[Any] = Field(default_factory=list)
+
+
+class UserPublic(BaseModel):
+    id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: str
+    auth_provider: str
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    password: str = Field(..., min_length=1, max_length=1024)
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    password: str = Field(..., min_length=1, max_length=1024)
+    display_name: Optional[str] = Field(default=None, max_length=255)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    user: Optional[UserPublic] = None
+
+
+class LogoutResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    revoked_sessions: int = 0

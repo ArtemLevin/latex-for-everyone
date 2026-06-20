@@ -3,7 +3,7 @@ import logging
 import uuid
 from datetime import timedelta
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.models import GenerationJob
@@ -69,7 +69,6 @@ class GenerationJobService:
         )
         return job
 
-
     def list_jobs(
         self,
         db: Session,
@@ -104,18 +103,39 @@ class GenerationJobService:
             .first()
         )
 
+    def get_active_job_by_request_hash(self, db: Session, *, owner_id: str, request_hash: str) -> GenerationJob | None:
+        return (
+            db.query(GenerationJob)
+            .filter(
+                GenerationJob.owner_id == owner_id,
+                GenerationJob.request_hash == request_hash,
+                GenerationJob.status.in_({"queued", "running"}),
+            )
+            .order_by(GenerationJob.created_at.desc())
+            .first()
+        )
+
     def get_next_queued_job(self, db: Session, *, owner_id: str | None = None) -> GenerationJob | None:
         query = db.query(GenerationJob).filter(GenerationJob.status == "queued")
         if owner_id is not None:
             query = query.filter(GenerationJob.owner_id == owner_id)
         return query.order_by(GenerationJob.created_at.asc()).first()
 
-    def heartbeat_job(self, db: Session, job: GenerationJob) -> GenerationJob:
-        job.updated_at = utc_now()
+    def heartbeat_job(self, db: Session, job: GenerationJob, *, worker_id: str | None = None) -> GenerationJob:
+        job.heartbeat_at = utc_now()
+        job.updated_at = job.heartbeat_at
+        if worker_id is not None:
+            job.worker_id = worker_id
         db.add(job)
         db.commit()
         db.refresh(job)
-        logger.debug("generation job heartbeat job_id=%s status=%s stage=%s", job.id, job.status, job.stage)
+        logger.debug(
+            "generation job heartbeat job_id=%s status=%s stage=%s worker_id=%s",
+            job.id,
+            job.status,
+            job.stage,
+            job.worker_id or "-",
+        )
         return job
 
     def recover_stale_running_jobs(
@@ -132,7 +152,10 @@ class GenerationJobService:
         cutoff = utc_now() - timedelta(seconds=stale_after_seconds)
         query = db.query(GenerationJob).filter(
             GenerationJob.status == "running",
-            GenerationJob.updated_at < cutoff,
+            or_(
+                GenerationJob.heartbeat_at < cutoff,
+                GenerationJob.heartbeat_at.is_(None) & (GenerationJob.updated_at < cutoff),
+            ),
         )
         if owner_id is not None:
             query = query.filter(GenerationJob.owner_id == owner_id)
@@ -144,6 +167,9 @@ class GenerationJobService:
             job.status = "queued"
             job.stage = "queued"
             job.error_message = "Recovered from stale running state; queued for worker retry."
+            job.worker_id = None
+            job.locked_at = None
+            job.heartbeat_at = None
             job.started_at = None
             job.finished_at = None
             job.updated_at = utc_now()
@@ -190,14 +216,13 @@ class GenerationJobService:
             stale_query = db.query(GenerationJob).filter(
                 GenerationJob.owner_id == owner_id,
                 GenerationJob.status == "running",
-                GenerationJob.updated_at < cutoff,
+                or_(
+                    GenerationJob.heartbeat_at < cutoff,
+                    GenerationJob.heartbeat_at.is_(None) & (GenerationJob.updated_at < cutoff),
+                ),
             )
             stale_running = stale_query.count()
-            stale_samples = (
-                stale_query.order_by(GenerationJob.updated_at.asc())
-                .limit(stale_sample_limit)
-                .all()
-            )
+            stale_samples = stale_query.order_by(GenerationJob.updated_at.asc()).limit(stale_sample_limit).all()
         return {
             "counts": normalized_counts,
             "backlog": normalized_counts["queued"] + normalized_counts["running"],
@@ -216,12 +241,14 @@ class GenerationJobService:
         owner_id: str,
         orchestrator: GenerationOrchestrator,
         timeout_seconds: int = 0,
+        mark_running: bool = True,
     ) -> GenerationJob:
         if job.status in TERMINAL_GENERATION_JOB_STATUSES:
             logger.info("generation job run skipped terminal job_id=%s status=%s", job.id, job.status)
             return job
 
-        self._mark_running(db, job, stage="generating")
+        if mark_running:
+            self._mark_running(db, job, stage="generating")
         try:
             generate_coro = orchestrator.generate(
                 db=db,
@@ -250,8 +277,6 @@ class GenerationJobService:
         self._mark_completed(db, job, result)
         return job
 
-
-
     def retry_job(self, db: Session, *, job_id: str, owner_id: str) -> GenerationJob:
         job = self.get_job(db, job_id=job_id, owner_id=owner_id)
         if job.status not in {"failed", "canceled"}:
@@ -260,6 +285,10 @@ class GenerationJobService:
         job.stage = "queued"
         job.result_payload = None
         job.error_message = None
+        job.worker_id = None
+        job.locked_at = None
+        job.heartbeat_at = None
+        job.next_attempt_at = None
         job.started_at = None
         job.finished_at = None
         job.updated_at = utc_now()
@@ -308,6 +337,10 @@ class GenerationJobService:
             result=result,
             error_message=job.error_message,
             attempts=job.attempts,
+            worker_id=job.worker_id,
+            locked_at=job.locked_at,
+            heartbeat_at=job.heartbeat_at,
+            next_attempt_at=job.next_attempt_at,
             queue_wait_seconds=self._seconds_between(job.created_at, job.started_at),
             run_duration_seconds=self._seconds_between(job.started_at, job.finished_at),
             total_duration_seconds=self._seconds_between(job.created_at, job.finished_at),
@@ -322,7 +355,9 @@ class GenerationJobService:
         job.stage = stage
         job.attempts += 1
         job.started_at = job.started_at or utc_now()
-        job.updated_at = utc_now()
+        job.locked_at = job.locked_at or job.started_at
+        job.heartbeat_at = utc_now()
+        job.updated_at = job.heartbeat_at
         db.add(job)
         db.commit()
         db.refresh(job)

@@ -26,13 +26,29 @@ summaries instead.
 | `degraded` | Core API can serve, but compile, LaTeX packages, transcription or generation-worker checks need attention. | Check the failing section in `/api/ready` and the symptom tables below. |
 | `not_ready` | Required DB or artifact directories are unavailable. | Do not send user traffic until DB/artifact storage is fixed. |
 
+## Authentication operations
+
+- Use `AUTH_MODE=password` for first-class SaaS login. Bootstrap users with `make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin` or `cd backend && PYTHONPATH=. python -m app.cli.create_user --email admin@example.com --password ... --role admin`.
+- In production password auth, set a non-default `SECRET_KEY`, set `AUTH_REFRESH_TOKEN_PEPPER`, keep `ACCESS_TOKEN_EXPIRE_MINUTES <= 60`, keep `REFRESH_TOKEN_EXPIRE_DAYS <= 90`, and set `AUTH_COOKIE_SECURE=true` when cookie mode is enabled.
+- Refresh tokens are opaque and stored only as hashes; rotation marks the old session as `rotated`, and reuse marks the refresh family as `compromised`.
+- Use `POST /api/auth/logout` for the current session, `POST /api/auth/logout-all` for all sessions, and `GET /api/auth/me` to verify the active user. Audit events are stored in `auth_audit_logs` without raw passwords or tokens.
+- `AUTH_MODE=local` remains for development; `AUTH_MODE=trusted_proxy` remains for enterprise reverse-proxy deployments and can auto-provision proxy identities as `User` rows while preserving legacy owner ids.
+
+## Sandboxed LaTeX compile workers
+
+- `POST /api/compile/jobs` enqueues compilation and returns `202 Accepted`; poll `GET /api/compile/jobs/{job_id}`.
+- Run `make compile-worker` (or `python -m app.workers.compile_worker`) to claim queued jobs and publish successful PDFs through owner-scoped artifacts.
+- Production must use `COMPILE_EXECUTION_MODE=sandbox`; `local_subprocess` is only for local development and tests.
+- The Docker sandbox runs without network, as a non-root user, with read-only rootfs, memory/CPU/PID limits, `cap_drop=ALL`, `no-new-privileges`, Docker default seccomp and `pdflatex -no-shell-escape`.
+- Do not mount `/var/run/docker.sock` into the API container; if Docker is used, only the compile worker should have runtime access, preferably on an isolated/rootless host.
+
 ## AI generation and job workers
 
 | Symptom | Likely cause | Safe action |
 |---------|--------------|-------------|
 | `429 Too Many Requests` from `/api/generation/*` | Per-client AI rate limit was exceeded. | Wait for `Retry-After`; do not add frontend auto-retry loops. If this happens during normal use, review duplicate submits, `AI_RATE_LIMIT_PER_MINUTE`, and whether `AI_REQUEST_CONTROL_BACKEND=redis` is needed for multi-replica deployments. |
 | `409` duplicate generation submit | Same in-flight request fingerprint is already running. | Wait for current job/poll result; use idempotency keys for safe client retries. |
-| Job stays `queued` | `AI_GENERATION_JOB_EXECUTION_MODE=external` but worker is not running, or worker cannot reach DB/provider. | Start `make generation-worker` or inspect worker process logs. Use `GET /api/generation/jobs/operator/status` for backlog. |
+| Job stays `queued` | `/api/generation/jobs` is enqueue-only and no generation worker is running, or the worker cannot reach DB/provider. | Start `make generation-worker` or inspect worker process logs. Use `GET /api/generation/jobs/operator/status` for backlog. |
 | Job stays `running` longer than expected | Provider call is slow, worker was interrupted, or stale recovery threshold is disabled/too high. | Check `run_duration_seconds`, worker logs and `/api/ready` `generation_jobs.stale_running`. If stale, run recovery below. |
 | `/api/ready` is `degraded` with `generation_jobs` error | Stale running generation jobs were detected. | Run `make generation-worker-recover-stale` or call `POST /api/generation/jobs/operator/recover-stale` for the current owner. |
 | `/api/ready` is `degraded` with `ai_request_control` error | Redis request-control backend is misconfigured or unreachable. | Check `AI_REQUEST_CONTROL_BACKEND`, `AI_REQUEST_CONTROL_REDIS_URL`, Redis network access and credentials; fall back to `memory` only for single-replica deployments. |
@@ -44,8 +60,8 @@ summaries instead.
 make generation-worker
 make generation-worker-once
 make generation-worker-recover-stale
-PYTHONPATH=backend python backend/scripts/run_generation_jobs.py --once --job-id <job-id>
-PYTHONPATH=backend python backend/scripts/run_generation_jobs.py --recover-stale-only --stale-after-seconds 600
+cd backend && PYTHONPATH=. python -m app.workers.generation_worker --once --job-id <job-id>
+cd backend && PYTHONPATH=. python -m app.workers.generation_worker --recover-stale-only --stale-after-seconds 600
 ```
 
 Recommended starting points:
@@ -95,13 +111,13 @@ Do not include full prompts, full source materials, full transcripts, generated 
 
 ## Deployment notes
 
-For external workers, run the web process and worker process separately. In
+Generation jobs are always enqueue-only, so run the web process and worker process separately. In
 systemd or Docker, configure process supervision to restart failed workers and
 alert on `/api/ready` degraded generation-job checks. A minimal deployment has:
 
 1. web process: FastAPI backend;
 2. frontend static server or same-origin static hosting;
-3. one or more `generation-worker` processes when `AI_GENERATION_JOB_EXECUTION_MODE=external`;
+3. one or more `generation-worker` processes for queued `/api/generation/jobs` work;
 4. scheduled `clean-artifacts-dry-run` reporting and a deliberate cleanup schedule;
 5. readiness probes that alert on `not_ready` immediately and on sustained `degraded` status.
 
@@ -131,8 +147,8 @@ After=network.target
 [Service]
 WorkingDirectory=/srv/latexed
 Environment=PYTHONPATH=/srv/latexed/backend
-Environment=AI_GENERATION_JOB_EXECUTION_MODE=external
-ExecStart=/srv/latexed/.venv/bin/python backend/scripts/run_generation_jobs.py --recover-stale --stale-after-seconds 900
+Environment=AI_GENERATION_JOB_STALE_AFTER_SECONDS=900
+ExecStart=/srv/latexed/.venv/bin/python -m app.workers.generation_worker --recover-stale --stale-after-seconds 900
 Restart=always
 RestartSec=5
 User=latexed
@@ -149,11 +165,11 @@ services:
   generation-worker:
     image: latexed-backend:latest
     command: >
-      python backend/scripts/run_generation_jobs.py
+      python -m app.workers.generation_worker
       --recover-stale
       --stale-after-seconds 900
     environment:
-      AI_GENERATION_JOB_EXECUTION_MODE: external
+      AI_GENERATION_JOB_STALE_AFTER_SECONDS: "900"
       DATABASE_URL: ${DATABASE_URL}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
     volumes:
@@ -199,3 +215,66 @@ moving to a production database that can handle concurrent job claims.
 - Generation jobs are durable in the database, but this is not yet a full queue
   system with priorities and dead-letter routing.
 - `/api/metrics` exposes core operational gauges/counters; add deployment-specific dashboards and alert routing before relying on dashboard-only alerts.
+
+## Security configuration runbook
+
+### Startup fails with an unsafe security configuration
+
+**Symptom:** the API exits during startup with a `SecurityConfigurationError`.
+
+**Likely cause:** `DEPLOYMENT_ENV=production` is set while `SECRET_KEY` still uses the development default, `ALLOWED_HOSTS` contains `*`, `AUTH_MODE=trusted_proxy` has no `TRUSTED_PROXY_IPS`, `AUTH_MODE=local` was not explicitly allowed with `ALLOW_PRODUCTION_LOCAL_AUTH=true`, or `AUTH_MODE=password` is missing production-safe token/cookie settings.
+
+**Action:** set a unique `SECRET_KEY`, configure exact public/reverse-proxy hostnames in `ALLOWED_HOSTS`, and choose one explicit auth mode. For SaaS password auth, use `AUTH_MODE=password`, set `AUTH_REFRESH_TOKEN_PEPPER`, keep short access-token lifetimes, and enable secure cookies. For proxy auth, use `AUTH_MODE=trusted_proxy` and populate `TRUSTED_PROXY_IPS`. For intentionally single-user production deployments, use `AUTH_MODE=local` with `ALLOW_PRODUCTION_LOCAL_AUTH=true` and keep the backend private.
+
+### Users resolve to the wrong owner or all data appears as one teacher
+
+**Symptom:** all created projects/lessons are owned by `local-teacher` or by the same configured user.
+
+**Likely cause:** the service is running in `AUTH_MODE=local`, which intentionally ignores `X-Latexed-User` and uses `LOCAL_USER_ID`.
+
+**Action:** keep `AUTH_MODE=local` for local/single-user installs. For SaaS login use `AUTH_MODE=password` and `/api/auth/login`; for proxy deployments configure a real authentication proxy, set `AUTH_MODE=trusted_proxy`, set `TRUSTED_PROXY_IPS`, and ensure the proxy sets `X-Latexed-User` from authenticated state rather than forwarding browser input.
+
+### Trusted-proxy requests return 401 or 403
+
+**Symptom:** API requests fail with `Trusted proxy identity header is required` or `Trusted proxy identity is not allowed from this client`.
+
+**Likely cause:** the proxy did not set the configured identity header, or the proxy IP/CIDR is missing from `TRUSTED_PROXY_IPS`.
+
+**Action:** verify the reverse proxy strips incoming `X-Latexed-User`, sets its own authenticated identity value, and connects from an address listed in `TRUSTED_PROXY_IPS`.
+
+## Upload and compile DoS protection runbook
+
+### File upload returns 413 or 422
+
+**Symptom:** project file upload returns `413 Payload Too Large` or `422 Unprocessable Entity`.
+
+**Likely cause:** a single upload exceeded `MAX_LATEX_UPLOAD_FILE_BYTES`, a multi-file upload exceeded `MAX_LATEX_UPLOAD_TOTAL_BYTES`/`MAX_LATEX_FILES`, the resulting project exceeded LaTeX character limits, or the uploaded text was not valid UTF-8.
+
+**Action:** ask the user to split the project into fewer/smaller LaTeX text files, remove binary assets from LaTeX upload flows, or raise limits deliberately after checking worker memory and database capacity. Do not raise `MAX_UPLOAD_SIZE` as a substitute for LaTeX-specific limits.
+
+### Compile returns 429
+
+**Symptom:** compile endpoints return `429 Too Many Requests` with a `Retry-After` header.
+
+**Likely cause:** the caller exceeded `COMPILE_RATE_LIMIT_PER_HOUR` for the owner/client key.
+
+**Action:** wait for the retry window, reduce frontend/manual retry frequency, or tune `COMPILE_RATE_LIMIT_PER_HOUR` for the deployment. Treat repeated 429s as a signal of abusive traffic or a stuck frontend retry loop.
+
+### Compile returns 503 queue full
+
+**Symptom:** compile endpoints return `503` with `Compile queue is full. Try again later.`
+
+**Likely cause:** all `COMPILE_CONCURRENCY_LIMIT` slots are occupied and no slot opened within `COMPILE_QUEUE_TIMEOUT_SECONDS`.
+
+**Action:** check running `pdflatex` processes and request volume, increase API replicas or `COMPILE_CONCURRENCY_LIMIT` only if CPU/memory allow it, and keep `COMPILE_TIMEOUT` bounded so stuck compiler processes do not exhaust capacity.
+
+## Artifact download ownership
+
+Compile and export outputs are persisted as owner-scoped artifact records before they are downloadable. Operators should treat `/api/artifacts/{artifact_id}/download` as the canonical download path; legacy filename-based download routes remain only for compatibility and require a matching artifact record for the current owner. Old files that predate artifact records are intentionally not backfilled because ownership cannot be reconstructed safely.
+
+Operational expectations:
+
+- investigate `404 Artifact file not found` as a storage/cleanup mismatch after confirming the artifact owner;
+- investigate `410 Artifact expired` as normal TTL expiry and ask the user to compile/export again;
+- do not manually expose files from compile/export directories without an artifact record;
+- keep artifact cleanup TTL aligned with `ARTIFACT_TTL_SECONDS`.
