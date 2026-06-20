@@ -114,6 +114,11 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | `make ai-validate-smoke` | Validate a minimal LaTeX document through the generation validator. |
 | `make test` | Run backend tests with `uv`. |
 | `make frontend-check` | Run `node --check` for `frontend/js/*.js`. |
+| `make lint` | Run Ruff lint checks for backend app and tests. |
+| `make format-check` | Check Ruff formatting for backend app and tests. |
+| `make format` | Format backend app and tests with Ruff. |
+| `make test-security` | Run focused security/upload/compile/generation regression tests. |
+| `make test-coverage` | Run backend tests with terminal coverage details for `backend/app`. |
 | `make frontend-e2e` | Run optional Playwright browser smoke tests for local preview, generation duplicate-submit guard, and lesson review/document controls. Skips when Playwright/browser binaries are unavailable. |
 | `make generation-worker` | Run the external AI generation worker loop for queued jobs. |
 | `make generation-worker-once` | Claim and run at most one queued AI generation job, useful for smoke tests and one-shot workers. |
@@ -225,9 +230,9 @@ The browser UI includes a lightweight `Уроки` sidebar tab loaded by `fronte
 
 ## Auth and ownership MVP
 
-Latexed currently uses a trusted-header MVP instead of a full login/session system. In local single-user mode, requests without an identity header use `LOCAL_USER_ID=local-teacher`, preserving the existing development workflow. In a multi-user deployment, terminate real authentication at a trusted reverse proxy and pass the normalized user id to the backend in `X-Latexed-User` or in the header configured by `TRUSTED_USER_HEADER`. Do not expose this header directly to untrusted clients without a proxy that strips spoofed incoming values.
+Latexed uses an explicit auth mode instead of implicitly trusting client-supplied identity headers. The default `AUTH_MODE=local` is for single-user local/dev installs: it ignores `X-Latexed-User` even if a browser sends it and uses/provisions `LOCAL_USER_ID=local-teacher` unless overridden. Multi-user SaaS deployments can set `AUTH_MODE=password`, create users with `python -m app.cli.create_user` (or `make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin`), and authenticate through `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/logout-all`, and `/api/auth/me`. Enterprise deployments can keep `AUTH_MODE=trusted_proxy`, terminate real authentication at a reverse proxy, configure `TRUSTED_PROXY_IPS`, and have the proxy set the normalized user id in `X-Latexed-User` or the header named by `TRUSTED_USER_HEADER`. Never forward a browser-supplied `X-Latexed-User`; the proxy must clear incoming values and replace them with its authenticated identity.
 
-The backend rejects blank or control-character identities, persists new projects with the resolved `owner_id`, and uses the same identity as the lesson `teacher_id`. Direct-ID access to another user's projects, files, compile history, generation history/jobs, exports, pupils, lessons, transcripts, documents, and processing jobs is intentionally reported as `404` to avoid revealing whether the resource exists.
+See `docs/auth.md` for the full auth-mode runbook. Password auth stores bcrypt password hashes only, issues short-lived JWT access tokens, stores refresh sessions as HMAC hashes, rotates refresh tokens on `/api/auth/refresh`, supports current-session and all-session logout, and writes auth audit events without logging raw passwords/tokens. The backend now resolves a real `User` and keeps `get_current_user_id()` as a compatibility wrapper, so existing `owner_id`/`teacher_id` scoping continues to work. Direct-ID access to another user's projects, files, compile history, generation history/jobs, exports, pupils, lessons, transcripts, documents, and processing jobs is intentionally reported as `404` to avoid revealing whether the resource exists. Production startup also fails fast when `DEPLOYMENT_ENV=production` is combined with a default `SECRET_KEY`, wildcard `ALLOWED_HOSTS`, `trusted_proxy` without `TRUSTED_PROXY_IPS`, `local` auth without `ALLOW_PRODUCTION_LOCAL_AUTH=true`, or unsafe password-auth settings such as missing `AUTH_REFRESH_TOKEN_PEPPER`, long access-token lifetimes, or insecure auth cookies.
 
 ## Frontend/backend integration
 
@@ -363,12 +368,26 @@ Deprecated compatibility routes are still available for compile history:
 | `DATABASE_URL` | `sqlite:///./latexed.db` | Database connection string |
 | `AUTO_CREATE_TABLES` | `true` | Create SQLAlchemy tables on app startup for local/dev convenience; set `false` in production and use Alembic migrations |
 | `DEBUG` | `false` | Debug mode |
-| `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features |
-| `LOCAL_USER_ID` | `local-teacher` | Local single-user fallback identity used when no trusted user header is present |
-| `TRUSTED_USER_HEADER` | `X-Latexed-User` | Header name populated by a trusted auth proxy with the current user id; blank/control-character values are rejected |
-| `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; override with exact public/reverse-proxy hostnames in production |
+| `DEPLOYMENT_ENV` | `development` | Set to `production` to enable startup guards for unsafe production security settings |
+| `AUTH_MODE` | `local` | `local` provisions/uses `LOCAL_USER_ID`; `password` uses `/api/auth/*` sessions/JWTs; `trusted_proxy` accepts identity only from configured proxies |
+| `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features; must be changed when `DEPLOYMENT_ENV=production` |
+| `LOCAL_USER_ID` | `local-teacher` | Local single-user fallback identity used only when `AUTH_MODE=local` |
+| `TRUSTED_USER_HEADER` | `X-Latexed-User` | Header name populated by a trusted auth proxy when `AUTH_MODE=trusted_proxy`; blank/control-character values are rejected |
+| `TRUSTED_PROXY_IPS` | `[]` | Trusted reverse-proxy IPs/CIDRs allowed to provide `TRUSTED_USER_HEADER` |
+| `AUTH_REFRESH_TOKEN_PEPPER` | unset | Required in production password auth; HMAC pepper for refresh-token and audit hashes |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh-session lifetime for password auth |
+| `AUTH_COOKIE_SECURE` | `false` | Must be `true` in production cookie auth |
+| `AUTH_REGISTRATION_ENABLED` | `false` | Enables `/api/auth/register`; keep disabled in production and bootstrap users with CLI |
+| `ALLOW_PRODUCTION_LOCAL_AUTH` | `false` | Explicit opt-in for single-user production deployments using `AUTH_MODE=local` |
+| `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; must be exact public/reverse-proxy hostnames when `DEPLOYMENT_ENV=production` |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
 | `COMPILE_TIMEOUT` | `30` | Compilation timeout in seconds |
+| `COMPILE_CONCURRENCY_LIMIT` | `2` | Maximum concurrent `pdflatex` executions per API process |
+| `COMPILE_QUEUE_TIMEOUT_SECONDS` | `5` | How long a compile request may wait for a concurrency slot before returning `503` |
+| `COMPILE_RATE_LIMIT_PER_HOUR` | `100` | Per-owner/per-client compile requests allowed per hour; `0` disables the limit |
+| `MAX_LATEX_UPLOAD_FILE_BYTES` | `2097152` | Maximum bytes read for one uploaded LaTeX text file |
+| `MAX_LATEX_UPLOAD_TOTAL_BYTES` | `10485760` | Maximum aggregate bytes accepted by multi-file upload |
+| `UPLOAD_READ_CHUNK_BYTES` | `65536` | Chunk size used while reading uploads with bounds |
 | `COMPILE_WORK_DIR` | `/tmp/latexed_compiles` | Temporary compile/PDF artifact directory |
 | `MAX_LATEX_FILES` | `100` | Maximum number of LaTeX project files accepted by compile/export payloads; set `0` to disable |
 | `MAX_LATEX_FILE_CHARS` | `500000` | Maximum characters allowed in a single LaTeX file for compile/export payloads; set `0` to disable |
@@ -397,9 +416,12 @@ Deprecated compatibility routes are still available for compile history:
 | `CORS_ORIGIN_REGEX` | local `localhost`/`127.0.0.1`/`0.0.0.0` ports | Regex for local-development frontend origins; set to an empty value or stricter regex in production |
 | `AI_PROVIDER` | `ollama` | Default generation provider (`ollama`, `vendor`, or `openai_compatible`) |
 | `AI_GENERATION_TIMEOUT` | `120` | AI generation request timeout in seconds; increase for slow local Ollama models such as 14B+ |
-| `AI_GENERATION_JOB_EXECUTION_MODE` | `inline` | Persisted generation job execution mode: `inline` runs before returning; `background` schedules in-process background execution; `external` leaves jobs queued for a separate worker/queue adapter |
+| `AI_GENERATION_JOB_EXECUTION_MODE` | `external` | Deprecated compatibility flag. `POST /api/generation/jobs` is always enqueue-only; use `/api/generation/generate` for explicit blocking generation and run a generation worker for queued jobs. |
 | `AI_GENERATION_JOB_TIMEOUT_SECONDS` | `0` | Optional timeout for persisted generation jobs; `0` disables timeout failure marking |
-| `AI_GENERATION_JOB_STALE_AFTER_SECONDS` | `0` | Optional stale-running job recovery threshold based on worker heartbeat/`updated_at`; `0` disables automatic recovery |
+| `AI_GENERATION_JOB_STALE_AFTER_SECONDS` | `1800` | Optional stale-running job recovery threshold based on worker heartbeat/`updated_at`; `0` disables automatic recovery |
+| `AI_GENERATION_JOB_WORKER_ID` | unset | Optional stable identifier for a generation worker process; generated from host/PID when unset |
+| `AI_GENERATION_JOB_IDLE_SLEEP_SECONDS` | `1.0` | Worker idle sleep interval when no queued job is claimable |
+| `AI_GENERATION_JOB_HEARTBEAT_SECONDS` | `30` | Best-effort heartbeat interval while a worker is running a claimed job |
 | `AI_PROVIDER_STATUS_TIMEOUT` | `10` | Short timeout for provider/model availability checks |
 | `AI_RATE_LIMIT_PER_MINUTE` | `20` | Per-client per-endpoint limit for AI endpoints; set `0` to disable |
 | `AI_REQUEST_CONTROL_BACKEND` | `memory` | Request-control backend for AI rate limits and duplicate guards: `memory` for single-process/local, `redis` for shared state across API replicas |
@@ -426,7 +448,7 @@ Deprecated compatibility routes are still available for compile history:
 | `AI_VENDOR_MODEL` | `gpt-4o-mini` | Default OpenAI-compatible vendor model |
 | `AI_VENDOR_TEMPERATURE` | `0.2` | Vendor generation temperature |
 
-Generation jobs are durable even in `inline` mode: every `POST /api/generation/jobs` stores a job row before provider execution. Set `AI_GENERATION_JOB_EXECUTION_MODE=background` to return queued jobs immediately and run provider work through FastAPI background tasks; this is suitable for local/dev. Set `AI_GENERATION_JOB_EXECUTION_MODE=external` when a deployment has a separate worker/queue adapter: the API persists a queued job and returns immediately, while the external worker claims queued rows and runs them through the same `GenerationJobService`/`GenerationOrchestrator` boundary. Run `make generation-worker` for a continuous worker loop or `make generation-worker-once` for a one-shot claim/run cycle; both call `backend/scripts/run_generation_jobs.py`, which also supports `--job-id`, `--owner-id`, `--max-jobs`, `--poll-interval-seconds`, `--timeout-seconds`, `--recover-stale`, `--recover-stale-only`, and `--stale-after-seconds`. Configure `AI_GENERATION_JOB_STALE_AFTER_SECONDS` (or pass `--stale-after-seconds`) to requeue `running` jobs whose worker heartbeat is older than the threshold; leave it at `0` to disable automatic stale recovery. `/api/ready` includes a `generation_jobs` check with queued/running/completed/failed/canceled counts, backlog, stale-running count, execution mode, and stale threshold so operators can see worker pressure before starting recovery. For a more detailed owner-scoped operator view, use `GET /api/generation/jobs/operator/status`; it returns counts and stale job samples containing IDs/timestamps only, never full prompts/materials. Use `POST /api/generation/jobs/operator/recover-stale` to requeue stale running jobs for the current owner. Job responses include operational timing metrics (`queue_wait_seconds`, `run_duration_seconds`, and `total_duration_seconds`) so operators can distinguish queue delay from provider/compile runtime. Use `GET /api/generation/jobs` for an operator-safe list of current-owner jobs, `POST /api/generation/jobs/{id}/retry` to rerun failed/canceled jobs from stored request metadata, `POST /api/generation/jobs/{id}/cancel` to mark queued/running jobs as canceled, and set `AI_GENERATION_JOB_TIMEOUT_SECONDS` when a deployment needs persisted timeout failures for slow or stuck provider calls. The frontend generation modal includes a lightweight “История jobs” panel backed by `GET /api/generation/jobs` for recent current-project job diagnostics.
+Generation jobs are now enqueue-only: every `POST /api/generation/jobs` validates the request, stores a `queued` job, returns `202 Accepted` with `Location: /api/generation/jobs/{id}`, and never calls the LLM provider or LaTeX compile path inside the HTTP request. Use `/api/generation/generate` when you intentionally need a blocking generation call for local/debug flows. Run `make generation-worker` for a continuous DB-backed worker loop or `make generation-worker-once` for a one-shot claim/run cycle; both execute `python -m app.workers.generation_worker`, which also supports `--job-id`, `--owner-id`, `--max-jobs`, `--poll-interval-seconds`, `--timeout-seconds`, `--recover-stale`, `--recover-stale-only`, and `--stale-after-seconds`. Configure `AI_GENERATION_JOB_STALE_AFTER_SECONDS` (or pass `--stale-after-seconds`) to requeue `running` jobs whose worker heartbeat is older than the threshold; leave it at `0` to disable automatic stale recovery. `/api/ready` includes a `generation_jobs` check with queued/running/completed/failed/canceled counts, backlog, stale-running count, execution mode, and stale threshold so operators can see worker pressure before starting recovery. For a more detailed owner-scoped operator view, use `GET /api/generation/jobs/operator/status`; it returns counts and stale job samples containing IDs/timestamps/worker metadata only, never full prompts/materials. Use `POST /api/generation/jobs/operator/recover-stale` to requeue stale running jobs for the current owner. Job responses include worker and timing metrics (`worker_id`, `locked_at`, `heartbeat_at`, `queue_wait_seconds`, `run_duration_seconds`, and `total_duration_seconds`) so operators can distinguish queue delay from provider/compile runtime. Use `GET /api/generation/jobs` for an operator-safe list of current-owner jobs, `POST /api/generation/jobs/{id}/retry` to requeue failed/canceled jobs from stored request metadata, `POST /api/generation/jobs/{id}/cancel` to mark queued/running jobs as canceled, and set `AI_GENERATION_JOB_TIMEOUT_SECONDS` when a deployment needs persisted timeout failures for slow or stuck provider calls. The frontend generation modal includes a lightweight “История jobs” panel backed by `GET /api/generation/jobs` for recent current-project job diagnostics.
 
 Lesson document generation records provenance for each artifact: provider, prompt hash, source transcript hash, and whether raw or edited transcript text was used. Reviewed transcripts produce `completed` documents; raw/unreviewed transcripts must be explicitly confirmed with `allow_unreviewed=true` and produce `draft` documents so teachers can distinguish generated materials that still need review.
 
@@ -568,8 +590,18 @@ Individual checks:
 ```bash
 make compileall
 make frontend-check
+make lint
+make format-check
+make test-security
+make test-coverage
 make test
 ```
+
+Quality gate expectations:
+
+- `make check` is the default pre-PR gate and runs Python syntax checks, frontend JavaScript syntax checks, Ruff lint, Ruff format check, and backend tests.
+- `make test-security` is a fast focused regression suite for security-sensitive auth, upload, compile, generation, and deployment-contract paths.
+- `make test-coverage` is intended for release and refactor work where maintainers need to inspect coverage movement before merging.
 
 Direct `uv` test invocation from the repository root also works because `pyproject.toml` configures the backend Python path:
 
@@ -588,6 +620,7 @@ node --check frontend/js/*.js
 - Frontend CSS and JavaScript are split out of `frontend/main.html`, and application JavaScript is grouped into ordered scripts under `frontend/js/`. A future cleanup can migrate these classic scripts to ES modules or TypeScript once a build step is introduced.
 - Local preview is an approximate HTML/KaTeX rendering path; authoritative PDF output comes from the backend LaTeX compiler.
 - Server-side compile/export requires a working LaTeX installation. Without `pdflatex`, compile endpoints return errors while the frontend can still use local preview fallback.
+- Compile/export downloads are owner-scoped artifacts. New responses return opaque `/api/artifacts/{artifact_id}/download` URLs; legacy `/api/compile/download/{filename}` and `/api/export/download/{filename}` routes are deprecated and return `404` unless the filename is backed by an artifact record owned by the current user.
 - Generated Russian documents require `russian.ldf`/T2A support from `texlive-lang-cyrillic`; otherwise `babel` may fail with `Unknown option 'russian'`.
 
 ## License

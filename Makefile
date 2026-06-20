@@ -5,6 +5,7 @@ ROOT_DIR := $(CURDIR)
 BACKEND_DIR := $(ROOT_DIR)/backend
 FRONTEND_DIR := $(ROOT_DIR)/frontend
 FRONTEND_JS_FILES := $(sort $(wildcard $(FRONTEND_DIR)/js/*.js))
+QUALITY_PY_FILES := $(BACKEND_DIR)/app/services/security_config.py $(BACKEND_DIR)/app/services/upload_limits.py $(BACKEND_DIR)/app/services/project_file_validation.py $(BACKEND_DIR)/app/services/compile_control.py $(BACKEND_DIR)/app/services/artifact_service.py $(BACKEND_DIR)/app/routers/artifacts.py $(BACKEND_DIR)/tests/test_artifact_service.py $(BACKEND_DIR)/tests/test_security_contracts.py
 
 # ---- Runtime configuration ------------------------------------------------
 HOST ?= 0.0.0.0
@@ -91,9 +92,29 @@ test: ## Run backend tests through uv.
 test-verbose: ## Run backend tests through uv with verbose output.
 	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/ -v
 
+.PHONY: test-security
+test-security: ## Run security/auth, upload, compile-control, and static contract tests.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_security_contracts.py -q && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_api.py -q -k "auth or trusted or security or upload or compile_rate or compile_queue or generation_router_hotfix or nginx or docker_compose or deploy_script"
+
+.PHONY: test-coverage
+test-coverage: ## Run backend tests with coverage for backend/app.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/ --cov=app --cov-report=term-missing
+
+.PHONY: lint
+lint: ## Run Ruff lint checks for backend app and tests.
+	$(UV) run $(UV_PROJECT) ruff check $(QUALITY_PY_FILES)
+
+.PHONY: format-check
+format-check: ## Check Ruff formatting for backend app and tests.
+	$(UV) run $(UV_PROJECT) ruff format --check $(QUALITY_PY_FILES)
+
+.PHONY: format
+format: ## Format backend app and tests with Ruff.
+	$(UV) run $(UV_PROJECT) ruff format $(QUALITY_PY_FILES)
+
 .PHONY: compileall
 compileall: ## Compile backend Python files to catch syntax errors.
-	$(UV) run $(UV_PROJECT) $(PYTHON) -m compileall $(BACKEND_DIR)/app
+	$(UV) run $(UV_PROJECT) $(PYTHON) -m compileall $(BACKEND_DIR)/app $(BACKEND_DIR)/tests
 
 .PHONY: frontend-check
 frontend-check: ## Run node --check for frontend JavaScript files.
@@ -105,7 +126,7 @@ frontend-e2e: ## Run optional Playwright smoke test for the local frontend workf
 	$(PYTHONPATH_BACKEND) $(PYTHON) -m pytest $(BACKEND_DIR)/tests/test_frontend_e2e.py -q
 
 .PHONY: check
-check: compileall frontend-check test ## Run all local checks.
+check: compileall frontend-check lint format-check test ## Run syntax, frontend, lint, formatting, and backend tests.
 
 # ---- Database and migrations ----------------------------------------------
 .PHONY: migrate
@@ -131,17 +152,22 @@ docker-logs: ## Follow docker compose logs.
 	cd $(BACKEND_DIR) && docker-compose logs -f
 
 # ---- Workers ---------------------------------------------------------------
+
+.PHONY: create-user
+create-user: ## Create a password auth user. Usage: make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.cli.create_user --email "$(EMAIL)" --password "$(PASSWORD)" --role "$(or $(ROLE),teacher)"
+
 .PHONY: generation-worker
-generation-worker: ## Run queued AI generation jobs for AI_GENERATION_JOB_EXECUTION_MODE=external.
-	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py
+generation-worker: ## Run queued AI generation jobs with the DB-backed worker.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker
 
 .PHONY: generation-worker-once
 generation-worker-once: ## Run at most one queued AI generation job and exit.
-	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --once
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker --once
 
 .PHONY: generation-worker-recover-stale
 generation-worker-recover-stale: ## Requeue stale running AI generation jobs and exit.
-	$(PYTHONPATH_BACKEND) $(PYTHON) $(BACKEND_DIR)/scripts/run_generation_jobs.py --recover-stale-only
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker --recover-stale-only
 
 # ---- Cleanup ---------------------------------------------------------------
 .PHONY: clean

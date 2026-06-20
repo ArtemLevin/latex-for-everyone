@@ -1,7 +1,7 @@
 import json
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.schemas import (
@@ -20,7 +20,7 @@ from app.schemas import (
     GenerationValidationResponse,
 )
 from app.config import settings
-from app.database import SessionLocal, get_db
+from app.database import get_db
 from app.dependencies import get_current_user_id
 from app.models import Project
 from app.services.ai_generation import AIGenerationError, AIGenerationService
@@ -214,7 +214,9 @@ def build_generation_prompt_response(request: GenerationRequest) -> GenerationPr
         if request.fields.content_source_mode == "materials_only":
             warnings.append("Тема не указана: prompt потребует определить тему по материалам без домыслов.")
         else:
-            warnings.append("Тема не указана: нейросеть будет выбирать тему самостоятельно, что может снизить точность пособия.")
+            warnings.append(
+                "Тема не указана: нейросеть будет выбирать тему самостоятельно, что может снизить точность пособия."
+            )
     if not request.materials.strip() and request.fields.content_source_mode == "materials_only":
         warnings.append("Материалы не переданы: prompt запрещает домысливать исходные задания.")
 
@@ -246,69 +248,6 @@ def ensure_project_access(db: Session, *, project_id: str | None, owner_id: str)
     project = db.query(Project).filter(Project.id == project_id, Project.owner_id == owner_id).first()
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
-
-
-async def run_generation_job_background(job_id: str) -> None:
-    db = SessionLocal()
-    try:
-        try:
-            job = generation_job_service.get_job(db, job_id=job_id)
-        except GenerationJobNotFoundError:
-            logger.warning("generation background job missing job_id=%s", job_id)
-            return
-
-        generation_request = GenerationRequest(**job.request_payload)
-        prompt_response = build_generation_prompt_response(generation_request)
-        await generation_job_service.run_job(
-            db,
-            job=job,
-            generation_request=generation_request,
-            prompt_response=prompt_response,
-            request_hash=job.request_hash,
-            owner_id=job.owner_id,
-            orchestrator=generation_orchestrator,
-            timeout_seconds=settings.AI_GENERATION_JOB_TIMEOUT_SECONDS,
-        )
-    finally:
-        db.close()
-
-
-def build_generation_request_from_job(job) -> GenerationRequest:
-    return GenerationRequest(**job.request_payload)
-
-
-async def run_generation_job_by_mode(
-    *,
-    db: Session,
-    job,
-    generation_request: GenerationRequest,
-    prompt_response: GenerationPromptResponse,
-    owner_id: str,
-    background_tasks: BackgroundTasks,
-) -> GenerationJobResponse:
-    execution_mode = settings.AI_GENERATION_JOB_EXECUTION_MODE.lower()
-    if execution_mode == "background":
-        background_tasks.add_task(run_generation_job_background, job.id)
-        logger.info("generation job scheduled background job_id=%s owner_id=%s", job.id, owner_id)
-        return generation_job_service.to_response(job)
-    if execution_mode == "external":
-        # External mode intentionally leaves the row queued so a dedicated worker can claim and run it.
-        logger.info("generation job queued for external worker job_id=%s owner_id=%s", job.id, owner_id)
-        return generation_job_service.to_response(job)
-    if execution_mode != "inline":
-        logger.warning("unknown generation job execution mode mode=%s; falling back to inline", execution_mode)
-
-    job = await generation_job_service.run_job(
-        db,
-        job=job,
-        generation_request=generation_request,
-        prompt_response=prompt_response,
-        request_hash=job.request_hash,
-        owner_id=owner_id,
-        orchestrator=generation_orchestrator,
-        timeout_seconds=settings.AI_GENERATION_JOB_TIMEOUT_SECONDS,
-    )
-    return generation_job_service.to_response(job)
 
 
 @router.get("/presets", response_model=list[GenerationPresetResponse])
@@ -446,7 +385,7 @@ async def generate_latex(
 async def create_generation_job(
     request: Request,
     generation_request: GenerationRequest,
-    background_tasks: BackgroundTasks,
+    response: Response,
     owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -462,33 +401,41 @@ async def create_generation_job(
         )
         if existing_job:
             if existing_job.request_hash != request_sha:
-                raise HTTPException(status_code=409, detail="Idempotency key was already used for a different generation request.")
-            logger.info("generation job idempotency replay job_id=%s owner_id=%s request_sha=%s", existing_job.id, owner_id, request_sha)
+                raise HTTPException(
+                    status_code=409, detail="Idempotency key was already used for a different generation request."
+                )
+            logger.info(
+                "generation job idempotency replay job_id=%s owner_id=%s request_sha=%s",
+                existing_job.id,
+                owner_id,
+                request_sha,
+            )
+            response.headers["Location"] = f"/api/generation/jobs/{existing_job.id}"
             return generation_job_service.to_response(existing_job)
+    else:
+        active_job = generation_job_service.get_active_job_by_request_hash(
+            db, owner_id=owner_id, request_hash=request_sha
+        )
+        if active_job is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Generation job is already queued or running for the same input.",
+                headers={"Retry-After": str(GENERATION_DUPLICATE_RETRY_AFTER_SECONDS)},
+            )
 
-    active_request_key = begin_generation_request(request, generation_request)
-    try:
-        enforce_ai_rate_limit(request)
-        prompt_response = build_generation_prompt_response(generation_request)
-        job = generation_job_service.create_job(
-            db,
-            job=job,
-            generation_request=generation_request,
-            request_hash=request_sha,
-            prompt_hash=text_digest(prompt_response.prompt),
-            owner_id=owner_id,
-            idempotency_key=idempotency_key,
-        )
-        return await run_generation_job_by_mode(
-            db=db,
-            job=job,
-            generation_request=generation_request,
-            prompt_response=prompt_response,
-            owner_id=owner_id,
-            background_tasks=background_tasks,
-        )
-    finally:
-        finish_generation_request(active_request_key)
+    enforce_ai_rate_limit(request)
+    prompt_response = build_generation_prompt_response(generation_request)
+    job = generation_job_service.create_job(
+        db,
+        generation_request=generation_request,
+        request_hash=request_sha,
+        prompt_hash=text_digest(prompt_response.prompt),
+        owner_id=owner_id,
+        idempotency_key=idempotency_key,
+    )
+    response.headers["Location"] = f"/api/generation/jobs/{job.id}"
+    logger.info("generation job enqueued job_id=%s owner_id=%s request_sha=%s", job.id, owner_id, request_sha)
+    return generation_job_service.to_response(job)
 
 
 @router.get("/jobs", response_model=list[GenerationJobResponse])
@@ -537,13 +484,15 @@ async def get_generation_jobs_operator_status(
                 status=job.status,
                 stage=job.stage,
                 attempts=job.attempts,
+                worker_id=job.worker_id,
+                locked_at=job.locked_at,
+                heartbeat_at=job.heartbeat_at,
                 started_at=job.started_at,
                 updated_at=job.updated_at,
             )
             for job in summary["stale_samples"]
         ],
     )
-    return [generation_job_service.to_response(job) for job in jobs]
 
 
 @router.post("/jobs/operator/recover-stale", response_model=GenerationJobRecoverStaleResponse)
@@ -593,7 +542,7 @@ async def get_generation_job(
 async def retry_generation_job(
     request: Request,
     job_id: str,
-    background_tasks: BackgroundTasks,
+    response: Response,
     owner_id: str = Depends(get_current_user_id),
     db: Session = Depends(get_db),
 ):
@@ -605,16 +554,9 @@ async def retry_generation_job(
     except GenerationJobNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    generation_request = build_generation_request_from_job(job)
-    prompt_response = build_generation_prompt_response(generation_request)
-    return await run_generation_job_by_mode(
-        db=db,
-        job=job,
-        generation_request=generation_request,
-        prompt_response=prompt_response,
-        owner_id=owner_id,
-        background_tasks=background_tasks,
-    )
+    response.headers["Location"] = f"/api/generation/jobs/{job.id}"
+    logger.info("generation job retry requeued job_id=%s owner_id=%s", job.id, owner_id)
+    return generation_job_service.to_response(job)
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=GenerationJobResponse)
