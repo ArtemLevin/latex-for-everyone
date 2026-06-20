@@ -152,6 +152,11 @@ docker-logs: ## Follow docker compose logs.
 	cd $(BACKEND_DIR) && docker-compose logs -f
 
 # ---- Workers ---------------------------------------------------------------
+
+.PHONY: create-user
+create-user: ## Create a password auth user. Usage: make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.cli.create_user --email "$(EMAIL)" --password "$(PASSWORD)" --role "$(or $(ROLE),teacher)"
+
 .PHONY: generation-worker
 generation-worker: ## Run queued AI generation jobs with the DB-backed worker.
 	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker

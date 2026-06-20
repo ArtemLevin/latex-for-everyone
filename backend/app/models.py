@@ -5,6 +5,60 @@ from app.database import Base
 from app.time_utils import utc_now
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(String(255), primary_key=True, default=lambda: str(uuid.uuid4()))
+    email = Column(String(320), nullable=True, unique=True, index=True)
+    normalized_email = Column(String(320), nullable=True, unique=True, index=True)
+    display_name = Column(String(255), nullable=True)
+    password_hash = Column(String(255), nullable=True)
+    auth_provider = Column(String(50), nullable=False, default="password", index=True)
+    external_subject = Column(String(255), nullable=True, index=True)
+    role = Column(String(50), nullable=False, default="teacher", index=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    is_verified = Column(Boolean, nullable=False, default=False)
+    last_login_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, index=True)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(255), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    refresh_token_hash = Column(String(128), nullable=False, unique=True, index=True)
+    refresh_token_family_id = Column(String(36), nullable=False, index=True)
+    user_agent_hash = Column(String(64), nullable=True)
+    ip_address_hash = Column(String(64), nullable=True)
+    status = Column(String(30), nullable=False, default="active", index=True)
+    created_at = Column(DateTime, default=utc_now, index=True)
+    last_used_at = Column(DateTime, nullable=True, index=True)
+    expires_at = Column(DateTime, nullable=False, index=True)
+    revoked_at = Column(DateTime, nullable=True)
+    revoke_reason = Column(String(255), nullable=True)
+
+    user = relationship("User")
+
+
+class AuthAuditLog(Base):
+    __tablename__ = "auth_audit_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(255), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    session_id = Column(String(36), ForeignKey("auth_sessions.id", ondelete="SET NULL"), nullable=True, index=True)
+    event_type = Column(String(80), nullable=False, index=True)
+    request_id = Column(String(64), nullable=True, index=True)
+    ip_address_hash = Column(String(64), nullable=True)
+    user_agent_hash = Column(String(64), nullable=True)
+    metadata_json = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=utc_now, index=True)
+
+    user = relationship("User")
+    session = relationship("AuthSession")
+
+
 class Project(Base):
     __tablename__ = "projects"
 

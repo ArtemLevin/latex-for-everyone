@@ -26,6 +26,14 @@ summaries instead.
 | `degraded` | Core API can serve, but compile, LaTeX packages, transcription or generation-worker checks need attention. | Check the failing section in `/api/ready` and the symptom tables below. |
 | `not_ready` | Required DB or artifact directories are unavailable. | Do not send user traffic until DB/artifact storage is fixed. |
 
+## Authentication operations
+
+- Use `AUTH_MODE=password` for first-class SaaS login. Bootstrap users with `make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin` or `cd backend && PYTHONPATH=. python -m app.cli.create_user --email admin@example.com --password ... --role admin`.
+- In production password auth, set a non-default `SECRET_KEY`, set `AUTH_REFRESH_TOKEN_PEPPER`, keep `ACCESS_TOKEN_EXPIRE_MINUTES <= 60`, keep `REFRESH_TOKEN_EXPIRE_DAYS <= 90`, and set `AUTH_COOKIE_SECURE=true` when cookie mode is enabled.
+- Refresh tokens are opaque and stored only as hashes; rotation marks the old session as `rotated`, and reuse marks the refresh family as `compromised`.
+- Use `POST /api/auth/logout` for the current session, `POST /api/auth/logout-all` for all sessions, and `GET /api/auth/me` to verify the active user. Audit events are stored in `auth_audit_logs` without raw passwords or tokens.
+- `AUTH_MODE=local` remains for development; `AUTH_MODE=trusted_proxy` remains for enterprise reverse-proxy deployments and can auto-provision proxy identities as `User` rows while preserving legacy owner ids.
+
 ## AI generation and job workers
 
 | Symptom | Likely cause | Safe action |
@@ -206,9 +214,9 @@ moving to a production database that can handle concurrent job claims.
 
 **Symptom:** the API exits during startup with a `SecurityConfigurationError`.
 
-**Likely cause:** `DEPLOYMENT_ENV=production` is set while `SECRET_KEY` still uses the development default, `ALLOWED_HOSTS` contains `*`, `AUTH_MODE=trusted_proxy` has no `TRUSTED_PROXY_IPS`, or `AUTH_MODE=local` was not explicitly allowed with `ALLOW_PRODUCTION_LOCAL_AUTH=true`.
+**Likely cause:** `DEPLOYMENT_ENV=production` is set while `SECRET_KEY` still uses the development default, `ALLOWED_HOSTS` contains `*`, `AUTH_MODE=trusted_proxy` has no `TRUSTED_PROXY_IPS`, `AUTH_MODE=local` was not explicitly allowed with `ALLOW_PRODUCTION_LOCAL_AUTH=true`, or `AUTH_MODE=password` is missing production-safe token/cookie settings.
 
-**Action:** set a unique `SECRET_KEY`, configure exact public/reverse-proxy hostnames in `ALLOWED_HOSTS`, and choose one explicit auth mode. For multi-user deployments, use `AUTH_MODE=trusted_proxy` and populate `TRUSTED_PROXY_IPS`. For intentionally single-user production deployments, use `AUTH_MODE=local` with `ALLOW_PRODUCTION_LOCAL_AUTH=true` and keep the backend private.
+**Action:** set a unique `SECRET_KEY`, configure exact public/reverse-proxy hostnames in `ALLOWED_HOSTS`, and choose one explicit auth mode. For SaaS password auth, use `AUTH_MODE=password`, set `AUTH_REFRESH_TOKEN_PEPPER`, keep short access-token lifetimes, and enable secure cookies. For proxy auth, use `AUTH_MODE=trusted_proxy` and populate `TRUSTED_PROXY_IPS`. For intentionally single-user production deployments, use `AUTH_MODE=local` with `ALLOW_PRODUCTION_LOCAL_AUTH=true` and keep the backend private.
 
 ### Users resolve to the wrong owner or all data appears as one teacher
 
@@ -216,7 +224,7 @@ moving to a production database that can handle concurrent job claims.
 
 **Likely cause:** the service is running in `AUTH_MODE=local`, which intentionally ignores `X-Latexed-User` and uses `LOCAL_USER_ID`.
 
-**Action:** keep `AUTH_MODE=local` for local/single-user installs. For multi-user deployments, configure a real authentication proxy, set `AUTH_MODE=trusted_proxy`, set `TRUSTED_PROXY_IPS`, and ensure the proxy sets `X-Latexed-User` from authenticated state rather than forwarding browser input.
+**Action:** keep `AUTH_MODE=local` for local/single-user installs. For SaaS login use `AUTH_MODE=password` and `/api/auth/login`; for proxy deployments configure a real authentication proxy, set `AUTH_MODE=trusted_proxy`, set `TRUSTED_PROXY_IPS`, and ensure the proxy sets `X-Latexed-User` from authenticated state rather than forwarding browser input.
 
 ### Trusted-proxy requests return 401 or 403
 

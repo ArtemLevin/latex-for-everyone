@@ -12,7 +12,7 @@ from sqlalchemy import inspect, text
 from app.config import settings
 from app.database import Base, engine
 from app.logging_config import configure_logging, reset_request_id, set_request_id
-from app.routers import artifacts, compile, export, files, generation, lessons, projects, pupils, templates
+from app.routers import artifacts, auth, compile, export, files, generation, lessons, projects, pupils, templates
 from app.schemas import ReadinessCheckResponse, ReadinessResponse
 from app.services import readiness
 from app.services.metrics import PROMETHEUS_CONTENT_TYPE, build_prometheus_metrics
@@ -278,6 +278,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # Routers
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(pupils.router, prefix="/api/pupils", tags=["pupils"])
 app.include_router(lessons.router, prefix="/api/lessons", tags=["lessons"])

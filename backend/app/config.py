@@ -35,14 +35,31 @@ class Settings(BaseSettings):
 
     # Security
     DEPLOYMENT_ENV: str = "development"
-    AUTH_MODE: str = "local"  # local or trusted_proxy
+    AUTH_MODE: str = "local"  # local, password, or trusted_proxy
     LOCAL_USER_ID: str = "local-teacher"
     TRUSTED_USER_HEADER: str = "X-Latexed-User"
     TRUSTED_PROXY_IPS: list[str] = []
     ALLOW_PRODUCTION_LOCAL_AUTH: bool = False
     SECRET_KEY: str = "change-me-in-production-please"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
+    REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    REFRESH_TOKEN_ROTATION_ENABLED: bool = True
+    AUTH_COOKIE_MODE: bool = True
+    AUTH_COOKIE_SECURE: bool = False
+    AUTH_COOKIE_SAMESITE: str = "lax"
+    AUTH_ACCESS_COOKIE_NAME: str = "latexed_access"
+    AUTH_REFRESH_COOKIE_NAME: str = "latexed_refresh"
+    AUTH_PASSWORD_MIN_LENGTH: int = 10
+    AUTH_REGISTRATION_ENABLED: bool = False
+    AUTH_BOOTSTRAP_ADMIN_EMAIL: Optional[str] = None
+    AUTH_BOOTSTRAP_ADMIN_PASSWORD: Optional[str] = None
+    AUTH_TOKEN_ISSUER: str = "latexed-api"
+    AUTH_TOKEN_AUDIENCE: str = "latexed-web"
+    AUTH_REFRESH_TOKEN_PEPPER: Optional[str] = None
+    AUTH_LOGIN_RATE_LIMIT_PER_MINUTE: int = 10
+    TRUSTED_PROXY_AUTO_PROVISION_USERS: bool = True
+    TRUSTED_PROXY_DEFAULT_ROLE: str = "teacher"
     # Keep local defaults permissive for development/TestClient; production deployments
     # should override this with the exact reverse-proxy and public hostnames.
     ALLOWED_HOSTS: list[str] = ["*"]

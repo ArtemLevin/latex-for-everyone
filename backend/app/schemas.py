@@ -512,3 +512,38 @@ class PaginationResponse(BaseModel):
     page: int
     per_page: int
     items: list[Any] = Field(default_factory=list)
+
+
+class UserPublic(BaseModel):
+    id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: str
+    auth_provider: str
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    password: str = Field(..., min_length=1, max_length=1024)
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    password: str = Field(..., min_length=1, max_length=1024)
+    display_name: Optional[str] = Field(default=None, max_length=255)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: Optional[str] = None
+
+
+class AuthTokenResponse(BaseModel):
+    access_token: str
+    token_type: Literal["bearer"] = "bearer"
+    expires_in: int
+    user: Optional[UserPublic] = None
+
+
+class LogoutResponse(BaseModel):
+    status: Literal["ok"] = "ok"
+    revoked_sessions: int = 0

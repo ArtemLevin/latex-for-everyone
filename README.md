@@ -230,9 +230,9 @@ The browser UI includes a lightweight `Уроки` sidebar tab loaded by `fronte
 
 ## Auth and ownership MVP
 
-Latexed uses an explicit auth mode instead of implicitly trusting client-supplied identity headers. The default `AUTH_MODE=local` is for single-user local/dev installs: it ignores `X-Latexed-User` even if a browser sends it and uses `LOCAL_USER_ID=local-teacher` unless overridden. Multi-user deployments must set `AUTH_MODE=trusted_proxy`, terminate real authentication at a reverse proxy, configure `TRUSTED_PROXY_IPS`, and have the proxy set the normalized user id in `X-Latexed-User` or the header named by `TRUSTED_USER_HEADER`. Never forward a browser-supplied `X-Latexed-User`; the proxy must clear incoming values and replace them with its authenticated identity.
+Latexed uses an explicit auth mode instead of implicitly trusting client-supplied identity headers. The default `AUTH_MODE=local` is for single-user local/dev installs: it ignores `X-Latexed-User` even if a browser sends it and uses/provisions `LOCAL_USER_ID=local-teacher` unless overridden. Multi-user SaaS deployments can set `AUTH_MODE=password`, create users with `python -m app.cli.create_user` (or `make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin`), and authenticate through `/api/auth/login`, `/api/auth/refresh`, `/api/auth/logout`, `/api/auth/logout-all`, and `/api/auth/me`. Enterprise deployments can keep `AUTH_MODE=trusted_proxy`, terminate real authentication at a reverse proxy, configure `TRUSTED_PROXY_IPS`, and have the proxy set the normalized user id in `X-Latexed-User` or the header named by `TRUSTED_USER_HEADER`. Never forward a browser-supplied `X-Latexed-User`; the proxy must clear incoming values and replace them with its authenticated identity.
 
-The backend rejects blank or control-character identities, persists new projects with the resolved `owner_id`, and uses the same identity as the lesson `teacher_id`. Direct-ID access to another user's projects, files, compile history, generation history/jobs, exports, pupils, lessons, transcripts, documents, and processing jobs is intentionally reported as `404` to avoid revealing whether the resource exists. Production startup also fails fast when `DEPLOYMENT_ENV=production` is combined with a default `SECRET_KEY`, wildcard `ALLOWED_HOSTS`, `trusted_proxy` without `TRUSTED_PROXY_IPS`, or `local` auth without `ALLOW_PRODUCTION_LOCAL_AUTH=true`.
+See `docs/auth.md` for the full auth-mode runbook. Password auth stores bcrypt password hashes only, issues short-lived JWT access tokens, stores refresh sessions as HMAC hashes, rotates refresh tokens on `/api/auth/refresh`, supports current-session and all-session logout, and writes auth audit events without logging raw passwords/tokens. The backend now resolves a real `User` and keeps `get_current_user_id()` as a compatibility wrapper, so existing `owner_id`/`teacher_id` scoping continues to work. Direct-ID access to another user's projects, files, compile history, generation history/jobs, exports, pupils, lessons, transcripts, documents, and processing jobs is intentionally reported as `404` to avoid revealing whether the resource exists. Production startup also fails fast when `DEPLOYMENT_ENV=production` is combined with a default `SECRET_KEY`, wildcard `ALLOWED_HOSTS`, `trusted_proxy` without `TRUSTED_PROXY_IPS`, `local` auth without `ALLOW_PRODUCTION_LOCAL_AUTH=true`, or unsafe password-auth settings such as missing `AUTH_REFRESH_TOKEN_PEPPER`, long access-token lifetimes, or insecure auth cookies.
 
 ## Frontend/backend integration
 
@@ -369,11 +369,15 @@ Deprecated compatibility routes are still available for compile history:
 | `AUTO_CREATE_TABLES` | `true` | Create SQLAlchemy tables on app startup for local/dev convenience; set `false` in production and use Alembic migrations |
 | `DEBUG` | `false` | Debug mode |
 | `DEPLOYMENT_ENV` | `development` | Set to `production` to enable startup guards for unsafe production security settings |
-| `AUTH_MODE` | `local` | `local` ignores trusted user headers; `trusted_proxy` accepts identity only from configured proxies |
+| `AUTH_MODE` | `local` | `local` provisions/uses `LOCAL_USER_ID`; `password` uses `/api/auth/*` sessions/JWTs; `trusted_proxy` accepts identity only from configured proxies |
 | `SECRET_KEY` | `change-me-in-production-please` | Secret key for JWT/session-related features; must be changed when `DEPLOYMENT_ENV=production` |
 | `LOCAL_USER_ID` | `local-teacher` | Local single-user fallback identity used only when `AUTH_MODE=local` |
 | `TRUSTED_USER_HEADER` | `X-Latexed-User` | Header name populated by a trusted auth proxy when `AUTH_MODE=trusted_proxy`; blank/control-character values are rejected |
 | `TRUSTED_PROXY_IPS` | `[]` | Trusted reverse-proxy IPs/CIDRs allowed to provide `TRUSTED_USER_HEADER` |
+| `AUTH_REFRESH_TOKEN_PEPPER` | unset | Required in production password auth; HMAC pepper for refresh-token and audit hashes |
+| `REFRESH_TOKEN_EXPIRE_DAYS` | `30` | Refresh-session lifetime for password auth |
+| `AUTH_COOKIE_SECURE` | `false` | Must be `true` in production cookie auth |
+| `AUTH_REGISTRATION_ENABLED` | `false` | Enables `/api/auth/register`; keep disabled in production and bootstrap users with CLI |
 | `ALLOW_PRODUCTION_LOCAL_AUTH` | `false` | Explicit opt-in for single-user production deployments using `AUTH_MODE=local` |
 | `ALLOWED_HOSTS` | `["*"]` | Trusted host allowlist used when `DEBUG=false`; must be exact public/reverse-proxy hostnames when `DEPLOYMENT_ENV=production` |
 | `LATEX_COMPILER` | `pdflatex` | LaTeX compiler binary |
