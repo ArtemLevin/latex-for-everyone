@@ -157,6 +157,14 @@ docker-logs: ## Follow docker compose logs.
 create-user: ## Create a password auth user. Usage: make create-user EMAIL=admin@example.com PASSWORD=... ROLE=admin
 	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.cli.create_user --email "$(EMAIL)" --password "$(PASSWORD)" --role "$(or $(ROLE),teacher)"
 
+.PHONY: compile-worker
+compile-worker: ## Run queued LaTeX compile jobs with the sandbox worker.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.compile_worker
+
+.PHONY: compile-worker-once
+compile-worker-once: ## Run at most one queued LaTeX compile job and exit.
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.compile_worker --once
+
 .PHONY: generation-worker
 generation-worker: ## Run queued AI generation jobs with the DB-backed worker.
 	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(PYTHON) -m app.workers.generation_worker

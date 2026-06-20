@@ -72,6 +72,7 @@ class Project(Base):
 
     files = relationship("File", back_populates="project", cascade="all, delete-orphan")
     compile_history = relationship("CompileHistory", back_populates="project", cascade="all, delete-orphan")
+    compile_jobs = relationship("CompileJob", back_populates="project")
     snapshots = relationship("ProjectSnapshot", back_populates="project", cascade="all, delete-orphan")
     generation_history = relationship("GenerationHistory", back_populates="project", cascade="all, delete-orphan")
     generation_jobs = relationship("GenerationJob", back_populates="project", cascade="all, delete-orphan")
@@ -231,6 +232,40 @@ class CompileHistory(Base):
 
     project = relationship("Project", back_populates="compile_history")
     artifacts = relationship("Artifact", back_populates="compile_history")
+    compile_jobs = relationship("CompileJob", back_populates="compile_history")
+
+
+class CompileJob(Base):
+    __tablename__ = "compile_jobs"
+    __table_args__ = (Index("ix_compile_jobs_queue_claim", "status", "queued_at"),)
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    owner_id = Column(String(255), nullable=False, index=True)
+    project_id = Column(String(36), ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True)
+    compile_history_id = Column(
+        String(36), ForeignKey("compile_history.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    status = Column(String(30), nullable=False, default="queued", index=True)
+    stage = Column(String(50), nullable=False, default="queued", index=True)
+    main_file_name = Column(String(255), nullable=False)
+    request_payload = Column(JSON, nullable=False)
+    result_payload = Column(JSON, nullable=True)
+    error_message = Column(Text, nullable=True)
+    pdf_artifact_id = Column(String(36), nullable=True, index=True)
+    worker_id = Column(String(255), nullable=True, index=True)
+    locked_at = Column(DateTime, nullable=True, index=True)
+    heartbeat_at = Column(DateTime, nullable=True, index=True)
+    cancel_requested = Column(Boolean, nullable=False, default=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    max_attempts = Column(Integer, nullable=False, default=1)
+    queued_at = Column(DateTime, default=utc_now, index=True)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=utc_now, index=True)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
+
+    project = relationship("Project", back_populates="compile_jobs")
+    compile_history = relationship("CompileHistory", back_populates="compile_jobs")
 
 
 class Artifact(Base):

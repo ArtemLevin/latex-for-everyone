@@ -32,6 +32,34 @@ class Settings(BaseSettings):
     COMPILE_QUEUE_TIMEOUT_SECONDS: int = 5
     LATEX_ALLOWED_EXTENSIONS: str = ".tex,.bib,.cls,.sty"
     ARTIFACT_TTL_SECONDS: int = 24 * 60 * 60
+    COMPILE_EXECUTION_MODE: str = "sandbox"  # sandbox or local_subprocess; production must use sandbox
+    COMPILE_JOB_EXECUTION_MODE: str = "worker"  # worker or inline_dev
+    COMPILE_WORKER_ID: Optional[str] = None
+    COMPILE_WORKER_IDLE_SLEEP_SECONDS: float = 1.0
+    COMPILE_JOB_STALE_AFTER_SECONDS: int = 900
+    COMPILE_SANDBOX_IMAGE: str = "latexed-latex-sandbox:latest"
+    COMPILE_SANDBOX_RUNTIME: str = "docker"
+    COMPILE_SANDBOX_NETWORK_DISABLED: bool = True
+    COMPILE_SANDBOX_MEMORY: str = "256m"
+    COMPILE_SANDBOX_CPUS: float = 1.0
+    COMPILE_SANDBOX_PIDS_LIMIT: int = 128
+    COMPILE_SANDBOX_TMPFS_SIZE: str = "64m"
+    COMPILE_SANDBOX_OUTPUT_SIZE_BYTES: int = 64 * 1024 * 1024
+    COMPILE_SANDBOX_TIMEOUT_SECONDS: int = 45
+    COMPILE_SANDBOX_UID: int = 10001
+    COMPILE_SANDBOX_GID: int = 10001
+    COMPILE_SANDBOX_READ_ONLY_ROOTFS: bool = True
+    COMPILE_SANDBOX_CAP_DROP_ALL: bool = True
+    COMPILE_SANDBOX_NO_NEW_PRIVILEGES: bool = True
+    COMPILE_SANDBOX_SECCOMP_PROFILE: str = "default"
+    COMPILE_SANDBOX_APPARMOR_PROFILE: Optional[str] = None
+    COMPILE_SANDBOX_OPENIN_ANY: str = "p"
+    COMPILE_SANDBOX_OPENOUT_ANY: str = "p"
+    COMPILE_SANDBOX_SHELL_ESCAPE: str = "disabled"
+    COMPILE_SANDBOX_ROOT: str = "/tmp/latexed_sandbox_compiles"
+    COMPILE_SANDBOX_KEEP_FAILED_WORKDIR: bool = False
+    COMPILE_SANDBOX_DEBUG_RETENTION_SECONDS: int = 3600
+    COMPILE_SYNC_ENDPOINT_ENABLED: bool = True
 
     # Security
     DEPLOYMENT_ENV: str = "development"

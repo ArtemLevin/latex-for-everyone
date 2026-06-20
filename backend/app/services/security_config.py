@@ -55,3 +55,22 @@ def validate_security_settings() -> None:
             raise SecurityConfigurationError("AUTH_COOKIE_SECURE=true is required for production cookie auth")
         if settings.AUTH_COOKIE_MODE and _has_wildcard_cors_origins():
             raise SecurityConfigurationError("CORS_ORIGINS must not contain '*' for production cookie auth")
+
+    if settings.COMPILE_EXECUTION_MODE.strip().lower() != "sandbox":
+        raise SecurityConfigurationError("COMPILE_EXECUTION_MODE must be sandbox in production")
+    if not settings.COMPILE_SANDBOX_NETWORK_DISABLED:
+        raise SecurityConfigurationError("Compile sandbox network must be disabled in production")
+    if not settings.COMPILE_SANDBOX_READ_ONLY_ROOTFS:
+        raise SecurityConfigurationError("Compile sandbox root filesystem must be read-only in production")
+    if not settings.COMPILE_SANDBOX_CAP_DROP_ALL:
+        raise SecurityConfigurationError("Compile sandbox must drop all Linux capabilities in production")
+    if not settings.COMPILE_SANDBOX_NO_NEW_PRIVILEGES:
+        raise SecurityConfigurationError("Compile sandbox must set no-new-privileges in production")
+    if settings.COMPILE_SANDBOX_SHELL_ESCAPE.strip().lower() != "disabled":
+        raise SecurityConfigurationError("LaTeX shell escape must be disabled in production")
+    if (
+        not settings.COMPILE_SANDBOX_MEMORY
+        or settings.COMPILE_SANDBOX_CPUS <= 0
+        or settings.COMPILE_SANDBOX_PIDS_LIMIT <= 0
+    ):
+        raise SecurityConfigurationError("Compile sandbox memory, CPU and PIDs limits are required in production")

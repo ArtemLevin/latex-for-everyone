@@ -34,6 +34,14 @@ summaries instead.
 - Use `POST /api/auth/logout` for the current session, `POST /api/auth/logout-all` for all sessions, and `GET /api/auth/me` to verify the active user. Audit events are stored in `auth_audit_logs` without raw passwords or tokens.
 - `AUTH_MODE=local` remains for development; `AUTH_MODE=trusted_proxy` remains for enterprise reverse-proxy deployments and can auto-provision proxy identities as `User` rows while preserving legacy owner ids.
 
+## Sandboxed LaTeX compile workers
+
+- `POST /api/compile/jobs` enqueues compilation and returns `202 Accepted`; poll `GET /api/compile/jobs/{job_id}`.
+- Run `make compile-worker` (or `python -m app.workers.compile_worker`) to claim queued jobs and publish successful PDFs through owner-scoped artifacts.
+- Production must use `COMPILE_EXECUTION_MODE=sandbox`; `local_subprocess` is only for local development and tests.
+- The Docker sandbox runs without network, as a non-root user, with read-only rootfs, memory/CPU/PID limits, `cap_drop=ALL`, `no-new-privileges`, Docker default seccomp and `pdflatex -no-shell-escape`.
+- Do not mount `/var/run/docker.sock` into the API container; if Docker is used, only the compile worker should have runtime access, preferably on an isolated/rootless host.
+
 ## AI generation and job workers
 
 | Symptom | Likely cause | Safe action |

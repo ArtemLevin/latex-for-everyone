@@ -247,6 +247,29 @@ class CompileResponse(BaseModel):
     history_id: Optional[str] = None
 
 
+class CompileJobResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    project_id: Optional[str] = None
+    history_id: Optional[str] = None
+    compile_history_id: Optional[str] = None
+    status: str
+    stage: str
+    pdf_url: Optional[str] = None
+    error: Optional[str] = None
+    output: Optional[str] = None
+    compile_time: Optional[str] = None
+    pdf_artifact_id: Optional[str] = None
+    attempts: int = 0
+    cancel_requested: bool = False
+    queued_at: Optional[datetime] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
 class CompileHistoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

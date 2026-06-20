@@ -23,6 +23,9 @@ services:
       - SECRET_KEY=${SECRET_KEY}
       - AUTH_REFRESH_TOKEN_PEPPER=${AUTH_REFRESH_TOKEN_PEPPER}
       - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-true}
+      - COMPILE_EXECUTION_MODE=sandbox
+      - COMPILE_JOB_EXECUTION_MODE=worker
+      - COMPILE_SANDBOX_IMAGE=${COMPILE_SANDBOX_IMAGE:-latexed-latex-sandbox:latest}
     volumes:
       - latexed_data:/tmp/latexed_uploads
       - latexed_compiles:/tmp/latexed_compiles
@@ -96,6 +99,40 @@ services:
         condition: service_healthy
     restart: always
 
+  compile-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: latexed-compile-worker
+    command: python -m app.workers.compile_worker
+    environment:
+      - DATABASE_URL=postgresql+psycopg2://latexed:${POSTGRES_PASSWORD}@db:5432/latexed
+      - DEPLOYMENT_ENV=production
+      - AUTH_MODE=${AUTH_MODE:-trusted_proxy}
+      - TRUSTED_USER_HEADER=${TRUSTED_USER_HEADER:-X-Latexed-User}
+      - TRUSTED_PROXY_IPS=${TRUSTED_PROXY_IPS}
+      - ALLOW_PRODUCTION_LOCAL_AUTH=${ALLOW_PRODUCTION_LOCAL_AUTH:-false}
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+      - SECRET_KEY=${SECRET_KEY}
+      - AUTH_REFRESH_TOKEN_PEPPER=${AUTH_REFRESH_TOKEN_PEPPER}
+      - AUTH_COOKIE_SECURE=${AUTH_COOKIE_SECURE:-true}
+      - COMPILE_EXECUTION_MODE=sandbox
+      - COMPILE_SANDBOX_IMAGE=${COMPILE_SANDBOX_IMAGE:-latexed-latex-sandbox:latest}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - latexed_data:/tmp/latexed_uploads
+      - latexed_compiles:/tmp/latexed_compiles
+      - latexed_sandbox:/tmp/latexed_sandbox_compiles
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+
   generation-worker:
     build:
       context: .
@@ -141,3 +178,4 @@ volumes:
   latexed_data:
   latexed_compiles:
   latexed_exports:
+  latexed_sandbox:
