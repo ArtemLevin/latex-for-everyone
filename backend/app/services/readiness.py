@@ -22,9 +22,21 @@ LATEX_PACKAGE_FILES = {
     "t2aenc_def": "t2aenc.def",
 }
 KPSEWHICH_TIMEOUT_SECONDS = 3
+LATEX_COMPILER_INSTALL_HINT = (
+    "Install TeX Live or set LATEX_COMPILER to an available pdflatex-compatible binary; run make latex-check."
+)
+LATEX_PACKAGE_INSTALL_HINT = (
+    "Install Russian/Cyrillic TeX Live packages such as texlive-lang-cyrillic; run make latex-check."
+)
+ARTIFACT_DIR_INSTALL_HINT = (
+    "Ensure COMPILE_WORK_DIR and UPLOAD_DIR roots exist and are writable by the backend process."
+)
+DATABASE_MIGRATION_HINT = "Run make migrate for production, or use AUTO_CREATE_TABLES=true only for local/dev."
+
 
 def _check_response(status: str, message: str, details: dict[str, Any] | None = None) -> ReadinessCheckResponse:
     return ReadinessCheckResponse(status=status, message=message, details=details or {})
+
 
 def check_database_ready(db_engine: Engine = default_engine) -> ReadinessCheckResponse:
     """Check that the database is reachable and contains the expected app tables."""
@@ -42,10 +54,14 @@ def check_database_ready(db_engine: Engine = default_engine) -> ReadinessCheckRe
             "alembic_version_present": "alembic_version" in existing_tables,
         }
         if missing_tables:
+            details["install_hint"] = DATABASE_MIGRATION_HINT
             return _check_response("error", "Database is reachable but required tables are missing", details)
         return _check_response("ok", "Database connection is available", details)
     except Exception as exc:  # noqa: BLE001 - readiness should report failures instead of raising
-        return _check_response("error", "Database readiness check failed", {"error": str(exc)})
+        return _check_response(
+            "error", "Database readiness check failed", {"error": str(exc), "install_hint": DATABASE_MIGRATION_HINT}
+        )
+
 
 def check_compiler_ready() -> ReadinessCheckResponse:
     """Check whether the configured LaTeX compiler binary can be found on PATH."""
@@ -53,8 +69,10 @@ def check_compiler_ready() -> ReadinessCheckResponse:
     compiler_path = shutil.which(compiler)
     details = {"binary": compiler, "path": compiler_path}
     if not compiler_path:
+        details["install_hint"] = LATEX_COMPILER_INSTALL_HINT
         return _check_response("missing", f"{compiler} was not found on PATH", details)
     return _check_response("ok", f"{compiler} found", details)
+
 
 def _kpsewhich_exists(filename: str) -> bool:
     result = subprocess.run(
@@ -66,13 +84,18 @@ def _kpsewhich_exists(filename: str) -> bool:
     )
     return result.returncode == 0 and bool(result.stdout.strip())
 
+
 def check_latex_packages_ready(compiler_check: ReadinessCheckResponse | None = None) -> ReadinessCheckResponse:
     """Check Russian babel/T2A package availability when the compiler is installed."""
     if compiler_check is not None and compiler_check.status != "ok":
         return _check_response(
             "skipped",
             "LaTeX package checks skipped because the compiler is unavailable",
-            {"reason": compiler_check.status},
+            {
+                "reason": compiler_check.status,
+                "compiler_message": compiler_check.message,
+                "install_hint": LATEX_COMPILER_INSTALL_HINT,
+            },
         )
 
     kpsewhich_path = shutil.which("kpsewhich")
@@ -80,7 +103,7 @@ def check_latex_packages_ready(compiler_check: ReadinessCheckResponse | None = N
         return _check_response(
             "missing",
             "kpsewhich was not found on PATH",
-            {"binary": "kpsewhich", "path": None},
+            {"binary": "kpsewhich", "path": None, "install_hint": LATEX_PACKAGE_INSTALL_HINT},
         )
 
     try:
@@ -89,22 +112,29 @@ def check_latex_packages_ready(compiler_check: ReadinessCheckResponse | None = N
         return _check_response(
             "error",
             "LaTeX package readiness check timed out",
-            {"binary": "kpsewhich", "timeout_seconds": KPSEWHICH_TIMEOUT_SECONDS, "error": str(exc)},
+            {
+                "binary": "kpsewhich",
+                "timeout_seconds": KPSEWHICH_TIMEOUT_SECONDS,
+                "error": str(exc),
+                "install_hint": LATEX_PACKAGE_INSTALL_HINT,
+            },
         )
     except OSError as exc:
         return _check_response(
             "error",
             "LaTeX package readiness check failed",
-            {"binary": "kpsewhich", "error": str(exc)},
+            {"binary": "kpsewhich", "error": str(exc), "install_hint": LATEX_PACKAGE_INSTALL_HINT},
         )
 
-    details = {"binary": "kpsewhich", "path": kpsewhich_path, **package_status}
+    details = {"binary": "kpsewhich", "path": kpsewhich_path, "required_files": LATEX_PACKAGE_FILES, **package_status}
     missing = [LATEX_PACKAGE_FILES[key] for key, available in package_status.items() if not available]
     if missing:
         details["missing_packages"] = missing
+        details["install_hint"] = LATEX_PACKAGE_INSTALL_HINT
         return _check_response("missing", "Russian/T2A LaTeX support is incomplete", details)
 
     return _check_response("ok", "Russian/T2A LaTeX support is available", details)
+
 
 def _check_directory_writable(directory: Path) -> dict[str, Any]:
     resolved = directory.resolve()
@@ -113,6 +143,7 @@ def _check_directory_writable(directory: Path) -> dict[str, Any]:
         probe.write(b"ok")
         probe.flush()
     return {"status": "ok", "path": str(resolved)}
+
 
 def check_artifact_dirs_ready() -> ReadinessCheckResponse:
     """Check that runtime artifact directories exist and are writable."""
@@ -133,13 +164,16 @@ def check_artifact_dirs_ready() -> ReadinessCheckResponse:
             failed[name] = str(exc)
 
     if failed:
+        details["install_hint"] = ARTIFACT_DIR_INSTALL_HINT
         return _check_response("error", "One or more runtime artifact directories are not writable", details)
     return _check_response("ok", "Runtime artifact directories are writable", details)
+
 
 def check_transcription_ready() -> ReadinessCheckResponse:
     """Check optional lesson transcription runtime without loading Whisper models."""
     status = get_transcription_runtime_status()
     return _check_response(str(status["status"]), str(status["message"]), dict(status["details"]))
+
 
 def check_ai_request_control_ready() -> ReadinessCheckResponse:
     """Check whether the configured AI request-control backend can be reached."""
@@ -189,6 +223,7 @@ def check_generation_jobs_ready(session_factory=SessionLocal) -> ReadinessCheckR
     finally:
         db.close()
 
+
 def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str:
     """Aggregate individual readiness checks into ready/degraded/not_ready."""
     if checks["database"].status != "ok" or checks["artifact_dirs"].status != "ok":
@@ -204,6 +239,7 @@ def aggregate_readiness_status(checks: dict[str, ReadinessCheckResponse]) -> str
     if checks.get("ai_request_control") and checks["ai_request_control"].status != "ok":
         return "degraded"
     return "ready"
+
 
 def build_readiness_response(db_engine: Engine = default_engine) -> ReadinessResponse:
     """Run all readiness checks and return the public API response model."""

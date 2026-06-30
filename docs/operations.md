@@ -6,6 +6,15 @@ AI prompts, lesson transcripts, source materials, API keys or generated LaTeX in
 logs, tickets or chat messages; use request IDs, job IDs, short hashes and status
 summaries instead.
 
+## Release checklist
+
+Use the [`release checklist`](release-checklist.md) before demos, staging deploys,
+and production releases. It defines local, Docker/staging, and production gates
+for dependency setup, `.env`/secret review, migrations, `make latex-check`,
+`/api/ready`, worker supervision, AI provider status, artifact cleanup dry-runs,
+and frontend smoke testing. Missing `pdflatex` or Russian/T2A packages should be
+treated as a documented `degraded` compile/export runtime, not as a frontend bug.
+
 ## First checks
 
 | Goal | Command or endpoint | Expected signal |
@@ -76,6 +85,8 @@ Recommended starting points:
 |---------|--------------|-------------|
 | `/api/ready` compiler check is `missing` | `pdflatex` is not on `PATH`. | Install TeX Live or set `LATEX_COMPILER`; run `make latex-check`. |
 | LaTeX package readiness is `missing` | Russian babel/T2A support is missing. | Install Cyrillic/Russian TeX packages such as `texlive-lang-cyrillic`; rerun `make latex-check`. |
+| `/api/ready` artifact directory check is `error` | Compile/upload/export runtime directory is missing or not writable by the backend process. | Fix ownership/volume mounts for `COMPILE_WORK_DIR` and `UPLOAD_DIR`; rerun `/api/ready`. |
+| `/api/ready` database check is `error` with missing tables | Migrations were not applied or local auto-create was disabled. | Run `make migrate` in production, or enable `AUTO_CREATE_TABLES=true` only for local/dev. |
 | Compile API returns timeout or truncated logs | Document is too slow/noisy for configured limits. | Inspect bounded compile log, simplify document, or tune `COMPILE_TIMEOUT`/`MAX_COMPILER_OUTPUT_CHARS`. |
 | Export/download cannot find artifact | Artifact expired, cleanup ran, or path is outside trusted roots. | Recompile/export; never bypass trusted artifact resolver with raw paths. |
 
