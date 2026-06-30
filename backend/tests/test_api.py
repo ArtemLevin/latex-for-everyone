@@ -473,7 +473,7 @@ def test_transcription_status_reports_missing_faster_whisper_runtime(monkeypatch
     assert data["status"] == "missing"
     assert data["details"]["dependency"] == {"module": "faster_whisper", "available": False}
     assert set(data["details"]["missing_requirements"]) == {"faster_whisper", "ffmpeg", "ffprobe"}
-    assert data["details"]["install_hint"] == "uv sync --group transcription"
+    assert data["details"]["install_hint"] == "make sync-transcription"
 
 
 def test_readiness_degraded_when_enabled_transcription_runtime_is_missing(monkeypatch):

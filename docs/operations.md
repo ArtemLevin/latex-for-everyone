@@ -6,6 +6,15 @@ AI prompts, lesson transcripts, source materials, API keys or generated LaTeX in
 logs, tickets or chat messages; use request IDs, job IDs, short hashes and status
 summaries instead.
 
+## Release checklist
+
+Use the [`release checklist`](release-checklist.md) before demos, staging deploys,
+and production releases. It defines local, Docker/staging, and production gates
+for dependency setup, `.env`/secret review, migrations, `make latex-check`,
+`/api/ready`, worker supervision, AI provider status, artifact cleanup dry-runs,
+and frontend smoke testing. Missing `pdflatex` or Russian/T2A packages should be
+treated as a documented `degraded` compile/export runtime, not as a frontend bug.
+
 ## First checks
 
 | Goal | Command or endpoint | Expected signal |
@@ -84,7 +93,7 @@ Recommended starting points:
 | Symptom | Likely cause | Safe action |
 |---------|--------------|-------------|
 | Transcript is persisted as `failed` with disabled-provider message | `TRANSCRIPTION_PROVIDER=disabled`. | Install/configure a provider or use `TRANSCRIPTION_PROVIDER=fake` only for local smoke tests. |
-| `/api/transcription/status` reports missing `faster_whisper` | Optional Python runtime is not installed. | Run `uv sync --group transcription` or install the documented pinned package. |
+| `/api/transcription/status` reports missing `faster_whisper` | Optional Python runtime is not installed. | Run `make sync-transcription` or install the documented pinned package. |
 | Missing `ffmpeg`/`ffprobe` in transcription status | System media tools are absent. | Install ffmpeg package in host/container image and rerun readiness. |
 | Lesson document generation creates `draft` | Transcript was not reviewed and request explicitly allowed unreviewed text. | Review/edit transcript and regenerate final documents when appropriate. |
 
@@ -204,7 +213,7 @@ moving to a production database that can handle concurrent job claims.
 ### Verify transcription runtime
 
 1. Call `GET /api/transcription/status`.
-2. If dependencies are missing, install `uv sync --group transcription` and
+2. If dependencies are missing, install `make sync-transcription` and
    system `ffmpeg`/`ffprobe` packages in the runtime image.
 3. Set `TRANSCRIPTION_PROVIDER` deliberately; use `fake` only for local smoke
    testing and `disabled` when transcription is intentionally unavailable.
