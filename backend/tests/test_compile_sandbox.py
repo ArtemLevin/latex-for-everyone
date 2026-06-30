@@ -12,6 +12,7 @@ from app.models import CompileJob, File, Project
 from app.services.compile_jobs import CompileJobService
 from app.services.compile_runners.docker_sandbox import DockerSandboxCompileRunner
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
 SQLALCHEMY_DATABASE_URL = "sqlite:///./test_compile_sandbox_latexed.db"
 engine_test = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
 SessionTesting = sessionmaker(autocommit=False, autoflush=False, bind=engine_test)
@@ -147,7 +148,9 @@ def test_docker_runner_uses_hardened_sandbox_flags(monkeypatch, tmp_path):
 
 
 def test_sandbox_compile_script_disables_shell_escape_and_sets_tex_policy():
-    script = Path("docker/latex-sandbox/compile.sh").read_text()
+    # Keep this path independent from pytest's current working directory:
+    # the Makefile runs pytest from backend/, while direct invocations often run from repo root.
+    script = (REPO_ROOT / "docker/latex-sandbox/compile.sh").read_text()
 
     assert "-no-shell-escape" in script
     assert "openin_any" in script
