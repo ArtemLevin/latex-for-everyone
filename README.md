@@ -177,7 +177,7 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
 Latexed exposes two operational status endpoints:
 
 - `GET /api/health` is a lightweight liveness check. It means the backend process is running and can answer HTTP requests.
-- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, `artifact_dirs`, and optional `transcription`, and returns an overall `ready`, `degraded`, or `not_ready` status.
+- `GET /api/ready` is a readiness check. It reports structured statuses for `database`, `compiler`, `latex_packages`, `artifact_dirs`, and optional `transcription`, and returns an overall `ready`, `degraded`, or `not_ready` status. Degraded/error details include actionable `install_hint` fields for missing compiler/packages, database migrations, and artifact directory permissions where applicable.
 - `GET /api/transcription/status` reports only the configured transcription runtime: selected/effective provider, optional Python package discovery, `ffmpeg`/`ffprobe` availability, model settings, and install hints.
 
 When `pdflatex` or required Russian/T2A LaTeX packages are missing, readiness is reported as `degraded`: project/file CRUD, templates, prompt preview, validation, and frontend local preview can still be useful, but backend server-side compile/export PDF flows are not ready. When an enabled transcription provider is missing optional packages or media tools, readiness is also `degraded`; the editor and compile flows can continue, but lesson transcription must be fixed before use. Run `make latex-check` in the target environment to verify the TeX Live runtime.

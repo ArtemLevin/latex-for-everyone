@@ -367,7 +367,9 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
         readiness,
         "check_latex_packages_ready",
         lambda compiler_check: ReadinessCheckResponse(
-            status="skipped", message="Package checks skipped", details={"reason": compiler_check.status}
+            status="skipped",
+            message="Package checks skipped",
+            details={"reason": compiler_check.status, "install_hint": readiness.LATEX_COMPILER_INSTALL_HINT},
         ),
     )
     monkeypatch.setattr(
@@ -402,7 +404,66 @@ def test_readiness_degraded_when_pdflatex_is_missing(monkeypatch):
     assert data["status"] == "degraded"
     assert data["checks"]["compiler"]["status"] == "missing"
     assert data["checks"]["latex_packages"]["status"] == "skipped"
-    assert data["checks"]["latex_packages"]["details"] == {"reason": "missing"}
+    assert data["checks"]["latex_packages"]["details"]["reason"] == "missing"
+    assert "install_hint" in data["checks"]["latex_packages"]["details"]
+
+
+def test_readiness_compiler_missing_includes_actionable_install_hint(monkeypatch):
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness.shutil, "which", lambda binary: None)
+
+    response = readiness.check_compiler_ready()
+
+    assert response.status == "missing"
+    assert response.details["binary"] == "pdflatex"
+    assert response.details["path"] is None
+    assert response.details["install_hint"] == readiness.LATEX_COMPILER_INSTALL_HINT
+
+
+def test_latex_package_readiness_missing_kpsewhich_includes_install_hint(monkeypatch):
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness.shutil, "which", lambda binary: None)
+
+    response = readiness.check_latex_packages_ready()
+
+    assert response.status == "missing"
+    assert response.details["binary"] == "kpsewhich"
+    assert response.details["install_hint"] == readiness.LATEX_PACKAGE_INSTALL_HINT
+
+
+def test_latex_package_readiness_reports_missing_required_files(monkeypatch):
+    from app.services import readiness
+
+    monkeypatch.setattr(readiness.shutil, "which", lambda binary: "/usr/bin/kpsewhich")
+    monkeypatch.setattr(readiness, "_kpsewhich_exists", lambda filename: filename == "russian.ldf")
+
+    response = readiness.check_latex_packages_ready()
+
+    assert response.status == "missing"
+    assert response.details["required_files"] == readiness.LATEX_PACKAGE_FILES
+    assert response.details["russian_ldf"] is True
+    assert response.details["t2aenc_def"] is False
+    assert response.details["missing_packages"] == ["t2aenc.def"]
+    assert response.details["install_hint"] == readiness.LATEX_PACKAGE_INSTALL_HINT
+
+
+def test_artifact_dirs_readiness_error_includes_actionable_hint(monkeypatch):
+    from app.services import readiness
+
+    def fake_check_directory_writable(directory):
+        if directory.name == "exports":
+            raise OSError("permission denied")
+        return {"status": "ok", "path": str(directory)}
+
+    monkeypatch.setattr(readiness, "_check_directory_writable", fake_check_directory_writable)
+
+    response = readiness.check_artifact_dirs_ready()
+
+    assert response.status == "error"
+    assert response.details["export_dir"]["status"] == "error"
+    assert response.details["install_hint"] == readiness.ARTIFACT_DIR_INSTALL_HINT
 
 
 def test_metrics_endpoint_returns_prometheus_text(monkeypatch):

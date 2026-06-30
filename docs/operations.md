@@ -85,6 +85,8 @@ Recommended starting points:
 |---------|--------------|-------------|
 | `/api/ready` compiler check is `missing` | `pdflatex` is not on `PATH`. | Install TeX Live or set `LATEX_COMPILER`; run `make latex-check`. |
 | LaTeX package readiness is `missing` | Russian babel/T2A support is missing. | Install Cyrillic/Russian TeX packages such as `texlive-lang-cyrillic`; rerun `make latex-check`. |
+| `/api/ready` artifact directory check is `error` | Compile/upload/export runtime directory is missing or not writable by the backend process. | Fix ownership/volume mounts for `COMPILE_WORK_DIR` and `UPLOAD_DIR`; rerun `/api/ready`. |
+| `/api/ready` database check is `error` with missing tables | Migrations were not applied or local auto-create was disabled. | Run `make migrate` in production, or enable `AUTO_CREATE_TABLES=true` only for local/dev. |
 | Compile API returns timeout or truncated logs | Document is too slow/noisy for configured limits. | Inspect bounded compile log, simplify document, or tune `COMPILE_TIMEOUT`/`MAX_COMPILER_OUTPUT_CHARS`. |
 | Export/download cannot find artifact | Artifact expired, cleanup ran, or path is outside trusted roots. | Recompile/export; never bypass trusted artifact resolver with raw paths. |
 
