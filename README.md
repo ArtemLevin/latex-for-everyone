@@ -30,7 +30,19 @@ Architecture overview with UML/Mermaid diagrams is available in [`docs/uml-diagr
 This repository includes `pyproject.toml` for `uv`. From the repository root:
 
 ```bash
-uv sync --all-groups
+make sync
+```
+
+`make sync` installs the core application and dev/test dependencies only. Optional
+transcription runtimes are intentionally excluded from the default setup because
+they pull large Whisper packages that are not needed for the editor, compile,
+export, auth, or AI-generation test suite. Install them only when enabling a
+real transcription provider:
+
+```bash
+make sync-transcription          # faster-whisper provider
+make sync-legacy-transcription   # legacy openai-whisper adapter
+make sync-all                    # every dependency group and optional extra
 ```
 
 If you prefer the legacy requirements file, use:
@@ -104,7 +116,10 @@ The root `Makefile` wraps the common `uv`, test, server, Docker, and cleanup wor
 | Command | Description |
 |---------|-------------|
 | `make help` | Show all available targets. |
-| `make sync` | Run `uv sync --all-groups` to install app and dev dependencies. |
+| `make sync` | Run `uv sync --frozen --group dev` to install locked core app and dev/test dependencies. |
+| `make sync-transcription` | Install core/dev dependencies plus the optional `faster-whisper` transcription runtime. |
+| `make sync-legacy-transcription` | Install core/dev dependencies plus the optional legacy `openai-whisper` adapter. |
+| `make sync-all` | Install every dependency group and optional extra, including transcription runtimes. |
 | `make lock` | Refresh `uv.lock` from `pyproject.toml`. |
 | `make backend` | Run the FastAPI backend on `BACKEND_PORT` (default `8000`). |
 | `make frontend` | Serve `frontend/main.html` on `FRONTEND_PORT` (default `8080`). |
@@ -146,6 +161,8 @@ make ai-provider-status AI_PROVIDER=ollama AI_MODEL=qwen2.5:3b
 ## uv notes
 
 - `pyproject.toml` is the source for `uv sync` and includes runtime dependencies plus a `dev` dependency group for tests.
+- `make sync` deliberately installs only the locked core app plus `dev` group; optional `transcription` and `legacy-transcription` extras are kept out of default setup and CI.
+- Use `make sync-transcription` before setting `TRANSCRIPTION_PROVIDER=faster_whisper`, or `make sync-legacy-transcription` before setting `TRANSCRIPTION_PROVIDER=legacy_whisper`.
 - The project is configured with `package = false`, so `uv` manages the environment without requiring this repository to be installed as a Python package.
 - Backend commands run from `backend/` so `app.main:app` imports resolve the same way they do with plain `uvicorn`.
 - `requirements.txt` remains available for Docker and pip-based workflows.
@@ -452,7 +469,7 @@ Generation jobs are now enqueue-only: every `POST /api/generation/jobs` validate
 
 Lesson document generation records provenance for each artifact: provider, prompt hash, source transcript hash, and whether raw or edited transcript text was used. Reviewed transcripts produce `completed` documents; raw/unreviewed transcripts must be explicitly confirmed with `allow_unreviewed=true` and produce `draft` documents so teachers can distinguish generated materials that still need review.
 
-Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. Install it with `uv sync --group transcription` or `uv pip install faster-whisper==1.2.1`, and make sure system `ffmpeg` and `ffprobe` are on `PATH`. The legacy `TRANSCRIPTION_PROVIDER=legacy_whisper` adapter requires `uv sync --group legacy-transcription` or `uv pip install openai-whisper==20250625`, plus system `ffmpeg`/`ffprobe` and the repository `transcribe.py` adapter. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper. Use `GET /api/transcription/status` or the `transcription` section of `GET /api/ready` before enabling lesson transcription in a deployment; missing optional packages or media binaries are reported with `missing_requirements` and an `install_hint`. If `/api/lessons/{id}/transcribe` logs `provider=disabled` or returns a failed transcript with `Transcription provider is disabled`, the backend is running in the safe no-provider mode; set `TRANSCRIPTION_PROVIDER=faster_whisper` after installing the optional runtime, or set `TRANSCRIPTION_PROVIDER=fake` only for local UI smoke tests.
+Optional local transcription runtime requires installing `faster-whisper` in the deployment image or virtualenv before setting `TRANSCRIPTION_PROVIDER=faster_whisper`. Install it with `make sync-transcription` or `uv pip install faster-whisper==1.2.1`, and make sure system `ffmpeg` and `ffprobe` are on `PATH`. The legacy `TRANSCRIPTION_PROVIDER=legacy_whisper` adapter requires `make sync-legacy-transcription` or `uv pip install openai-whisper==20250625`, plus system `ffmpeg`/`ffprobe` and the repository `transcribe.py` adapter. The default `disabled` and CI `fake` providers do not require model downloads, ffmpeg, or faster-whisper. Use `GET /api/transcription/status` or the `transcription` section of `GET /api/ready` before enabling lesson transcription in a deployment; missing optional packages or media binaries are reported with `missing_requirements` and an `install_hint`. If `/api/lessons/{id}/transcribe` logs `provider=disabled` or returns a failed transcript with `Transcription provider is disabled`, the backend is running in the safe no-provider mode; set `TRANSCRIPTION_PROVIDER=faster_whisper` after installing the optional runtime, or set `TRANSCRIPTION_PROVIDER=fake` only for local UI smoke tests.
 
 ## Logging and observability
 

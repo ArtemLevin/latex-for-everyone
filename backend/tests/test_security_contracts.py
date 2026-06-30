@@ -23,6 +23,16 @@ def test_makefile_exposes_stage_four_quality_gates():
     assert ".PHONY: test-coverage" in makefile
     assert "--cov=app --cov-report=term-missing" in makefile
     assert "check: compileall frontend-check lint format-check test" in makefile
+    assert (
+        "sync: ## Create/update the uv environment with app and dev dependencies.\n\t$(UV) sync --frozen --group dev"
+        in makefile
+    )
+    assert ".PHONY: sync-transcription" in makefile
+    assert "$(UV) sync --group dev --extra transcription" in makefile
+    assert ".PHONY: sync-legacy-transcription" in makefile
+    assert "$(UV) sync --group dev --extra legacy-transcription" in makefile
+    assert ".PHONY: sync-all" in makefile
+    assert "$(UV) sync --all-groups --all-extras" in makefile
 
 
 def test_ci_runs_backend_quality_frontend_static_and_docker_build():
@@ -30,7 +40,8 @@ def test_ci_runs_backend_quality_frontend_static_and_docker_build():
 
     assert "backend-quality:" in workflow
     assert "astral-sh/setup-uv@v4" in workflow
-    assert "uv sync --all-groups" in workflow
+    assert "make sync" in workflow
+    assert "uv sync --all-groups" not in workflow
     assert "make compileall" in workflow
     assert "make lint" in workflow
     assert "make format-check" in workflow
@@ -49,6 +60,9 @@ def test_ruff_and_coverage_tools_are_declared_for_quality_gates():
     assert "line-length = 120" in pyproject
     assert "[tool.ruff.lint]" in pyproject
     assert 'select = ["E9", "F821"]' in pyproject
+    assert "[project.optional-dependencies]" in pyproject
+    assert "faster-whisper==1.2.1" in pyproject
+    assert "openai-whisper==20250625" in pyproject
 
 
 def test_docs_describe_quality_gate_workflow():

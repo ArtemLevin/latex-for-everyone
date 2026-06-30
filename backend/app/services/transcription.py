@@ -259,7 +259,7 @@ def get_transcription_runtime_status() -> dict[str, object]:
                 "device": settings.TRANSCRIPTION_DEVICE,
                 "compute_type": settings.TRANSCRIPTION_COMPUTE_TYPE,
                 "word_timestamps": settings.TRANSCRIPTION_WORD_TIMESTAMPS,
-                "install_hint": "uv sync --group transcription",
+                "install_hint": "make sync-transcription",
             }
         )
         missing = [
@@ -288,7 +288,7 @@ def get_transcription_runtime_status() -> dict[str, object]:
                 "dependency": dependency,
                 "legacy_script_path": str(script_path),
                 "legacy_script_present": script_path.exists(),
-                "install_hint": "uv sync --group legacy-transcription",
+                "install_hint": "make sync-legacy-transcription",
             }
         )
         missing = [

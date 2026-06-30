@@ -34,7 +34,19 @@ uv-version: ## Print the installed uv version.
 
 .PHONY: sync
 sync: ## Create/update the uv environment with app and dev dependencies.
-	$(UV) sync --all-groups
+	$(UV) sync --frozen --group dev
+
+.PHONY: sync-transcription
+sync-transcription: ## Install core/dev dependencies plus faster-whisper transcription extras.
+	$(UV) sync --group dev --extra transcription
+
+.PHONY: sync-legacy-transcription
+sync-legacy-transcription: ## Install core/dev dependencies plus legacy openai-whisper transcription extras.
+	$(UV) sync --group dev --extra legacy-transcription
+
+.PHONY: sync-all
+sync-all: ## Install all dependency groups and optional extras, including transcription runtimes.
+	$(UV) sync --all-groups --all-extras
 
 .PHONY: lock
 lock: ## Update uv.lock from pyproject.toml.
@@ -47,7 +59,7 @@ pip-sync: ## Alternative: install backend/requirements.txt into the uv environme
 # ---- Local servers ---------------------------------------------------------
 .PHONY: backend
 backend: ## Run the FastAPI backend with uvicorn on BACKEND_PORT (default: 8000).
-	cd $(BACKEND_DIR) && $(UV) run $(UV_PROJECT) uvicorn app.main:app --reload --host $(HOST) --port $(BACKEND_PORT)
+	cd $(BACKEND_DIR) && $(UV) run --frozen $(UV_PROJECT) uvicorn app.main:app --reload --host $(HOST) --port $(BACKEND_PORT)
 
 .PHONY: frontend
 frontend: ## Serve frontend/main.html on FRONTEND_PORT (default: 8080).
@@ -86,35 +98,35 @@ latex-check: ## Check pdflatex and Russian babel/T2A support needed for generate
 # ---- Tests and checks ------------------------------------------------------
 .PHONY: test
 test: ## Run backend tests through uv.
-	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/ -q
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run --frozen $(UV_PROJECT) pytest tests/ -q
 
 .PHONY: test-verbose
 test-verbose: ## Run backend tests through uv with verbose output.
-	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/ -v
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run --frozen $(UV_PROJECT) pytest tests/ -v
 
 .PHONY: test-security
 test-security: ## Run security/auth, upload, compile-control, and static contract tests.
-	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_security_contracts.py -q && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/test_api.py -q -k "auth or trusted or security or upload or compile_rate or compile_queue or generation_router_hotfix or nginx or docker_compose or deploy_script"
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run --frozen $(UV_PROJECT) pytest tests/test_security_contracts.py -q && $(PYTHONPATH_BACKEND) $(UV) run --frozen $(UV_PROJECT) pytest tests/test_api.py -q -k "auth or trusted or security or upload or compile_rate or compile_queue or generation_router_hotfix or nginx or docker_compose or deploy_script"
 
 .PHONY: test-coverage
 test-coverage: ## Run backend tests with coverage for backend/app.
-	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run $(UV_PROJECT) pytest tests/ --cov=app --cov-report=term-missing
+	cd $(BACKEND_DIR) && $(PYTHONPATH_BACKEND) $(UV) run --frozen $(UV_PROJECT) pytest tests/ --cov=app --cov-report=term-missing
 
 .PHONY: lint
 lint: ## Run Ruff lint checks for backend app and tests.
-	$(UV) run $(UV_PROJECT) ruff check $(QUALITY_PY_FILES)
+	$(UV) run --frozen $(UV_PROJECT) ruff check $(QUALITY_PY_FILES)
 
 .PHONY: format-check
 format-check: ## Check Ruff formatting for backend app and tests.
-	$(UV) run $(UV_PROJECT) ruff format --check $(QUALITY_PY_FILES)
+	$(UV) run --frozen $(UV_PROJECT) ruff format --check $(QUALITY_PY_FILES)
 
 .PHONY: format
 format: ## Format backend app and tests with Ruff.
-	$(UV) run $(UV_PROJECT) ruff format $(QUALITY_PY_FILES)
+	$(UV) run --frozen $(UV_PROJECT) ruff format $(QUALITY_PY_FILES)
 
 .PHONY: compileall
 compileall: ## Compile backend Python files to catch syntax errors.
-	$(UV) run $(UV_PROJECT) $(PYTHON) -m compileall $(BACKEND_DIR)/app $(BACKEND_DIR)/tests
+	$(UV) run --frozen $(UV_PROJECT) $(PYTHON) -m compileall $(BACKEND_DIR)/app $(BACKEND_DIR)/tests
 
 .PHONY: frontend-check
 frontend-check: ## Run node --check for frontend JavaScript files.
@@ -131,12 +143,12 @@ check: compileall frontend-check lint format-check test ## Run syntax, frontend,
 # ---- Database and migrations ----------------------------------------------
 .PHONY: migrate
 migrate: ## Run Alembic migrations against the configured backend database.
-	cd $(BACKEND_DIR) && $(UV) run $(UV_PROJECT) alembic upgrade head
+	cd $(BACKEND_DIR) && $(UV) run --frozen $(UV_PROJECT) alembic upgrade head
 
 .PHONY: migration
 migration: ## Create an Alembic migration: make migration MSG="message".
 	@test -n "$(MSG)" || (echo 'Usage: make migration MSG="message"' && exit 1)
-	cd $(BACKEND_DIR) && $(UV) run $(UV_PROJECT) alembic revision --autogenerate -m "$(MSG)"
+	cd $(BACKEND_DIR) && $(UV) run --frozen $(UV_PROJECT) alembic revision --autogenerate -m "$(MSG)"
 
 # ---- Docker ----------------------------------------------------------------
 .PHONY: docker-up

@@ -29,6 +29,8 @@ dev = [
     "pytest-cov==5.0.0",
     "ruff==0.6.9",
 ]
+
+[project.optional-dependencies]
 transcription = [
     "faster-whisper==1.2.1",
 ]
